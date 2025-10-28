@@ -1,8 +1,11 @@
-[gd_scene load_steps=10 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=13 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://dxexvk5ydnrdq" path="res://controllers/scripts/fps_controller.gd" id="1_ca8e7"]
 [ext_resource type="Material" path="res://materials/player.tres" id="1_gf80s"]
 [ext_resource type="Script" uid="uid://fjkc6funlbbj" path="res://controllers/scripts/shape_cast_signal.gd" id="3_xc2pf"]
+[ext_resource type="Script" uid="uid://2j0ubpg0qevr" path="res://controllers/scripts/gui.gd" id="4_co0pi"]
+[ext_resource type="Theme" uid="uid://b28fy0uaom4ds" path="res://ui/themes/debug.tres" id="4_t6fw5"]
+[ext_resource type="Script" uid="uid://sv4ikmsp6nik" path="res://controllers/scripts/debug.gd" id="5_y677r"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_74qjk"]
 
@@ -119,7 +122,7 @@ _data = {
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_ca8e7"]
 
-[node name="CharacterBody3D" type="CharacterBody3D" node_paths=PackedStringArray("CAMERA_CONTROLLER", "ANIMATION_PLAYER", "CROUCH_SHAPECAST")]
+[node name="FPSController" type="CharacterBody3D" node_paths=PackedStringArray("CAMERA_CONTROLLER", "ANIMATION_PLAYER", "CROUCH_SHAPECAST")]
 slide_on_ceiling = false
 script = ExtResource("1_ca8e7")
 CAMERA_CONTROLLER = NodePath("CameraController/Camera3D")
@@ -153,6 +156,38 @@ shape = SubResource("SphereShape3D_ca8e7")
 target_position = Vector3(0, 0.5, 0)
 debug_shape_custom_color = Color(0, 0.8586215, 0, 1)
 script = ExtResource("3_xc2pf")
+
+[node name="GUI" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("4_co0pi")
+
+[node name="DebugPanel" type="PanelContainer" parent="GUI"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 210.0
+offset_bottom = 50.0
+theme = ExtResource("4_t6fw5")
+script = ExtResource("5_y677r")
+
+[node name="MarginContainer" type="MarginContainer" parent="GUI/DebugPanel"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="GUI/DebugPanel/MarginContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Button" type="Button" parent="GUI/DebugPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Test
+"
 
 [connection signal="animation_started" from="AnimationPlayer" to="." method="_on_animation_player_animation_started"]
 [connection signal="collision_state_changed" from="ShapeCast3D" to="." method="_on_shape_cast_3d_collision_state_changed"]
