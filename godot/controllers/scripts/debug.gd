@@ -7,7 +7,7 @@ var props = {}
 func _ready() -> void:
 	visible = false
 	
-func _process(delta: float) -> void:
+func _process(_delta) -> void:
 	set_debug_property("FPS", Engine.get_frames_per_second())
 
 func _input(event):
@@ -15,10 +15,9 @@ func _input(event):
 		visible = !visible
 
 func set_debug_property(title: String, value):
-	var property
 	if title not in props:
 		props[title] = Label.new()
-	property = props[title]
+		property_container.add_child(props[title])
+	var property = props[title]
 	property.name = title
 	property.text = "%s: %s" % [title, value]
-	property_container.add_child(property)

@@ -189,5 +189,9 @@ layout_mode = 2
 text = "Test
 "
 
+[node name="LineEdit" type="LineEdit" parent="GUI/DebugPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "Type stuff"
+
 [connection signal="animation_started" from="AnimationPlayer" to="." method="_on_animation_player_animation_started"]
 [connection signal="collision_state_changed" from="ShapeCast3D" to="." method="_on_shape_cast_3d_collision_state_changed"]

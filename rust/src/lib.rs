@@ -1,7 +1,7 @@
 use godot::prelude::*;
 
 mod player;
-mod server;
+mod network_handler;
 
 struct MyExtension;
 

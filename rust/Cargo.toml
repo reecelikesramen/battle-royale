@@ -7,5 +7,5 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-gns = "0.1.0"
+game-networking-sockets = { git = "https://github.com/reecelikesramen/gns-rs.git" }
 godot = "0.4.2"
