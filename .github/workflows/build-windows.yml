@@ -1,0 +1,31 @@
+name: Build Windows DLL
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build release
+      working-directory: rust
+      run: cargo build --release
+      
+    - name: Upload DLL artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-dll
+        path: rust/target/release/rust.dll
+        retention-days: 7
+
