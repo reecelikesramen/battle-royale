@@ -1,5 +1,22 @@
 extends CharacterBody3D
 
+var is_authority: bool:
+	get: return !LowLevelNetworkHandler.is_server && owner_id == ClientNetworkGlobals.id
+
+var owner_id: int
+
+func _enter_tree() -> void:
+	print("Player #%d added to the tree, named %s!" % [owner_id, name])
+	ServerNetworkGlobals.handle_game_state.connect(server_handle_game_state)
+	ClientNetworkGlobals.handle_game_state.connect(client_handle_game_state)
+	if is_authority:
+		%Camera3D.make_current()
+
+
+func _exit_tree() -> void:
+	ServerNetworkGlobals.handle_game_state.disconnect(server_handle_game_state)
+	ClientNetworkGlobals.handle_game_state.disconnect(client_handle_game_state)
+
 const SPEED = 5.0
 const JUMP_VELOCITY = 4.5
 
@@ -32,7 +49,7 @@ func _input(event):
 		crouch(false)
 
 func _ready():
-	if !TestGlobal.isServer():
+	if !LowLevelNetworkHandler.isServer():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	#CROUCH_SHAPECAST.add_excep
 	
@@ -59,6 +76,8 @@ func _update_camera(delta: float) -> void:
 	_tilt_input = 0.0
 
 func _physics_process(delta: float) -> void:
+	if !is_authority: return
+
 	# Add the gravity.
 	if not is_on_floor():
 		velocity += get_gravity() * delta
@@ -79,8 +98,10 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.x = move_toward(velocity.x, 0, SPEED)
 		velocity.z = move_toward(velocity.z, 0, SPEED)
-
+	
 	move_and_slide()
+	
+	LowLevelNetworkHandler.send_packet(GdGameStatePacket.create(owner_id, position))
 	
 func crouch(state: bool):
 	print("Colliding:", CROUCH_SHAPECAST.is_colliding())
@@ -101,6 +122,19 @@ func toggle_crouch():
 	elif !_is_crouching:
 		crouch(false)
 	print(_is_crouching)
+
+func server_handle_game_state(peer_id: int, game_state: GdGameStatePacket) -> void:
+	if owner_id != peer_id:
+		return
+
+	global_position = game_state.player_position
+	LowLevelNetworkHandler.broadcast_packet(GdGameStatePacket.create(owner_id, global_position))
+
+
+func client_handle_game_state(game_state: GdGameStatePacket) -> void:
+	if is_authority || owner_id != game_state.id: return
+
+	global_position = game_state.player_position
 
 func _on_animation_player_animation_started(anim_name: StringName) -> void:
 	if anim_name == "Crouch":

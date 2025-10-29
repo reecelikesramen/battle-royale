@@ -1,10 +1,11 @@
 use std::{collections::{HashMap, VecDeque}, net::{IpAddr, Ipv4Addr}, time::Instant};
 use std::sync::{Arc, Mutex, OnceLock};
-use gns::{GnsConfig, GnsConnection, GnsGlobal, GnsSocket, IsClient, IsServer};
+use gns::{GnsConfig, GnsConnection, GnsGlobal, GnsSocket, IsClient, IsServer, sys::k_nSteamNetworkingSend_Unreliable};
 use gns::sys::{ESteamNetworkingConfigValue, ESteamNetworkingConnectionState, ESteamNetworkingSocketsDebugOutputType, k_nSteamNetworkingSend_Reliable};
 use godot::prelude::*;
 use godot::classes::Node;
 use godot::classes::INode;
+use crate::packet::prelude::*;
 
 const DEFAULT_IP_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const DEFAULT_PORT: i64 = 45876;
@@ -44,6 +45,7 @@ struct NetworkHandler {
     /* common vars */
     #[var]
     is_connected: bool,
+    #[var]
     is_server: bool,
     gns_global: Arc<GnsGlobal>,
     last_update: Instant,
@@ -51,12 +53,10 @@ struct NetworkHandler {
     /* server-side vars */
     server: Option<GnsSocket<IsServer>>,
     available_peer_ids: Vec<i64>,
-    nonce: i64,
-    client_peers: HashMap<GnsConnection, String>,
+    connected_clients: HashMap<GnsConnection, u8>,
 
     /* client-side vars */
     client: Option<GnsSocket<IsClient>>,
-    test_user_input_stream: Arc<Mutex<VecDeque<String>>>,
 
     /* thread-safe debug message queue */
     debug_messages: Arc<Mutex<VecDeque<String>>>,
@@ -83,18 +83,16 @@ impl INode for NetworkHandler {
             gns_global,
             server: None,
             last_update: Instant::now(),
-            available_peer_ids: (0..256).rev().collect(),
-            nonce: 0,
-            client_peers: HashMap::new(),
+            available_peer_ids: vec![],
+            connected_clients: HashMap::new(),
             client: None,
-            test_user_input_stream: Arc::new(Mutex::new(VecDeque::new())),
             debug_messages: debug_queue,
         }
     }
 
     fn physics_process(&mut self, _delta: f64) {
-        self.process_debug_messages();
         self.handle_events();
+        self.process_debug_messages();
     }
 }
 
@@ -106,7 +104,7 @@ impl NetworkHandler {
     #[signal]
     fn on_peer_disconnect(peer_id: i64);
     #[signal]
-    fn on_server_packet(peer_id: i64, packet: PackedByteArray);
+    fn on_server_packet(peer_id: i64, packet: Gd<Object>);
 
     /* client-side signals */
     #[signal]
@@ -114,12 +112,11 @@ impl NetworkHandler {
     #[signal]
     fn on_disconnect_from_server();
     #[signal]
-    fn on_client_packet(packet: PackedByteArray);
+    fn on_client_packet(packet: Gd<Object>);
 
     fn _start_server(&mut self, ip_address: IpAddr, port: i64) {
-        self.is_connected = true;
         self.is_server = true;
-        self.available_peer_ids = (0..256).rev().collect();
+        self.available_peer_ids = (0..100).rev().collect();
 
         // Setup debugging to log everything.
         // Use function pointer to safely queue messages from GNS thread
@@ -128,17 +125,19 @@ impl NetworkHandler {
             server_debug_callback,
         );
 
-        // Add fake 1000ms ping to everyone connecting.
-        self.gns_global.utils().set_global_config_value(
-            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Recv,
-            GnsConfig::Int32(1000),
-        ).unwrap_or_else(|e| {
-            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            panic!("Failed to configure fake ping");
-        });
+        // // Add fake 1000ms ping to everyone connecting.
+        // self.gns_global.utils().set_global_config_value(
+        //     ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Recv,
+        //     GnsConfig::Int32(1000),
+        // ).unwrap_or_else(|e| {
+        //     godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+        //     panic!("Failed to configure fake ping");
+        // });
 
         self.server = GnsSocket::new(self.gns_global.clone())
-            .listen(ip_address, port as u16).ok()
+            .listen(ip_address, port.try_into().unwrap()).ok();
+
+        self.is_connected = true;
     }
 
     #[func]
@@ -161,7 +160,6 @@ impl NetworkHandler {
     }
 
     fn _start_client(&mut self, ip_address: IpAddr, port: i64) {
-        self.is_connected = true;
         self.is_server = false;
         
         // Setup debugging using function pointer to safely queue messages from GNS thread
@@ -171,8 +169,10 @@ impl NetworkHandler {
         );
     
         self.client = GnsSocket::new(self.gns_global.clone())
-            .connect(ip_address, port as u16)
+            .connect(ip_address, port.try_into().unwrap())
             .ok();
+
+        self.is_connected = true;
     }
 
     #[func]
@@ -194,12 +194,55 @@ impl NetworkHandler {
         self._start_client(DEFAULT_IP_ADDRESS, DEFAULT_PORT);
     }
 
-    #[func]
-    fn test_submit_user_input(&mut self, input: String) {
-        godot_print!("Submitting input: {}", input);
-        if let Ok(mut input_queue) = self.test_user_input_stream.lock() {
-            input_queue.push_back(input);
+    fn _send_packet(&self, packet: &Packet) {
+        if self.is_server {
+            return;
         }
+
+        let client = self.client.as_ref().unwrap_or_else(|| {
+            godot_print!("ERROR: Client not initialized");
+            panic!("Client socket not initialized");
+        });
+
+        client.send_messages(vec![self.gns_global.utils().allocate_message(
+            client.connection(),
+            if packet.is_reliable() { k_nSteamNetworkingSend_Reliable } else { k_nSteamNetworkingSend_Unreliable },
+            packet.encode().as_slice(),
+        )]);
+    }
+
+    #[func]
+    fn send_packet(&self, packet: Gd<GdPacket>) {
+        self._send_packet(&packet.bind().packet);
+    }
+
+    fn _broadcast_packet(&self, packet: &Packet) {
+        if !self.is_server {
+            return;
+        }
+
+        let server = self.server.as_ref().unwrap_or_else(|| {
+            godot_print!("ERROR: Server not initialized");
+            panic!("Server socket not initialized");
+        });
+
+        let messages = self.connected_clients.keys().clone()
+            .into_iter()
+            .map(|client| {
+                self.gns_global.utils().allocate_message(
+                    *client,
+                    if packet.is_reliable() { k_nSteamNetworkingSend_Reliable } else { k_nSteamNetworkingSend_Unreliable },
+                    packet.encode().as_slice(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        server.send_messages(messages);
+    }
+
+    #[func]
+    fn broadcast_packet(&self, packet: Gd<GdPacket>) {
+        self._broadcast_packet(&packet.bind().packet);
     }
 
     fn process_debug_messages(&mut self) {
@@ -244,96 +287,83 @@ impl NetworkHandler {
             panic!("Client socket not initialized");
         });
 
+        let mut packets_to_emit = Vec::new();
+
         // Process some messages, we arbitrary define 100 as being the max number of messages we can handle per iteration.
         let _messages_processed = client.poll_messages::<100>(|message| {
-            let s = core::str::from_utf8(message.payload()).unwrap_or_else(|e| {
-                self.queue_debug(format!("ERROR: Failed to decode UTF8 message: {}", e));
-                ""
-            });
-            if !s.is_empty() {
-                self.queue_debug(format!("[Client Chat] {}", s));
+            let packet = Packet::decode(message.payload());
+            
+            match packet {
+                Ok(packet) => {
+                    packets_to_emit.push(packet.as_gd());
+                }
+                Err(e) => {
+                    self.queue_debug(format!("ERROR: Failed to decode packet: {}, raw data {:x?}", e, &message.payload()));
+                }
             }
         });
 
-        let mut quit = false;
-        let _ =
-            client.poll_event::<100>(|event| match (event.old_state(), event.info().state()) {
-                (
-                    ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_None,
-                    ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
-                ) => {
-                    self.queue_debug("GnsSocket<Client>: connecting to server.".to_string());
-                }
-                (
-                    ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
-                    ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connected,
-                ) => {
-                    self.queue_debug("GnsSocket<Client>: connected to server.".to_string());
-                }
-                (_, ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ClosedByPeer | ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ProblemDetectedLocally) => {
-                  // We got disconnected or lost the connection.
-                  self.queue_debug("GnsSocket<Client>: ET phone home.".to_string());
-                    quit = true;
-                }
-                (previous, current) => {
-                    self.queue_debug(format!("GnsSocket<Client>: {:#?} => {:#?}.", previous, current));
-                }
+        let mut emit_disconnect = false;
+        let mut emit_connect = false;
+        client.poll_event::<100>(|event| match (event.old_state(), event.info().state()) {
+            (
+                ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_None,
+                ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
+            ) => {
+                self.queue_debug("GnsSocket<Client>: connecting to server.".to_string());
+            }
+            (
+                ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
+                ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connected,
+            ) => {
+                self.queue_debug("GnsSocket<Client>: connected to server.".to_string());
+                emit_connect = true;
+            }
+            (_, ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ClosedByPeer | ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ProblemDetectedLocally) => {
+                // We got disconnected or lost the connection.
+                self.queue_debug("GnsSocket<Client>: ET phone home.".to_string());
+                emit_disconnect = true;
+            }
+            (previous, current) => {
+                self.queue_debug(format!("GnsSocket<Client>: {:#?} => {:#?}.", previous, current));
+            }
+        });
 
-            });
-        if quit {
+        if emit_disconnect {
             self.is_connected = false;
-            return;
+            self.signals().on_disconnect_from_server().emit();
+            self.client = None;
         }
 
-        // Process queued user input messages
-        if let Ok(mut input_queue) = self.test_user_input_stream.lock() {
-            while let Some(input) = input_queue.pop_front() {
-                let input = input.trim();
-                if input == "/quit" {
-                    self.is_connected = false;
-                    return;
-                }
-                client.send_messages(vec![self.gns_global.utils().allocate_message(
-                    client.connection(),
-                    k_nSteamNetworkingSend_Reliable,
-                    input.as_bytes(),
-                )]);
-            }
+        if emit_connect {
+            self.signals().on_connect_to_server().emit();
+        }
+
+        for packet in packets_to_emit {
+            self.signals().on_client_packet().emit(&packet);
         }
     }
 
     fn handle_server_events(&mut self) {
-        let server = self.server.as_ref().unwrap_or_else(|| {
+        let server = self.server.take().unwrap_or_else(|| {
             godot_print!("ERROR: Server not initialized");
             panic!("Server socket not initialized");
         });
-        self.last_update = Instant::now();
-        
-        // Clone Arc for use in closures
-        let debug_queue = self.debug_messages.clone();
-        let queue_msg = |msg: String| {
-            if let Ok(mut q) = debug_queue.lock() {
-                q.push_back(msg);
-                if q.len() > 1000 {
-                    q.pop_front();
-                }
-            }
-        };
 
         let now = Instant::now();
         let elapsed = now - self.last_update;
         if elapsed.as_secs() > 10 {
             self.last_update = now;
-            for (client, nick) in self.client_peers.clone().into_iter() {
+            for (client, nick) in self.connected_clients.clone().into_iter() {
                 let info = server.get_connection_info(client).unwrap_or_else(|| {
-                    queue_msg(format!("ERROR: Failed to get connection info for {nick}"));
+                    self.queue_debug(format!("ERROR: Failed to get connection info for {nick}"));
                     panic!()
                 });
                 let (status, _) = server.get_connection_real_time_status(client, 0).unwrap_or_else(|_| {
-                    queue_msg(format!("ERROR: Failed to get real time status for {nick}"));
+                    self.queue_debug(format!("ERROR: Failed to get real time status for {nick}"));
                     panic!()
                 });
-                queue_msg(format!(
+                self.queue_debug(format!(
                   "== Client {:#?}\n\tIP: {:#?}\n\tPing: {:#?}\n\tOut/sec: {:#?}\n\tIn/sec: {:#?}",
                     nick,
                     info.remote_address(),
@@ -347,23 +377,9 @@ impl NetworkHandler {
         // Poll internal callbacks
         self.gns_global.poll_callbacks();
 
-        // Broadcast a message to the provided clients.
-        // We first build a list of messages and then send them.
-        let broadcast_chat = |clients: Vec<GnsConnection>, title: &str, content: &str| {
-            let messages = clients
-                .clone()
-                .into_iter()
-                .map(|client| {
-                    self.gns_global.utils().allocate_message(
-                        client,
-                        k_nSteamNetworkingSend_Reliable,
-                        format!("[{}]: {}", title, content).as_bytes(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            // Here we should check whether all messages were successfully sent with the result.
-            server.send_messages(messages);
-        };
+        let mut packets_to_emit: Vec<(i64, Gd<Object>)> = Vec::new();
+        let mut peer_connects_to_emit: Vec<i64> = Vec::new();
+        let mut peer_disconnects_to_emit: Vec<i64> = Vec::new();
 
         // Process connections events.
         let _events_processed = server.poll_event::<100>(|event| {
@@ -373,18 +389,14 @@ impl NetworkHandler {
               ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_None,
               ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
             ) => {
-              let result = server.accept(event.connection());
-              queue_msg(format!("GnsSocket<Server>: accepted new client: {:#?}.", result));
-              if result.is_ok() {
-                self.client_peers.insert(event.connection(), self.nonce.to_string());
-                broadcast_chat(
-                  self.client_peers.keys().copied().collect(),
-                  "Server",
-                  &format!("A new user joined us, weclome {}", self.nonce),
-                );
-                self.nonce += 1;
-              }
-              queue_msg(format!("GnsSocket<Server>: number of clients: {:#?}.", self.client_peers.len()));
+                if self.available_peer_ids.is_empty() {
+                    self.queue_debug(format!("GnsSocket<Server>: no available peer ids"));
+                    server.close_connection(event.connection(), 0, "Server is full", false);
+                } else {
+                    let result = server.accept(event.connection());
+                    self.queue_debug(format!("GnsSocket<Server>: accepted new client: {:#?}.", result));
+                    self.queue_debug(format!("GnsSocket<Server>: number of clients: {:#?}.", self.connected_clients.len()));
+                }
             }
 
             // A client is connected, we previously accepted it and don't do anything here.
@@ -393,47 +405,78 @@ impl NetworkHandler {
               ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
               ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connected,
             ) => {
+                match self.available_peer_ids.pop() {
+                    Some(peer_id) => {
+                        self.connected_clients.insert(event.connection(), peer_id.try_into().unwrap());
+                        self.queue_debug(format!("GnsSocket<Server>: new client connected with peer id: {:#?}.", peer_id));
+                        peer_connects_to_emit.push(peer_id);
+                    }
+                    None => {
+                        self.queue_debug(format!("GnsSocket<Server>: no available peer ids, this should not happen"));
+                        server.close_connection(event.connection(), 0, "Server is full", false);
+                    },
+                }
             }
 
             (_, ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ClosedByPeer | ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ProblemDetectedLocally) => {
               // Remove the client from the list and close the connection.
               let conn = event.connection();
-              queue_msg(format!("GnsSocket<Server>: {:#?} disconnected", conn));
-              let nickname = &self.client_peers[&conn];
-              broadcast_chat(
-                self.client_peers.keys().copied().collect(),
-                "Server",
-                &format!("[{}] lost faith.", nickname),
-              );
-              self.client_peers.remove(&conn);
+              match self.connected_clients.remove(&conn) {
+                Some(peer_id) => {
+                  self.queue_debug(format!("GnsSocket<Server>: {:#?} disconnected with peer id: {:#?}.", conn, peer_id));
+                  peer_disconnects_to_emit.push(peer_id.try_into().unwrap());
+                }
+                None => {
+                  self.queue_debug(format!("GnsSocket<Server>: {:#?} disconnected, but not found in connected clients", conn));
+                }
+              }
               // Make sure we cleanup the connection, mandatory as per GNS doc.
+              self.queue_debug(format!("GnsSocket<Server>: closing connection for {:#?}.", conn));
               server.close_connection(conn, 0, "", false);
             }
 
             // A client state is changing, perhaps disconnecting
             // If a client disconnected and it's connection get cleaned up, its state goes back to `ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_None`
             (previous, current) => {
-              queue_msg(format!("GnsSocket<Server>: {:#?} => {:#?}.", previous, current));
+              self.queue_debug(format!("GnsSocket<Server>: {:#?} => {:#?}.", previous, current));
             }
           }
         });
 
         // Process some messages, we arbitrary define 100 as being the max number of messages we can handle per iteration.
         let _messages_processed = server.poll_messages::<100>(|message| {
-            let chat_message = core::str::from_utf8(message.payload()).unwrap_or_else(|e| {
-                queue_msg(format!("ERROR: Failed to decode UTF8 message: {}", e));
-                ""
-            });
-            if !chat_message.is_empty() {
-                let sender = message.connection();
-                let sender_nickname = &self.client_peers[&sender];
-                queue_msg(format!("[Server Received] From {}: {}", sender_nickname, chat_message));
-                broadcast_chat(
-                    self.client_peers.keys().copied().collect(),
-                    &sender_nickname,
-                    chat_message,
-                );
+            let packet = Packet::decode(message.payload());
+            
+            let peer_id: i64 = match self.connected_clients.get(&message.connection()) {
+                Some(peer_id) => (*peer_id).try_into().unwrap(),
+                None => {
+                    self.queue_debug(format!("ERROR: Failed to get peer id for connection: {:#?}", message.connection()));
+                    return;
+                }
+            };
+
+            match packet {
+                Ok(packet) => {
+                    packets_to_emit.push((peer_id, packet.as_gd()));
+                }
+                Err(e) => {
+                    self.queue_debug(format!("ERROR: Failed to decode packet: {}, raw data {:x?}", e, &message.payload()));
+                }
             }
         });
+
+        self.server = Some(server);
+
+        for peer_id in peer_connects_to_emit {
+            self.signals().on_peer_connect().emit(peer_id);
+        }
+
+        for peer_id in peer_disconnects_to_emit {
+            self.signals().on_peer_disconnect().emit(peer_id);
+        }
+
+        for (peer_id, packet) in packets_to_emit {
+            self.signals().on_server_packet().emit(peer_id, &packet);
+        }
     }
 }

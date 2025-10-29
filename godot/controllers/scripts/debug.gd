@@ -6,7 +6,7 @@ var props = {}
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	visible = false
-	if TestGlobal.isServer():
+	if LowLevelNetworkHandler.isServer():
 		%Button.visible = false
 		%LineEdit.visible = false
 	
@@ -28,13 +28,11 @@ func set_debug_property(title: String, value):
 
 func _on_connect_pressed() -> void:
 	print("Connect pressed")
-	if TestGlobal.isServer():
+	if LowLevelNetworkHandler.isServer():
 		return
-	if !TestGlobal.is_connected:
-		TestGlobal.start_client_default()
+	if !LowLevelNetworkHandler.is_connected:
+		LowLevelNetworkHandler.start_client_default()
 		print("Client started")
 
 
-func _on_line_edit_text_submitted(new_text: String) -> void:
-	%LineEdit.clear()
-	TestGlobal.test_submit_user_input(new_text)
+#func _on_lin1Handler.test_submit_user_input(new_text)
