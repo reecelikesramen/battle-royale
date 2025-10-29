@@ -20,6 +20,8 @@ jobs:
       
     - name: Build release
       working-directory: rust
+      env:
+        GNS_VCPKG_BUILDTREES_ROOT: C:\vcpkg-buildtrees
       run: cargo build --release
       
     - name: Upload DLL artifacts
