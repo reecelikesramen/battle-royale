@@ -13,7 +13,7 @@ const JUMP_VELOCITY = 4.5
 @export_range(5, 10, 0.1) var CROUCH_SPEED = 7.0
 
 var _mouse_input: bool = false
-var _mouse_rotation: Vector3
+var _mouse_rotation: Vector3 = Vector3()
 var _rotation_input: float
 var _tilt_input: float
 var _player_rotation: Vector3
@@ -32,7 +32,8 @@ func _input(event):
 		crouch(false)
 
 func _ready():
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if !TestGlobal.isServer():
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	#CROUCH_SHAPECAST.add_excep
 	
 func _unhandled_input(event):

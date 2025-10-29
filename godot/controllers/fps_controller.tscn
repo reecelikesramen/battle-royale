@@ -185,13 +185,16 @@ unique_name_in_owner = true
 layout_mode = 2
 
 [node name="Button" type="Button" parent="GUI/DebugPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
 layout_mode = 2
-text = "Test
-"
+text = "Connect to Server"
 
 [node name="LineEdit" type="LineEdit" parent="GUI/DebugPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
 layout_mode = 2
 placeholder_text = "Type stuff"
 
 [connection signal="animation_started" from="AnimationPlayer" to="." method="_on_animation_player_animation_started"]
 [connection signal="collision_state_changed" from="ShapeCast3D" to="." method="_on_shape_cast_3d_collision_state_changed"]
+[connection signal="pressed" from="GUI/DebugPanel/MarginContainer/VBoxContainer/Button" to="GUI/DebugPanel" method="_on_connect_pressed"]
+[connection signal="text_submitted" from="GUI/DebugPanel/MarginContainer/VBoxContainer/LineEdit" to="GUI/DebugPanel" method="_on_line_edit_text_submitted"]

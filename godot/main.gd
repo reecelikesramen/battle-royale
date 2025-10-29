@@ -1,4 +1,4 @@
-extends Node
+extends NetworkHandler
 
 func isServer() -> bool:
 	return "--server" in OS.get_cmdline_user_args() or DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")
@@ -6,6 +6,8 @@ func isServer() -> bool:
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	print("I'm a server" if isServer() else "I'm a client")
+	if isServer():
+		start_server_default()
 	pass # Replace with function body.
 
 

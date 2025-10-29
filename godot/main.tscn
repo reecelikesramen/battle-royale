@@ -297,5 +297,3 @@ text = "Crouch"
 font_size = 128
 
 [node name="CharacterBody3D" parent="." instance=ExtResource("5_lquwl")]
-
-[node name="Server" type="Server" parent="."]
