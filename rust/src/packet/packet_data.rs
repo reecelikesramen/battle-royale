@@ -1,6 +1,5 @@
 use std::io::Result;
 
-
 pub(crate) trait PacketData: Sized {
     const IS_RELIABLE: bool;
     fn encode(&self) -> Vec<u8>;

@@ -13,3 +13,5 @@ godot = "0.4.2"
 num-derive = "0.4.2"
 num-traits = "0.2.19"
 paste = "1.0.14"
+postcard = { version = "1.0.10", features = ["alloc"] }
+serde = { version = "1.0", features = ["derive"] }

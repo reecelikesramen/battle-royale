@@ -9,8 +9,10 @@
 [ext_resource type="Script" uid="uid://6f4ocj2j872t" path="res://controllers/scripts/chat_message.gd" id="7_gshig"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_74qjk"]
+resource_local_to_scene = true
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_gf80s"]
+resource_local_to_scene = true
 material = ExtResource("1_gf80s")
 
 [sub_resource type="Animation" id="Animation_ca8e7"]
@@ -123,13 +125,10 @@ _data = {
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_ca8e7"]
 
-[node name="FPSController" type="CharacterBody3D" node_paths=PackedStringArray("CAMERA_CONTROLLER", "ANIMATION_PLAYER", "CROUCH_SHAPECAST")]
+[node name="FPSController" type="CharacterBody3D"]
 slide_on_ceiling = false
 script = ExtResource("1_ca8e7")
-CAMERA_CONTROLLER = NodePath("CameraController/Camera3D")
-ANIMATION_PLAYER = NodePath("AnimationPlayer")
 TOGGLE_CROUCH = false
-CROUCH_SHAPECAST = NodePath("ShapeCast3D")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
@@ -152,7 +151,7 @@ libraries = {
 &"": SubResource("AnimationLibrary_xc2pf")
 }
 
-[node name="ShapeCast3D" type="ShapeCast3D" parent="."]
+[node name="CrouchShapeCast3D" type="ShapeCast3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 shape = SubResource("SphereShape3D_ca8e7")
 target_position = Vector3(0, 0.5, 0)
@@ -231,7 +230,7 @@ unique_name_in_owner = true
 layout_mode = 2
 
 [connection signal="animation_started" from="AnimationPlayer" to="." method="_on_animation_player_animation_started"]
-[connection signal="collision_state_changed" from="ShapeCast3D" to="." method="_on_shape_cast_3d_collision_state_changed"]
+[connection signal="collision_state_changed" from="CrouchShapeCast3D" to="." method="_on_shape_cast_3d_collision_state_changed"]
 [connection signal="text_submitted" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ChatEdit" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_chat_edit_text_submitted"]
 [connection signal="pressed" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ExitToMenuButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_exit_to_menu_button_pressed"]
 [connection signal="pressed" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/QuitButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_quit_button_pressed"]

@@ -1,11 +1,21 @@
-use std::{collections::{HashMap, VecDeque}, net::{IpAddr, Ipv4Addr}, time::Instant};
-use std::sync::{Arc, Mutex, OnceLock};
-use gns::{GnsConfig, GnsConnection, GnsGlobal, GnsSocket, IsClient, IsServer, sys::k_nSteamNetworkingSend_Unreliable};
-use gns::sys::{ESteamNetworkingConfigValue, ESteamNetworkingConnectionState, ESteamNetworkingSocketsDebugOutputType, k_nSteamNetworkingSend_Reliable};
-use godot::prelude::*;
-use godot::classes::Node;
-use godot::classes::INode;
 use crate::packet::prelude::*;
+use gns::sys::{
+    ESteamNetworkingConfigValue, ESteamNetworkingConnectionState,
+    ESteamNetworkingSocketsDebugOutputType, k_nSteamNetworkingSend_Reliable,
+};
+use gns::{
+    GnsConfig, GnsConnection, GnsGlobal, GnsSocket, IsClient, IsServer,
+    sys::k_nSteamNetworkingSend_Unreliable,
+};
+use godot::classes::INode;
+use godot::classes::Node;
+use godot::prelude::*;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::{
+    collections::{HashMap, VecDeque},
+    net::{IpAddr, Ipv4Addr},
+    time::Instant,
+};
 
 const DEFAULT_IP_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const DEFAULT_PORT: i64 = 45876;
@@ -49,7 +59,7 @@ struct NetworkHandler {
     is_server: bool,
     gns_global: Arc<GnsGlobal>,
     last_update: Instant,
-    
+
     /* server-side vars */
     server: Option<GnsSocket<IsServer>>,
     available_peer_ids: Vec<i64>,
@@ -135,7 +145,8 @@ impl NetworkHandler {
         // });
 
         self.server = GnsSocket::new(self.gns_global.clone())
-            .listen(ip_address, port.try_into().unwrap()).ok();
+            .listen(ip_address, port.try_into().unwrap())
+            .ok();
 
         self.is_connected = true;
     }
@@ -161,13 +172,13 @@ impl NetworkHandler {
 
     fn _start_client(&mut self, ip_address: IpAddr, port: i64) {
         self.is_server = false;
-        
+
         // Setup debugging using function pointer to safely queue messages from GNS thread
         self.gns_global.utils().enable_debug_output(
             ESteamNetworkingSocketsDebugOutputType::k_ESteamNetworkingSocketsDebugOutputType_Everything,
             client_debug_callback,
         );
-    
+
         self.client = GnsSocket::new(self.gns_global.clone())
             .connect(ip_address, port.try_into().unwrap())
             .ok();
@@ -220,7 +231,11 @@ impl NetworkHandler {
 
         client.send_messages(vec![self.gns_global.utils().allocate_message(
             client.connection(),
-            if packet.is_reliable() { k_nSteamNetworkingSend_Reliable } else { k_nSteamNetworkingSend_Unreliable },
+            if packet.is_reliable() {
+                k_nSteamNetworkingSend_Reliable
+            } else {
+                k_nSteamNetworkingSend_Unreliable
+            },
             packet.encode().as_slice(),
         )]);
     }
@@ -240,12 +255,19 @@ impl NetworkHandler {
             panic!("Server socket not initialized");
         });
 
-        let messages = self.connected_clients.keys().clone()
+        let messages = self
+            .connected_clients
+            .keys()
+            .clone()
             .into_iter()
             .map(|client| {
                 self.gns_global.utils().allocate_message(
                     *client,
-                    if packet.is_reliable() { k_nSteamNetworkingSend_Reliable } else { k_nSteamNetworkingSend_Unreliable },
+                    if packet.is_reliable() {
+                        k_nSteamNetworkingSend_Reliable
+                    } else {
+                        k_nSteamNetworkingSend_Unreliable
+                    },
                     packet.encode().as_slice(),
                 )
             })
@@ -306,13 +328,17 @@ impl NetworkHandler {
         // Process some messages, we arbitrary define 100 as being the max number of messages we can handle per iteration.
         let _messages_processed = client.poll_messages::<100>(|message| {
             let packet = Packet::decode(message.payload());
-            
+
             match packet {
                 Ok(packet) => {
                     packets_to_emit.push(packet.as_gd());
                 }
                 Err(e) => {
-                    self.queue_debug(format!("ERROR: Failed to decode packet: {}, raw data {:x?}", e, &message.payload()));
+                    self.queue_debug(format!(
+                        "ERROR: Failed to decode packet: {}, raw data {:x?}",
+                        e,
+                        &message.payload()
+                    ));
                 }
             }
         });
@@ -373,10 +399,14 @@ impl NetworkHandler {
                     self.queue_debug(format!("ERROR: Failed to get connection info for {nick}"));
                     panic!()
                 });
-                let (status, _) = server.get_connection_real_time_status(client, 0).unwrap_or_else(|_| {
-                    self.queue_debug(format!("ERROR: Failed to get real time status for {nick}"));
-                    panic!()
-                });
+                let (status, _) = server
+                    .get_connection_real_time_status(client, 0)
+                    .unwrap_or_else(|_| {
+                        self.queue_debug(format!(
+                            "ERROR: Failed to get real time status for {nick}"
+                        ));
+                        panic!()
+                    });
                 self.queue_debug(format!(
                   "== Client {:#?}\n\tIP: {:#?}\n\tPing: {:#?}\n\tOut/sec: {:#?}\n\tIn/sec: {:#?}",
                     nick,
@@ -460,11 +490,14 @@ impl NetworkHandler {
         // Process some messages, we arbitrary define 100 as being the max number of messages we can handle per iteration.
         let _messages_processed = server.poll_messages::<100>(|message| {
             let packet = Packet::decode(message.payload());
-            
+
             let peer_id: i64 = match self.connected_clients.get(&message.connection()) {
                 Some(peer_id) => (*peer_id).try_into().unwrap(),
                 None => {
-                    self.queue_debug(format!("ERROR: Failed to get peer id for connection: {:#?}", message.connection()));
+                    self.queue_debug(format!(
+                        "ERROR: Failed to get peer id for connection: {:#?}",
+                        message.connection()
+                    ));
                     return;
                 }
             };
@@ -474,7 +507,11 @@ impl NetworkHandler {
                     packets_to_emit.push((peer_id, packet.as_gd()));
                 }
                 Err(e) => {
-                    self.queue_debug(format!("ERROR: Failed to decode packet: {}, raw data {:x?}", e, &message.payload()));
+                    self.queue_debug(format!(
+                        "ERROR: Failed to decode packet: {}, raw data {:x?}",
+                        e,
+                        &message.payload()
+                    ));
                 }
             }
         });

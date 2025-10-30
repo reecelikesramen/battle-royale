@@ -74,7 +74,9 @@ impl Packet {
             )?)),
             PacketId::GameState => Ok(Packet::GameState(GameStatePacketWire::decode(packet_data)?)),
             PacketId::Chat => Ok(Packet::Chat(ChatPacketWire::decode(packet_data)?)),
-            PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(PlayerDisconnectedPacketWire::decode(packet_data)?)),
+            PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(
+                PlayerDisconnectedPacketWire::decode(packet_data)?,
+            )),
             PacketId::Null => Ok(Packet::Null(NullPacketWire::decode(packet_data)?)),
         }
     }

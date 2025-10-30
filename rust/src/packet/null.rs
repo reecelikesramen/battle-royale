@@ -6,5 +6,3 @@ define_null_packet! {
     variant: Null,
     reliable: false,
 }
-
-

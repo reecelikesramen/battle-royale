@@ -15,9 +15,10 @@ func _ready() -> void:
 
 func spawn_player(id: int) -> void:
 	var player = LOW_LEVEL_NETWORK_PLAYER.instantiate()
-	player.owner_id = id
+	player._owner_id = id
 	player.name = "Player_%d" % id # Optional, but it beats the name "@CharacterBody2D@2/3/4..."
 	players[id] = player
+	
 	call_deferred("add_child", player)
 
 
