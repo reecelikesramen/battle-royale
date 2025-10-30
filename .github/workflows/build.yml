@@ -1,4 +1,4 @@
-name: Build All Platforms
+name: Build Rust Libraries
 
 on:
   push:
@@ -8,10 +8,6 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-
-env:
-  GODOT_VERSION: "4.5"
-  GODOT_EXPORT_TEMPLATES_VERSION: "4.5.stable"
 
 jobs:
   build-rust:
@@ -76,6 +72,9 @@ jobs:
     - name: Install dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
+        # Remove old cached protobuf from /usr/local that conflicts with system packages
+        sudo rm -rf /usr/local/lib/libprotobuf* /usr/local/include/google/protobuf /usr/local/share/cmake-*/Modules/FindProtobuf.cmake || true
+        
         sudo apt-get update
         sudo apt-get install -y protobuf-compiler libprotobuf-dev pkg-config libssl-dev
 
@@ -108,6 +107,7 @@ jobs:
       env:
         GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg-buildtrees' || '' }}
         GNS_VCPKG_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg' || '' }}
+        CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr' || '' }}
       run: |
         cargo build --release --target ${{ matrix.target }}
       
@@ -118,231 +118,4 @@ jobs:
         path: |
           rust/target/${{ matrix.target }}/release/${{ matrix.library-name }}
         retention-days: 7
-
-  build-godot:
-    needs: build-rust
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos
-            preset: macOS
-            output: game-macos-arm64.app
-            rust-artifact: rust-macos-arm64
-            rust-lib: librust.dylib
-          - platform: macos
-            preset: macOS Dedicated Server
-            output: server-macos-arm64.app
-            rust-artifact: rust-macos-arm64
-            rust-lib: librust.dylib
-          - platform: linux
-            preset: Linux
-            output: game-linux-x86_64.x86_64
-            rust-artifact: rust-linux-x86_64
-            rust-lib: librust.so
-          - platform: linux
-            preset: Linux Dedicated Server
-            output: server-linux-x86_64.x86_64
-            rust-artifact: rust-linux-x86_64
-            rust-lib: librust.so
-          - platform: windows
-            preset: Windows
-            output: game-windows-x86_64.exe
-            rust-artifact: rust-windows-x86_64
-            rust-lib: rust.dll
-          - platform: windows
-            preset: Windows Dedicated Server
-            output: server-windows-x86_64.exe
-            rust-artifact: rust-windows-x86_64
-            rust-lib: rust.dll
-    
-    runs-on: ubuntu-24.04
-    container:
-      image: barichello/godot-ci:4.5
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        lfs: true
-      
-    - name: Setup
-      run: |
-        mkdir -v -p ~/.local/share/godot/export_templates/
-        mkdir -v -p ~/.config/
-        mv /root/.config/godot ~/.config/godot
-        mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
-      
-    - name: Download Rust library
-      uses: actions/download-artifact@v4
-      with:
-        name: ${{ matrix.rust-artifact }}
-        path: rust/target/release
-      
-    - name: Verify and organize Rust library
-      run: |
-        # Ensure the library exists and is in the correct location for GDExtension
-        # The GDExtension file uses: res://../rust/target/release/{lib}
-        # This matches the repo structure: godot/HelloWorld.gdextension -> ../rust/target/release/
-        mkdir -p rust/target/release
-        
-        # Find the downloaded library (it might be in a subdirectory from the artifact)
-        if [ -f "rust/target/release/${{ matrix.rust-lib }}" ]; then
-          echo "Library already in correct location"
-        elif find rust/target/release -name "${{ matrix.rust-lib }}" -type f | head -1 | xargs -I {} mv {} "rust/target/release/${{ matrix.rust-lib }}"; then
-          echo "Moved library to correct location"
-        else
-          echo "Error: Could not find ${{ matrix.rust-lib }}"
-          find rust/target/release -type f
-          exit 1
-        fi
-        
-        echo "Library in repo structure: rust/target/release/"
-        ls -la rust/target/release/
-      
-    - name: Show directory structure
-      run: |
-        apt-get update && apt-get install -y tree
-        tree -h || true
-        echo "Main dir:"
-        tree -L 5 . || true
-        echo "Rust dir:"
-        tree -L 5 rust/ || true
-        echo "Godot dir:"
-        tree -L 5 godot/ || true
-        echo ""
-        echo "=== Rust library location ==="
-        ls -la rust/target/release/ || echo "rust/target/release/ not found"
-        echo ""
-        echo "=== GDExtension file ==="
-        cat godot/HelloWorld.gdextension || echo "HelloWorld.gdextension not found"
-      
-    - name: Check macOS templates and update preset
-      if: matrix.platform == 'macos'
-      run: |
-        # Check what macOS templates are available
-        echo "Checking available export templates..."
-        TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_EXPORT_TEMPLATES_VERSION}/macos.app_template/Contents/MacOS/"
-        if [ -d "$TEMPLATE_DIR" ]; then
-          ls -la "$TEMPLATE_DIR" || true
-          # Check if arm64 binary exists
-          if ls "$TEMPLATE_DIR"/godot_macos*arm64* 1> /dev/null 2>&1; then
-            echo "ARM64 template found, keeping architecture as arm64"
-            # Don't change, export preset should work
-          else
-            echo "ARM64 template not found, using universal"
-            # Change to universal which should include arm64
-            sed -i 's|binary_format/architecture="arm64"|binary_format/architecture="universal"|g' godot/export_presets.cfg || true
-          fi
-        fi
-      
-    - name: Build
-      run: |
-        # Run export from inside godot/ directory to match repo structure
-        # The GDExtension file uses res://../rust/target/release/ which is correct from godot/
-        EXPORT_DIR="$(readlink -f build)"
-        mkdir -v -p build
-        cd godot
-        godot --headless --verbose --export-release "${{ matrix.preset }}" "../$EXPORT_DIR/${{ matrix.output }}"
-      
-    - name: Copy GDExtension libraries to export
-      run: |
-        # Copy libraries to export location so they're available at runtime
-        # The exported game will look for libraries using the paths in GDExtension file
-        # We're in repo root, and rust libraries are in rust/target/release/
-        EXPORT_DIR="$(readlink -f build)"
-        OUTPUT_FILE="$EXPORT_DIR/${{ matrix.output }}"
-        
-        # Determine where to copy the library based on platform
-        if [ "${{ matrix.platform }}" = "linux" ]; then
-          # For Linux, copy next to the executable
-          cp "rust/target/release/${{ matrix.rust-lib }}" "$(dirname "$OUTPUT_FILE")/"
-        elif [ "${{ matrix.platform }}" = "windows" ]; then
-          # For Windows, copy next to the executable
-          cp "rust/target/release/${{ matrix.rust-lib }}" "$(dirname "$OUTPUT_FILE")/"
-        elif [ "${{ matrix.platform }}" = "macos" ]; then
-          # For macOS .app bundles, copy into Contents/MacOS/
-          if [ -d "$OUTPUT_FILE/Contents/MacOS" ]; then
-            cp "rust/target/release/${{ matrix.rust-lib }}" "$OUTPUT_FILE/Contents/MacOS/"
-          elif [ -f "$OUTPUT_FILE" ]; then
-            # If it's a zip file, we need to extract, copy, and re-zip
-            TEMP_DIR=$(mktemp -d)
-            unzip -q "$OUTPUT_FILE" -d "$TEMP_DIR"
-            APP_NAME=$(basename "$OUTPUT_FILE" .zip)
-            if [ -d "$TEMP_DIR/$APP_NAME.app/Contents/MacOS" ]; then
-              cp "rust/target/release/${{ matrix.rust-lib }}" "$TEMP_DIR/$APP_NAME.app/Contents/MacOS/"
-              cd "$TEMP_DIR"
-              zip -r -q "$OUTPUT_FILE" "$APP_NAME.app"
-            fi
-            rm -rf "$TEMP_DIR"
-          fi
-        fi
-        
-        echo "Library copied to export location"
-        ls -la "$(dirname "$OUTPUT_FILE")/" || ls -la "$OUTPUT_FILE/Contents/MacOS/" || true
-      
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: godot-${{ matrix.platform }}-${{ matrix.preset }}
-        path: build/${{ matrix.output }}
-        if-no-files-found: error
-        retention-days: 7
-
-  release:
-    needs: [build-rust, build-godot]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Download all Godot artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: release-artifacts
-        pattern: godot-*
-        merge-multiple: false
-      
-    - name: Extract and organize artifacts
-      run: |
-        mkdir -p release
-        # Copy all artifacts, flattening structure
-        find release-artifacts -type f -exec cp {} release/ \;
-        ls -la release/
-      
-    - name: Generate release notes
-      id: release_notes
-      run: |
-        cat > release_notes.md << EOF
-        ## Downloads
-        
-        ### macOS (ARM64)
-        - **game-macos-arm64.app** - Game application
-        - **server-macos-arm64.app** - Dedicated server
-        
-        ### Linux (x86_64)
-        - **game-linux-x86_64.x86_64** - Game application  
-        - **server-linux-x86_64.x86_64** - Dedicated server
-        
-        ### Windows (x86_64)
-        - **game-windows-x86_64.exe** - Game application
-        - **server-windows-x86_64.exe** - Dedicated server
-        EOF
-        echo "notes<<EOF" >> $GITHUB_OUTPUT
-        cat release_notes.md >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-      
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: release/**/*
-        tag_name: ${{ github.ref_name }}
-        name: Release ${{ github.ref_name }}
-        body_path: release_notes.md
-        draft: false
-        prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
 
