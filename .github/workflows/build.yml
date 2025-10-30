@@ -61,10 +61,62 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-${{ matrix.target }}-cargo-target-
       
+    - name: Cache protobuf (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/cache@v4
+      with:
+        path: |
+          /usr/local/lib/libprotobuf.a
+          /usr/local/lib/pkgconfig/protobuf.pc
+          /usr/local/include/google/protobuf
+        key: linux-protobuf-21.12-static
+        restore-keys: |
+          linux-protobuf-
+    
+    - name: Install dependencies (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake pkg-config libssl-dev
+        
+        # Install protobuf 21 from source if not cached
+        if [ ! -f "/usr/local/lib/libprotobuf.a" ]; then
+          cd /tmp
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protobuf-all-21.12.tar.gz
+          tar -xzf protobuf-all-21.12.tar.gz
+          cd protobuf-21.12
+          ./configure --prefix=/usr/local --enable-static=yes --enable-shared=no
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+        fi
+        
+        # Set PKG_CONFIG_PATH for static linking
+        echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+    
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install openssl protobuf@21 pkg-config
+        echo "PKG_CONFIG_PATH=$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix protobuf@21)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+    
+    - name: Enable long paths (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        git config --global core.longpaths true
+        # Enable long path support (requires admin, will fail gracefully if not available)
+        reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f 2>$null
+        # Create shorter vcpkg directories
+        New-Item -ItemType Directory -Force -Path "C:\vcpkg" -ErrorAction SilentlyContinue | Out-Null
+        New-Item -ItemType Directory -Force -Path "C:\vcpkg-buildtrees" -ErrorAction SilentlyContinue | Out-Null
+    
     - name: Build Rust release
       working-directory: rust
       env:
         GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg-buildtrees' || '' }}
+        GNS_VCPKG_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg' || '' }}
       run: |
         cargo build --release --target ${{ matrix.target }}
       
