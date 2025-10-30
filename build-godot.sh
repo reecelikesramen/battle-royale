@@ -53,34 +53,16 @@ command -v rustc > /dev/null || { echo -e "${RED}Error: rustc not found. Please 
 command -v cargo > /dev/null || { echo -e "${RED}Error: cargo not found. Please install Rust.${NC}"; exit 1; }
 command -v godot > /dev/null || { echo -e "${RED}Error: godot not found. Please install Godot 4.5.${NC}"; exit 1; }
 
-# Check if cross-compilation targets are installed
-echo -e "${GREEN}Checking Rust targets...${NC}"
-TARGETS=(
-    "aarch64-apple-darwin"
-    "x86_64-unknown-linux-gnu"
-    "x86_64-pc-windows-msvc"
-)
+# Check if macOS Rust target is installed (only target we build locally)
+echo -e "${GREEN}Checking Rust target...${NC}"
+MACOS_TARGET="aarch64-apple-darwin"
 
-for target in "${TARGETS[@]}"; do
-    if rustup target list --installed | grep -q "^${target}$"; then
-        echo -e "  ${GREEN}✓${NC} $target"
-    else
-        echo -e "  ${YELLOW}⚠${NC} $target not installed, installing..."
-        rustup target add "$target"
-    fi
-done
-echo ""
-
-# Check for required tools for cross-compilation
-echo -e "${GREEN}Checking cross-compilation tools...${NC}"
-
-# Check for Linux cross-compilation (needs musl or gnu toolchain)
-if ! command -v x86_64-linux-gnu-gcc > /dev/null 2>&1; then
-    echo -e "  ${YELLOW}Warning: x86_64-linux-gnu-gcc not found. Linux builds may fail.${NC}"
-    echo -e "  ${YELLOW}Install with: brew install SergioBenitez/osxct/x86_64-unknown-linux-gnu${NC}"
+if rustup target list --installed | grep -q "^${MACOS_TARGET}$"; then
+    echo -e "  ${GREEN}✓${NC} $MACOS_TARGET"
+else
+    echo -e "  ${YELLOW}⚠${NC} $MACOS_TARGET not installed, installing..."
+    rustup target add "$MACOS_TARGET"
 fi
-
-# Windows cross-compilation typically works without extra tools on macOS
 echo ""
 
 # Install macOS dependencies
@@ -111,69 +93,64 @@ export LDFLAGS="-L$OPENSSL_PREFIX/lib -L$PROTOBUF_PREFIX/lib"
 export CPPFLAGS="-I$OPENSSL_PREFIX/include -I$PROTOBUF_PREFIX/include"
 export CMAKE_PREFIX_PATH="$PROTOBUF_PREFIX:$CMAKE_PREFIX_PATH"
 
-# Build Rust libraries for each target
+# Build Rust libraries
 echo -e "${GREEN}=== Building Rust Libraries ===${NC}"
 cd "$PROJECT_ROOT/rust"
 
-for target in "${TARGETS[@]}"; do
-    echo ""
-    echo -e "${GREEN}Building for $target...${NC}"
-    
-    # Set platform-specific environment variables
-    unset CMAKE_PREFIX_PATH
-    unset PKG_CONFIG_PATH
-    unset LDFLAGS
-    unset CPPFLAGS
-    
-    if [ "$target" = "aarch64-apple-darwin" ]; then
-        # macOS ARM64 - use brew-installed dependencies
-        export PROTOBUF_PREFIX=$(brew --prefix protobuf@21)
-        export OPENSSL_PREFIX=$(brew --prefix openssl)
-        export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$PROTOBUF_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"
-        export LDFLAGS="-L$OPENSSL_PREFIX/lib -L$PROTOBUF_PREFIX/lib"
-        export CPPFLAGS="-I$OPENSSL_PREFIX/include -I$PROTOBUF_PREFIX/include"
-        export CMAKE_PREFIX_PATH="$PROTOBUF_PREFIX:$CMAKE_PREFIX_PATH"
-    elif [ "$target" = "x86_64-unknown-linux-gnu" ]; then
-        # Linux - may need special configuration
-        echo -e "  ${YELLOW}Note: Linux cross-compilation may require additional setup${NC}"
-    elif [ "$target" = "x86_64-pc-windows-msvc" ]; then
-        # Windows - usually works without extra config
-        echo -e "  ${YELLOW}Note: Windows cross-compilation requires Windows SDK (usually auto-detected)${NC}"
-    fi
-    
-    if cargo build --release --target "$target"; then
-        echo -e "  ${GREEN}✓ Successfully built $target${NC}"
-    else
-        echo -e "  ${RED}✗ Failed to build $target${NC}"
-        exit 1
-    fi
-done
+# Only build macOS ARM64 locally - Linux and Windows libraries come from CI artifacts
+MACOS_TARGET="aarch64-apple-darwin"
+
+echo ""
+echo -e "${GREEN}Building for $MACOS_TARGET...${NC}"
+
+# Set macOS-specific environment variables
+export PROTOBUF_PREFIX=$(brew --prefix protobuf@21)
+export OPENSSL_PREFIX=$(brew --prefix openssl)
+export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$PROTOBUF_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"
+export LDFLAGS="-L$OPENSSL_PREFIX/lib -L$PROTOBUF_PREFIX/lib"
+export CPPFLAGS="-I$OPENSSL_PREFIX/include -I$PROTOBUF_PREFIX/include"
+export CMAKE_PREFIX_PATH="$PROTOBUF_PREFIX:$CMAKE_PREFIX_PATH"
+
+if cargo build --release --target "$MACOS_TARGET"; then
+    echo -e "  ${GREEN}✓ Successfully built $MACOS_TARGET${NC}"
+else
+    echo -e "  ${RED}✗ Failed to build $MACOS_TARGET${NC}"
+    exit 1
+fi
+
+echo ""
+echo -e "${YELLOW}Note: Linux and Windows libraries should be manually placed in target/release/${NC}"
+echo -e "${YELLOW}      Expected files: librust.so (Linux) and rust.dll (Windows)${NC}"
 
 echo ""
 echo -e "${GREEN}=== Rust Libraries Built Successfully ===${NC}"
 echo ""
 
 # Verify libraries exist
-echo -e "${GREEN}Verifying built libraries...${NC}"
+echo -e "${GREEN}Verifying libraries...${NC}"
+
+# Check macOS library (built locally)
 if [ -f "target/aarch64-apple-darwin/release/librust.dylib" ]; then
-    echo -e "  ${GREEN}✓ macOS ARM64 library${NC}"
+    echo -e "  ${GREEN}✓ macOS ARM64 library (built locally)${NC}"
 else
     echo -e "  ${RED}✗ macOS ARM64 library not found${NC}"
     exit 1
 fi
 
-if [ -f "target/x86_64-unknown-linux-gnu/release/librust.so" ]; then
-    echo -e "  ${GREEN}✓ Linux x86_64 library${NC}"
+# Check Linux library (from CI artifacts) - should be in rust/target/release/
+if [ -f "$PROJECT_ROOT/rust/target/release/librust.so" ]; then
+    echo -e "  ${GREEN}✓ Linux x86_64 library (from CI artifacts)${NC}"
 else
-    echo -e "  ${RED}✗ Linux x86_64 library not found${NC}"
-    exit 1
+    echo -e "  ${YELLOW}⚠ Linux x86_64 library not found in rust/target/release/${NC}"
+    echo -e "  ${YELLOW}  Please download from CI and place librust.so in rust/target/release/${NC}"
 fi
 
-if [ -f "target/x86_64-pc-windows-msvc/release/rust.dll" ]; then
-    echo -e "  ${GREEN}✓ Windows x86_64 library${NC}"
+# Check Windows library (from CI artifacts) - should be in rust/target/release/
+if [ -f "$PROJECT_ROOT/rust/target/release/rust.dll" ]; then
+    echo -e "  ${GREEN}✓ Windows x86_64 library (from CI artifacts)${NC}"
 else
-    echo -e "  ${RED}✗ Windows x86_64 library not found${NC}"
-    exit 1
+    echo -e "  ${YELLOW}⚠ Windows x86_64 library not found in rust/target/release/${NC}"
+    echo -e "  ${YELLOW}  Please download from CI and place rust.dll in rust/target/release/${NC}"
 fi
 
 echo ""
@@ -182,12 +159,24 @@ echo ""
 echo -e "${GREEN}Preparing libraries for Godot export...${NC}"
 mkdir -p target/release
 
-# Copy each library to target/release/ with the name GDExtension expects
+# Copy macOS library from built target
 cp target/aarch64-apple-darwin/release/librust.dylib target/release/librust.dylib
-cp target/x86_64-unknown-linux-gnu/release/librust.so target/release/librust.so
-cp target/x86_64-pc-windows-msvc/release/rust.dll target/release/rust.dll
+echo -e "  ${GREEN}✓ Copied macOS library${NC}"
 
-echo -e "  ${GREEN}✓ Libraries prepared${NC}"
+# Linux and Windows libraries should already be in target/release/ from CI artifacts
+# Just verify they exist
+if [ -f "target/release/librust.so" ]; then
+    echo -e "  ${GREEN}✓ Linux library ready${NC}"
+else
+    echo -e "  ${YELLOW}⚠ Linux library missing (will skip Linux exports)${NC}"
+fi
+
+if [ -f "target/release/rust.dll" ]; then
+    echo -e "  ${GREEN}✓ Windows library ready${NC}"
+else
+    echo -e "  ${YELLOW}⚠ Windows library missing (will skip Windows exports)${NC}"
+fi
+
 echo ""
 
 # Build Godot exports
@@ -199,38 +188,74 @@ echo -e "${GREEN}=== Building Godot Exports ===${NC}"
 cd godot
 
 # Export presets from export_presets.cfg
+# Only export presets if their corresponding libraries exist
 PRESETS=(
-    "macOS"
-    "macOS Dedicated Server"
-    "Linux"
-    "Linux Dedicated Server"
-    "Windows"
-    "Windows Dedicated Server"
+    "macOS|macOS Dedicated Server|game-macos-arm64|server-macos-arm64|../rust/target/release/librust.dylib|app|app"
+    "Linux|Linux Dedicated Server|game-linux-x86_64|server-linux-x86_64|../rust/target/release/librust.so|x86_64|x86_64"
+    "Windows|Windows Dedicated Server|game-windows-x86_64|server-windows-x86_64|../rust/target/release/rust.dll|exe|exe"
 )
 
-# Output filenames matching the CI naming
-OUTPUTS=(
-    "game-macos-arm64.app"
-    "server-macos-arm64.app"
-    "game-linux-x86_64.x86_64"
-    "server-linux-x86_64.x86_64"
-    "game-windows-x86_64.exe"
-    "server-windows-x86_64.exe"
-)
-
-for i in "${!PRESETS[@]}"; do
-    preset="${PRESETS[$i]}"
-    output="${OUTPUTS[$i]}"
+for preset_group in "${PRESETS[@]}"; do
+    IFS='|' read -r preset_game preset_server folder_game folder_server lib_path ext_game ext_server <<< "$preset_group"
     
+    # Check if library exists (from godot/ directory, so use relative path)
+    if [ ! -f "$lib_path" ]; then
+        echo ""
+        echo -e "${YELLOW}Skipping $preset_game and $preset_server (library not found: $lib_path)${NC}"
+        continue
+    fi
+    
+    # Export game preset
     echo ""
-    echo -e "${GREEN}Exporting: $preset${NC}"
-    
-    output_path="../$OUTPUT_DIR/$output"
-    
-    if godot --headless --verbose --export-release "$preset" "$output_path"; then
-        echo -e "  ${GREEN}✓ Successfully exported $preset${NC}"
+    echo -e "${GREEN}Exporting: $preset_game${NC}"
+    game_folder="../$OUTPUT_DIR/$folder_game"
+    mkdir -p "$game_folder"
+    output_path="$game_folder/$folder_game.$ext_game"
+    if godot --headless --verbose --export-release "$preset_game" "$output_path"; then
+        echo -e "  ${GREEN}✓ Successfully exported $preset_game${NC}"
+        
+        # Create zip file
+        echo -e "  ${GREEN}Creating zip archive...${NC}"
+        cd "$game_folder"
+        zip_name="../${folder_game}.zip"
+        if [ "$ext_game" = "app" ]; then
+            # For macOS .app bundles, zip the directory itself
+            zip -r -q "$zip_name" "$folder_game.$ext_game"
+        else
+            # For other platforms, zip the file
+            zip -q "$zip_name" "$folder_game.$ext_game"
+        fi
+        cd - > /dev/null
+        echo -e "  ${GREEN}✓ Created $zip_name${NC}"
     else
-        echo -e "  ${RED}✗ Failed to export $preset${NC}"
+        echo -e "  ${RED}✗ Failed to export $preset_game${NC}"
+        exit 1
+    fi
+    
+    # Export server preset
+    echo ""
+    echo -e "${GREEN}Exporting: $preset_server${NC}"
+    server_folder="../$OUTPUT_DIR/$folder_server"
+    mkdir -p "$server_folder"
+    output_path="$server_folder/$folder_server.$ext_server"
+    if godot --headless --verbose --export-release "$preset_server" "$output_path"; then
+        echo -e "  ${GREEN}✓ Successfully exported $preset_server${NC}"
+        
+        # Create zip file
+        echo -e "  ${GREEN}Creating zip archive...${NC}"
+        cd "$server_folder"
+        zip_name="../${folder_server}.zip"
+        if [ "$ext_server" = "app" ]; then
+            # For macOS .app bundles, zip the directory itself
+            zip -r -q "$zip_name" "$folder_server.$ext_server"
+        else
+            # For other platforms, zip the file
+            zip -q "$zip_name" "$folder_server.$ext_server"
+        fi
+        cd - > /dev/null
+        echo -e "  ${GREEN}✓ Created $zip_name${NC}"
+    else
+        echo -e "  ${RED}✗ Failed to export $preset_server${NC}"
         exit 1
     fi
 done
@@ -239,5 +264,9 @@ echo ""
 echo -e "${GREEN}=== Build Complete ===${NC}"
 echo -e "${GREEN}Builds available in: $OUTPUT_DIR${NC}"
 echo ""
-ls -lh "../$OUTPUT_DIR/"
+echo -e "${GREEN}Build folders:${NC}"
+ls -ld "../$OUTPUT_DIR"/*/ 2>/dev/null | sed 's/^/  /' || true
+echo ""
+echo -e "${GREEN}Zip archives:${NC}"
+ls -lh "../$OUTPUT_DIR"/*.zip 2>/dev/null | sed 's/^/  /' || true
 
