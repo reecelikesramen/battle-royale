@@ -48,10 +48,24 @@ fn client_debug_callback(ty: ESteamNetworkingSocketsDebugOutputType, message: St
     queue_debug_message("GNS Client", ty, message);
 }
 
+fn i64_to_u32(value: i64) -> u32 {
+    value.try_into().map_err(|e| {
+        godot_print!("ERROR: Failed to convert {value} to u32: {:#?}", e);
+    }).unwrap_or(0)
+}
+
 #[derive(GodotClass)]
 #[class(base=Node)]
 struct NetworkHandler {
     base: Base<Node>,
+
+    /* server-side vars */
+    server: Option<GnsSocket<IsServer>>,
+    available_peer_ids: Vec<u8>,
+    connected_clients: HashMap<GnsConnection, u8>,
+
+    /* client-side vars */
+    client: Option<GnsSocket<IsClient>>,
 
     /* common vars */
     #[var]
@@ -61,13 +75,43 @@ struct NetworkHandler {
     gns_global: Arc<GnsGlobal>,
     last_update: Instant,
 
-    /* server-side vars */
-    server: Option<GnsSocket<IsServer>>,
-    available_peer_ids: Vec<u8>,
-    connected_clients: HashMap<GnsConnection, u8>,
-
-    /* client-side vars */
-    client: Option<GnsSocket<IsClient>>,
+    /* config/debug exports */
+    #[export]
+    #[var(get=get_fake_ping_lag_send, set=set_fake_ping_lag_send)]
+    fake_ping_lag_send: i64,
+    #[export]
+    #[var(get=get_fake_ping_lag_recv, set=set_fake_ping_lag_recv)]
+    fake_ping_lag_recv: i64,
+    #[export]
+    #[var(get=get_fake_loss_send, set=set_fake_loss_send)]
+    fake_loss_send: i64,
+    #[export]
+    #[var(get=get_fake_loss_recv, set=set_fake_loss_recv)]
+    fake_loss_recv: i64,
+    #[export]
+    #[var(get=get_fake_jitter_send, set=set_fake_jitter_send)]
+    fake_jitter_send: i64,
+    #[export]
+    #[var(get=get_fake_jitter_recv, set=set_fake_jitter_recv)]
+    fake_jitter_recv: i64,
+    #[export]
+    #[var(get=get_fake_dup_send, set=set_fake_dup_send)]
+    fake_dup_send: i64,
+    #[export]
+    #[var(get=get_fake_dup_recv, set=set_fake_dup_recv)]
+    fake_dup_recv: i64,
+    #[export]
+    #[var(get=get_fake_dup_ms_max, set=set_fake_dup_ms_max)]
+    fake_dup_ms_max: i64,
+    #[export]
+    #[var(get=get_fake_reorder_send, set=set_fake_reorder_send)]
+    fake_reorder_send: i64,
+    #[export]
+    #[var(get=get_fake_reorder_recv, set=set_fake_reorder_recv)]
+    fake_reorder_recv: i64,
+    #[export]
+    #[var(get=get_fake_reorder_ms, set=set_fake_reorder_ms)]
+    fake_reorder_ms: i64,
 
     /* thread-safe debug message queue */
     debug_messages: Arc<Mutex<VecDeque<String>>>,
@@ -97,6 +141,18 @@ impl INode for NetworkHandler {
             available_peer_ids: (0..PLAYER_COUNT).rev().collect(),
             connected_clients: HashMap::new(),
             client: None,
+            fake_ping_lag_send: 0,
+            fake_ping_lag_recv: 0,
+            fake_loss_send: 0,
+            fake_loss_recv: 0,
+            fake_jitter_send: 0,
+            fake_jitter_recv: 0,
+            fake_dup_send: 0,
+            fake_dup_recv: 0,
+            fake_dup_ms_max: 0,
+            fake_reorder_send: 0,
+            fake_reorder_recv: 0,
+            fake_reorder_ms: 0,
             debug_messages: debug_queue,
         }
     }
@@ -134,15 +190,6 @@ impl NetworkHandler {
             ESteamNetworkingSocketsDebugOutputType::k_ESteamNetworkingSocketsDebugOutputType_Everything,
             server_debug_callback,
         );
-
-        // Add fake 1000ms ping to everyone connecting.
-        // self.gns_global.utils().set_global_config_value(
-        //     ESteamNetworkingConfigValue::k,
-        //     GnsConfig::Int32(1000),
-        // ).unwrap_or_else(|e| {
-        //     godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-        //     panic!("Failed to configure fake ping");
-        // });
 
         self.server = GnsSocket::new(self.gns_global.clone())
             .listen(ip_address, port.try_into().unwrap())
@@ -530,5 +577,197 @@ impl NetworkHandler {
         for (peer_id, packet) in packets_to_emit {
             self.signals().on_server_packet().emit(peer_id, &packet);
         }
+    }
+
+    #[func]
+    fn get_fake_ping_lag_send(&self) -> i64 {
+        self.fake_ping_lag_send
+    }
+
+    #[func]
+    fn set_fake_ping_lag_send(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Send,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_ping_lag_send = 0;
+        });
+    }
+    
+    #[func]
+    fn get_fake_ping_lag_recv(&self) -> i64 {
+        self.fake_ping_lag_recv
+    }
+
+    #[func]
+    fn set_fake_ping_lag_recv(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Recv,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_ping_lag_recv = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_loss_send(&self) -> i64 {
+        self.fake_loss_send
+    }
+
+    #[func]
+    fn set_fake_loss_send(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLoss_Send,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_loss_send = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_loss_recv(&self) -> i64 {
+        self.fake_loss_recv
+    }
+
+    #[func]
+    fn set_fake_loss_recv(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLoss_Recv,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_loss_recv = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_jitter_send(&self) -> i64 {
+        self.fake_jitter_send
+    }
+
+    #[func]
+    fn set_fake_jitter_send(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketJitter_Send_Avg,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_jitter_send = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_jitter_recv(&self) -> i64 {
+        self.fake_jitter_recv
+    }
+
+    #[func]
+    fn set_fake_jitter_recv(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketJitter_Recv_Avg,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_jitter_recv = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_dup_send(&self) -> i64 {
+        self.fake_dup_send
+    }
+
+    #[func]
+    fn set_fake_dup_send(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_Send,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_dup_send = 0;
+        });
+    }
+    
+    #[func]
+    fn get_fake_dup_recv(&self) -> i64 {
+        self.fake_dup_recv
+    }
+
+    #[func]
+    fn set_fake_dup_recv(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_Recv,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_dup_recv = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_dup_ms_max(&self) -> i64 {
+        self.fake_dup_ms_max
+    }
+
+    #[func]
+    fn set_fake_dup_ms_max(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_TimeMax,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_dup_ms_max = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_reorder_send(&self) -> i64 {
+        self.fake_reorder_send
+    }
+
+    #[func]
+    fn set_fake_reorder_send(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Send,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_reorder_send = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_reorder_recv(&self) -> i64 {
+        self.fake_reorder_recv
+    }
+
+    #[func]
+    fn set_fake_reorder_recv(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Recv,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_reorder_recv = 0;
+        });
+    }
+
+    #[func]
+    fn get_fake_reorder_ms(&self) -> i64 {
+        self.fake_reorder_ms
+    }
+
+    #[func]
+    fn set_fake_reorder_ms(&mut self, value: i64) {
+        self.gns_global.utils().set_global_config_value(
+            ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Time,
+            GnsConfig::Int32(i64_to_u32(value)),
+        ).unwrap_or_else(|e| {
+            godot_print!("ERROR: Failed to set global config value: {:#?}", e);
+            self.fake_reorder_ms = 0;
+        });
     }
 }
