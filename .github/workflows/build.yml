@@ -61,17 +61,17 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-${{ matrix.target }}-cargo-target-
       
-    - name: Cache protobuf (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      uses: actions/cache@v4
-      with:
-        path: |
-          /usr/local/lib/libprotobuf.a
-          /usr/local/lib/pkgconfig/protobuf.pc
-          /usr/local/include/google/protobuf
-        key: linux-protobuf-21.12-static-fpic
-        restore-keys: |
-          linux-protobuf-
+    # - name: Cache protobuf (Linux)
+    #   if: matrix.os == 'ubuntu-latest'
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: |
+    #       /usr/local/lib/libprotobuf.a
+    #       /usr/local/lib/pkgconfig/protobuf.pc
+    #       /usr/local/include/google/protobuf
+    #     key: linux-protobuf-21.12-static-fpic
+    #     restore-keys: |
+    #       linux-protobuf-
     
     - name: Install dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
