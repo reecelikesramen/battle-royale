@@ -5,17 +5,17 @@ var is_authority: bool:
 
 var owner_id: int
 
+@onready var camera: Camera3D = $CameraController/Camera3D
+
 func _enter_tree() -> void:
-	print("Player #%d added to the tree, named %s!" % [owner_id, name])
 	ServerNetworkGlobals.handle_game_state.connect(server_handle_game_state)
 	ClientNetworkGlobals.handle_game_state.connect(client_handle_game_state)
-	if is_authority:
-		%Camera3D.make_current()
 
 
 func _exit_tree() -> void:
 	ServerNetworkGlobals.handle_game_state.disconnect(server_handle_game_state)
 	ClientNetworkGlobals.handle_game_state.disconnect(client_handle_game_state)
+
 
 const SPEED = 5.0
 const JUMP_VELOCITY = 4.5
@@ -49,10 +49,15 @@ func _input(event):
 		crouch(false)
 
 func _ready():
+	print("Player #%d spawned, named %s!" % [owner_id, name])
 	if !LowLevelNetworkHandler.is_dedicated_server:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	#CROUCH_SHAPECAST.add_excep
-	
+
+	if is_authority:
+		camera.make_current()
+	else:
+		call_deferred("remove_child", %GUI)
+
 func _unhandled_input(event):
 	_mouse_input = event is InputEventMouseMotion and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	if _mouse_input:
@@ -101,7 +106,7 @@ func _physics_process(delta: float) -> void:
 	
 	move_and_slide()
 	
-	LowLevelNetworkHandler.send_packet(GdGameStatePacket.create(owner_id, position))
+	LowLevelNetworkHandler.send_packet(GameStatePacket.create(owner_id, position, get_sightline_unit_vector(), _is_crouching))
 	
 func crouch(state: bool):
 	print("Colliding:", CROUCH_SHAPECAST.is_colliding())
@@ -122,16 +127,21 @@ func toggle_crouch():
 	elif !_is_crouching:
 		crouch(false)
 	print(_is_crouching)
+	
+func get_sightline_unit_vector() -> Vector3:
+	var camera_global_transform: Transform3D = camera.global_transform
+	var sightline_vector: Vector3 = -camera_global_transform.basis.z
+	return sightline_vector
 
-func server_handle_game_state(peer_id: int, game_state: GdGameStatePacket) -> void:
+func server_handle_game_state(peer_id: int, game_state: GameStatePacket) -> void:
 	if owner_id != peer_id:
 		return
 
 	global_position = game_state.player_position
-	LowLevelNetworkHandler.broadcast_packet(GdGameStatePacket.create(owner_id, global_position))
+	LowLevelNetworkHandler.broadcast_packet(game_state.to_payload())
 
 
-func client_handle_game_state(game_state: GdGameStatePacket) -> void:
+func client_handle_game_state(game_state: GameStatePacket) -> void:
 	if is_authority || owner_id != game_state.id: return
 
 	global_position = game_state.player_position

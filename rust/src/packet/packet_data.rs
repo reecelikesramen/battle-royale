@@ -1,5 +1,4 @@
 use std::io::Result;
-use godot::prelude::*;
 
 
 pub(crate) trait PacketData: Sized {

@@ -13,10 +13,7 @@ impl IRefCounted for GdPacket {
     fn init(base: Base<RefCounted>) -> Self {
         Self {
             base,
-            packet: Packet::GameState(GameStatePacket {
-                id: -1,
-                player_position: Vector3::ZERO,
-            }),
+            packet: Packet::Null(NullPacketWire),
         }
     }
 }

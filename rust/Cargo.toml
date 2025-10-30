@@ -12,3 +12,4 @@ godot = "0.4.2"
 #godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
 num-derive = "0.4.2"
 num-traits = "0.2.19"
+paste = "1.0.14"

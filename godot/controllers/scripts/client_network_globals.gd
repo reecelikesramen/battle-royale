@@ -3,8 +3,8 @@ extends Node
 signal handle_local_id_assignment(local_id: int)
 signal handle_remote_id_assignment(remote_id: int)
 signal handle_player_disconnected(player_id: int)
-signal handle_game_state(game_state: GdGameStatePacket)
-signal handle_chat(message: GdChatPacket)
+signal handle_game_state(game_state: GameStatePacket)
+signal handle_chat(message: ChatPacket)
 signal handle_disconnect_from_server()
 
 var username: String
@@ -17,19 +17,19 @@ func _ready() -> void:
 
 
 func on_client_packet(data) -> void:
-	if data is GdIdAssignmentPacket:
+	if data is IdAssignmentPacket:
 		manage_ids(data)
-	elif data is GdGameStatePacket:
+	elif data is GameStatePacket:
 		handle_game_state.emit(data)
-	elif data is GdChatPacket:
+	elif data is ChatPacket:
 		handle_chat.emit(data)
-	elif data is GdPlayerDisconnectedPacket:
+	elif data is PlayerDisconnectedPacket:
 		handle_player_disconnected.emit(data.player_id)
 	else:
 		push_error("Packet unknown type unhandled!")
 
 
-func manage_ids(packet: GdIdAssignmentPacket) -> void:
+func manage_ids(packet: IdAssignmentPacket) -> void:
 	if id == -1: # When id == -1, the id sent by the server is for us
 		id = packet.id
 		handle_local_id_assignment.emit(packet.id)

@@ -22,7 +22,7 @@ func spawn_player(id: int) -> void:
 
 
 func despawn_player(id: int) -> void:
-	LowLevelNetworkHandler.broadcast_packet(GdPlayerDisconnectedPacket.create(id))
+	LowLevelNetworkHandler.broadcast_packet(PlayerDisconnectedPacket.create(id))
 	var player = players[id]
 	player.despawn()
 	player.queue_free()

@@ -11,13 +11,15 @@ pub(crate) enum PacketId {
     GameState,
     Chat,
     PlayerDisconnected,
+    Null,
 }
 
 pub(crate) enum Packet {
-    IdAssignment(IdAssignmentPacket),
-    GameState(GameStatePacket),
-    Chat(ChatPacket),
-    PlayerDisconnected(PlayerDisconnectedPacket),
+    IdAssignment(IdAssignmentPacketWire),
+    GameState(GameStatePacketWire),
+    Chat(ChatPacketWire),
+    PlayerDisconnected(PlayerDisconnectedPacketWire),
+    Null(NullPacketWire),
 }
 
 impl Packet {
@@ -27,15 +29,17 @@ impl Packet {
             Packet::GameState(_) => PacketId::GameState,
             Packet::Chat(_) => PacketId::Chat,
             Packet::PlayerDisconnected(_) => PacketId::PlayerDisconnected,
+            Packet::Null(_) => PacketId::Null,
         }
     }
 
     pub(crate) fn is_reliable(&self) -> bool {
         match self {
-            Packet::IdAssignment(_) => IdAssignmentPacket::IS_RELIABLE,
-            Packet::GameState(_) => GameStatePacket::IS_RELIABLE,
-            Packet::Chat(_) => ChatPacket::IS_RELIABLE,
-            Packet::PlayerDisconnected(_) => PlayerDisconnectedPacket::IS_RELIABLE,
+            Packet::IdAssignment(_) => IdAssignmentPacketWire::IS_RELIABLE,
+            Packet::GameState(_) => GameStatePacketWire::IS_RELIABLE,
+            Packet::Chat(_) => ChatPacketWire::IS_RELIABLE,
+            Packet::PlayerDisconnected(_) => PlayerDisconnectedPacketWire::IS_RELIABLE,
+            Packet::Null(_) => NullPacketWire::IS_RELIABLE,
         }
     }
 
@@ -46,6 +50,7 @@ impl Packet {
             Packet::GameState(packet) => packet.encode(),
             Packet::Chat(packet) => packet.encode(),
             Packet::PlayerDisconnected(packet) => packet.encode(),
+            Packet::Null(packet) => packet.encode(),
         });
         bytes
     }
@@ -64,12 +69,13 @@ impl Packet {
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Unknown packet ID"))?;
 
         match packet_id {
-            PacketId::IdAssignment => Ok(Packet::IdAssignment(IdAssignmentPacket::decode(
+            PacketId::IdAssignment => Ok(Packet::IdAssignment(IdAssignmentPacketWire::decode(
                 packet_data,
             )?)),
-            PacketId::GameState => Ok(Packet::GameState(GameStatePacket::decode(packet_data)?)),
-            PacketId::Chat => Ok(Packet::Chat(ChatPacket::decode(packet_data)?)),
-            PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(PlayerDisconnectedPacket::decode(packet_data)?)),
+            PacketId::GameState => Ok(Packet::GameState(GameStatePacketWire::decode(packet_data)?)),
+            PacketId::Chat => Ok(Packet::Chat(ChatPacketWire::decode(packet_data)?)),
+            PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(PlayerDisconnectedPacketWire::decode(packet_data)?)),
+            PacketId::Null => Ok(Packet::Null(NullPacketWire::decode(packet_data)?)),
         }
     }
 
@@ -79,6 +85,7 @@ impl Packet {
             Packet::GameState(packet) => packet.as_gd(),
             Packet::Chat(packet) => packet.as_gd(),
             Packet::PlayerDisconnected(packet) => packet.as_gd(),
+            Packet::Null(packet) => packet.as_gd(),
         }
     }
 }
