@@ -145,3 +145,9 @@ func _on_shape_cast_3d_collision_state_changed(is_colliding: bool) -> void:
 	print(is_colliding)
 	if !is_colliding and _do_uncrouch:
 		ANIMATION_PLAYER.play("Crouch", -1, -CROUCH_SPEED, true)
+
+
+func despawn() -> void:
+	print("I'm (%s) being despawned!" % name)
+	if is_authority: get_tree().change_scene_to_file("res://main_menu.tscn")
+	

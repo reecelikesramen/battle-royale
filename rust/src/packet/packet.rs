@@ -10,12 +10,14 @@ pub(crate) enum PacketId {
     IdAssignment,
     GameState,
     Chat,
+    PlayerDisconnected,
 }
 
 pub(crate) enum Packet {
     IdAssignment(IdAssignmentPacket),
     GameState(GameStatePacket),
     Chat(ChatPacket),
+    PlayerDisconnected(PlayerDisconnectedPacket),
 }
 
 impl Packet {
@@ -24,6 +26,7 @@ impl Packet {
             Packet::IdAssignment(_) => PacketId::IdAssignment,
             Packet::GameState(_) => PacketId::GameState,
             Packet::Chat(_) => PacketId::Chat,
+            Packet::PlayerDisconnected(_) => PacketId::PlayerDisconnected,
         }
     }
 
@@ -32,6 +35,7 @@ impl Packet {
             Packet::IdAssignment(_) => IdAssignmentPacket::IS_RELIABLE,
             Packet::GameState(_) => GameStatePacket::IS_RELIABLE,
             Packet::Chat(_) => ChatPacket::IS_RELIABLE,
+            Packet::PlayerDisconnected(_) => PlayerDisconnectedPacket::IS_RELIABLE,
         }
     }
 
@@ -41,6 +45,7 @@ impl Packet {
             Packet::IdAssignment(packet) => packet.encode(),
             Packet::GameState(packet) => packet.encode(),
             Packet::Chat(packet) => packet.encode(),
+            Packet::PlayerDisconnected(packet) => packet.encode(),
         });
         bytes
     }
@@ -64,6 +69,7 @@ impl Packet {
             )?)),
             PacketId::GameState => Ok(Packet::GameState(GameStatePacket::decode(packet_data)?)),
             PacketId::Chat => Ok(Packet::Chat(ChatPacket::decode(packet_data)?)),
+            PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(PlayerDisconnectedPacket::decode(packet_data)?)),
         }
     }
 
@@ -72,6 +78,7 @@ impl Packet {
             Packet::IdAssignment(packet) => packet.as_gd(),
             Packet::GameState(packet) => packet.as_gd(),
             Packet::Chat(packet) => packet.as_gd(),
+            Packet::PlayerDisconnected(packet) => packet.as_gd(),
         }
     }
 }

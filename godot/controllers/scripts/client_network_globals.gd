@@ -2,8 +2,10 @@ extends Node
 
 signal handle_local_id_assignment(local_id: int)
 signal handle_remote_id_assignment(remote_id: int)
+signal handle_player_disconnected(player_id: int)
 signal handle_game_state(game_state: GdGameStatePacket)
 signal handle_chat(message: GdChatPacket)
+signal handle_disconnect_from_server()
 
 var username: String
 var id: int = -1
@@ -11,6 +13,7 @@ var remote_ids: Array[int]
 
 func _ready() -> void:
 	LowLevelNetworkHandler.on_client_packet.connect(on_client_packet)
+	LowLevelNetworkHandler.on_disconnect_from_server.connect(on_disconnect_from_server)
 
 
 func on_client_packet(data) -> void:
@@ -20,6 +23,8 @@ func on_client_packet(data) -> void:
 		handle_game_state.emit(data)
 	elif data is GdChatPacket:
 		handle_chat.emit(data)
+	elif data is GdPlayerDisconnectedPacket:
+		handle_player_disconnected.emit(data.player_id)
 	else:
 		push_error("Packet unknown type unhandled!")
 
@@ -36,3 +41,10 @@ func manage_ids(packet: GdIdAssignmentPacket) -> void:
 	else: # When id != -1, we already own an id, and just append the remote ids by the sent id
 		remote_ids.append(packet.id)
 		handle_remote_id_assignment.emit(packet.id)
+
+
+func on_disconnect_from_server() -> void:
+	print("Disconnected from server")
+	handle_disconnect_from_server.emit()
+	id = -1
+	remote_ids.clear()

@@ -199,6 +199,7 @@ impl NetworkHandler {
     fn disconnect_client(&mut self) {
         self.client = None;
         self.is_connected = false;
+        self.signals().on_disconnect_from_server().emit();
     }
 
     #[func]
