@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 game-networking-sockets = { git = "https://github.com/reecelikesramen/gns-rs.git" }
-#godot = "0.4.2"
-godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
+godot = "0.4.2"
+#godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
 num-derive = "0.4.2"
 num-traits = "0.2.19"

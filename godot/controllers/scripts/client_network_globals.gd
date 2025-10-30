@@ -3,7 +3,9 @@ extends Node
 signal handle_local_id_assignment(local_id: int)
 signal handle_remote_id_assignment(remote_id: int)
 signal handle_game_state(game_state: GdGameStatePacket)
+signal handle_chat(message: GdChatPacket)
 
+var username: String
 var id: int = -1
 var remote_ids: Array[int]
 
@@ -16,6 +18,8 @@ func on_client_packet(data) -> void:
 		manage_ids(data)
 	elif data is GdGameStatePacket:
 		handle_game_state.emit(data)
+	elif data is GdChatPacket:
+		handle_chat.emit(data)
 	else:
 		push_error("Packet unknown type unhandled!")
 

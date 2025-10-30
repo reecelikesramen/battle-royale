@@ -6,9 +6,12 @@ var props = {}
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	visible = false
+	%ScrollContainer.visible = false
+	ClientNetworkGlobals.handle_chat.connect(chat_message_added)
 	if LowLevelNetworkHandler.is_dedicated_server:
 		%ExitToMenuButton.visible = false
-	
+
+
 func _process(_delta) -> void:
 	set_debug_property("FPS", Engine.get_frames_per_second())
 
@@ -26,8 +29,25 @@ func set_debug_property(title: String, value):
 
 
 func _on_exit_to_menu_button_pressed() -> void:
+	LowLevelNetworkHandler.disconnect_client()
 	get_tree().change_scene_to_file("res://main_menu.tscn")
 
 
 func _on_quit_button_pressed() -> void:
 	get_tree().quit()
+
+
+func _on_chat_edit_text_submitted(new_text: String) -> void:
+	%ChatEdit.text = ""
+	LowLevelNetworkHandler.send_packet(GdChatPacket.create(ClientNetworkGlobals.username, new_text))
+
+
+func chat_message_added(packet: GdChatPacket):
+	%ScrollContainer.visible = true
+	var new_chat = %ChatMessagePrototype.duplicate()
+	new_chat.text = "<%s> %s" % [packet.username, packet.message]
+	new_chat.visible = true
+	print("New chat: %s" % new_chat.text)
+	%ChatVBox.add_child(new_chat)
+	%ChatVBox.move_child(new_chat, 0)
+	%ScrollContainer.custom_minimum_size.y = clamp(31 * %ChatVBox.get_children().size(), 0, 31 * 6)

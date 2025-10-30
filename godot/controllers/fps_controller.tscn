@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=14 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://dxexvk5ydnrdq" path="res://controllers/scripts/fps_controller.gd" id="1_ca8e7"]
 [ext_resource type="Material" path="res://materials/player.tres" id="1_gf80s"]
@@ -6,6 +6,7 @@
 [ext_resource type="Script" uid="uid://2j0ubpg0qevr" path="res://controllers/scripts/gui.gd" id="4_co0pi"]
 [ext_resource type="Theme" uid="uid://b28fy0uaom4ds" path="res://ui/themes/debug.tres" id="4_t6fw5"]
 [ext_resource type="Script" uid="uid://sv4ikmsp6nik" path="res://controllers/scripts/debug.gd" id="5_y677r"]
+[ext_resource type="Script" uid="uid://6f4ocj2j872t" path="res://controllers/scripts/chat_message.gd" id="7_gshig"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_74qjk"]
 
@@ -168,40 +169,68 @@ grow_vertical = 2
 mouse_filter = 1
 script = ExtResource("4_co0pi")
 
-[node name="DebugPanel" type="PanelContainer" parent="GUI"]
-custom_minimum_size = Vector2(300, 0)
+[node name="VBoxContainer" type="VBoxContainer" parent="GUI"]
 layout_mode = 0
-offset_left = 10.0
-offset_top = 10.0
-offset_right = 210.0
-offset_bottom = 50.0
+offset_left = 2.0
+offset_top = 2.0
+offset_right = 298.0
+offset_bottom = 123.0
+
+[node name="MarginContainer" type="MarginContainer" parent="GUI/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_right = 200
+
+[node name="DebugPanel" type="PanelContainer" parent="GUI/VBoxContainer/MarginContainer"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
 theme = ExtResource("4_t6fw5")
 script = ExtResource("5_y677r")
 
-[node name="MarginContainer" type="MarginContainer" parent="GUI/DebugPanel"]
+[node name="MarginContainer" type="MarginContainer" parent="GUI/VBoxContainer/MarginContainer/DebugPanel"]
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="GUI/DebugPanel/MarginContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="ChatEdit" type="LineEdit" parent="GUI/DebugPanel/MarginContainer/VBoxContainer"]
+[node name="ChatEdit" type="LineEdit" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 placeholder_text = "Press enter to send chat"
 
-[node name="ExitToMenuButton" type="Button" parent="GUI/DebugPanel/MarginContainer/VBoxContainer"]
+[node name="ExitToMenuButton" type="Button" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Exit to Menu"
 
-[node name="QuitButton" type="Button" parent="GUI/DebugPanel/MarginContainer/VBoxContainer"]
+[node name="QuitButton" type="Button" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Quit"
 
+[node name="PanelContainer" type="PanelContainer" parent="GUI/VBoxContainer"]
+custom_minimum_size = Vector2(500, 0)
+layout_mode = 2
+
+[node name="ChatMessagePrototype" type="Label" parent="GUI/VBoxContainer/PanelContainer"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "test
+"
+script = ExtResource("7_gshig")
+
+[node name="ScrollContainer" type="ScrollContainer" parent="GUI/VBoxContainer/PanelContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(500, 31)
+layout_mode = 2
+
+[node name="ChatVBox" type="VBoxContainer" parent="GUI/VBoxContainer/PanelContainer/ScrollContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+
 [connection signal="animation_started" from="AnimationPlayer" to="." method="_on_animation_player_animation_started"]
 [connection signal="collision_state_changed" from="ShapeCast3D" to="." method="_on_shape_cast_3d_collision_state_changed"]
-[connection signal="text_submitted" from="GUI/DebugPanel/MarginContainer/VBoxContainer/ChatEdit" to="GUI/DebugPanel" method="_on_line_edit_text_submitted"]
-[connection signal="pressed" from="GUI/DebugPanel/MarginContainer/VBoxContainer/ExitToMenuButton" to="GUI/DebugPanel" method="_on_exit_to_menu_button_pressed"]
-[connection signal="pressed" from="GUI/DebugPanel/MarginContainer/VBoxContainer/QuitButton" to="GUI/DebugPanel" method="_on_quit_button_pressed"]
+[connection signal="text_submitted" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ChatEdit" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_chat_edit_text_submitted"]
+[connection signal="pressed" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ExitToMenuButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_exit_to_menu_button_pressed"]
+[connection signal="pressed" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/QuitButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_quit_button_pressed"]
