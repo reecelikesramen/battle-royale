@@ -303,5 +303,3 @@ script = ExtResource("6_7mycd")
 transform = Transform3D(0.6911473, -0.5281808, 0.49329552, 1.5333317e-08, 0.68255985, 0.7308297, -0.7227139, -0.505111, 0.47174945, 10.452567, 10.135494, 10.88443)
 rotation_edit_mode = 1
 fov = 64.8
-
-[node name="ReflectionProbe" type="ReflectionProbe" parent="FallbackCamera"]

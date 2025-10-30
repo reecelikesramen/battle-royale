@@ -19,6 +19,7 @@ use std::{
 
 const DEFAULT_IP_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const DEFAULT_PORT: i64 = 45876;
+const PLAYER_COUNT: u8 = 2;
 
 /* TODO: unwrap must be banned */
 
@@ -62,7 +63,7 @@ struct NetworkHandler {
 
     /* server-side vars */
     server: Option<GnsSocket<IsServer>>,
-    available_peer_ids: Vec<i64>,
+    available_peer_ids: Vec<u8>,
     connected_clients: HashMap<GnsConnection, u8>,
 
     /* client-side vars */
@@ -93,7 +94,7 @@ impl INode for NetworkHandler {
             gns_global,
             server: None,
             last_update: Instant::now(),
-            available_peer_ids: vec![],
+            available_peer_ids: (0..PLAYER_COUNT).rev().collect(),
             connected_clients: HashMap::new(),
             client: None,
             debug_messages: debug_queue,
@@ -120,13 +121,12 @@ impl NetworkHandler {
     #[signal]
     fn on_connect_to_server();
     #[signal]
-    fn on_disconnect_from_server();
+    fn on_disconnect_from_server(end_reason: i64);
     #[signal]
     fn on_client_packet(packet: Gd<Object>);
 
     fn _start_server(&mut self, ip_address: IpAddr, port: i64) {
         self.is_server = true;
-        self.available_peer_ids = (0..100).rev().collect();
 
         // Setup debugging to log everything.
         // Use function pointer to safely queue messages from GNS thread
@@ -135,9 +135,9 @@ impl NetworkHandler {
             server_debug_callback,
         );
 
-        // // Add fake 1000ms ping to everyone connecting.
+        // Add fake 1000ms ping to everyone connecting.
         // self.gns_global.utils().set_global_config_value(
-        //     ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Recv,
+        //     ESteamNetworkingConfigValue::k,
         //     GnsConfig::Int32(1000),
         // ).unwrap_or_else(|e| {
         //     godot_print!("ERROR: Failed to set global config value: {:#?}", e);
@@ -210,7 +210,7 @@ impl NetworkHandler {
     fn disconnect_client(&mut self) {
         self.client = None;
         self.is_connected = false;
-        self.signals().on_disconnect_from_server().emit();
+        self.signals().on_disconnect_from_server().emit(1000);
     }
 
     #[func]
@@ -343,7 +343,7 @@ impl NetworkHandler {
             }
         });
 
-        let mut emit_disconnect = false;
+        let mut emit_disconnect = -1;
         let mut emit_connect = false;
         client.poll_event::<100>(|event| match (event.old_state(), event.info().state()) {
             (
@@ -362,16 +362,16 @@ impl NetworkHandler {
             (_, ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ClosedByPeer | ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ProblemDetectedLocally) => {
                 // We got disconnected or lost the connection.
                 self.queue_debug("GnsSocket<Client>: ET phone home.".to_string());
-                emit_disconnect = true;
+                emit_disconnect = event.info().end_reason() as i64;
             }
             (previous, current) => {
                 self.queue_debug(format!("GnsSocket<Client>: {:#?} => {:#?}.", previous, current));
             }
         });
 
-        if emit_disconnect {
+        if emit_disconnect != -1 {
             self.is_connected = false;
-            self.signals().on_disconnect_from_server().emit();
+            self.signals().on_disconnect_from_server().emit(emit_disconnect);
             self.client = None;
         }
 
@@ -422,8 +422,8 @@ impl NetworkHandler {
         self.gns_global.poll_callbacks();
 
         let mut packets_to_emit: Vec<(i64, Gd<Object>)> = Vec::new();
-        let mut peer_connects_to_emit: Vec<i64> = Vec::new();
-        let mut peer_disconnects_to_emit: Vec<i64> = Vec::new();
+        let mut peer_connects_to_emit: Vec<u8> = Vec::new();
+        let mut peer_disconnects_to_emit: Vec<u8> = Vec::new();
 
         // Process connections events.
         let _events_processed = server.poll_event::<100>(|event| {
@@ -435,7 +435,7 @@ impl NetworkHandler {
             ) => {
                 if self.available_peer_ids.is_empty() {
                     self.queue_debug(format!("GnsSocket<Server>: no available peer ids"));
-                    server.close_connection(event.connection(), 0, "Server is full", false);
+                    server.close_connection(event.connection(), 1001, "Server is full", false);
                 } else {
                     let result = server.accept(event.connection());
                     self.queue_debug(format!("GnsSocket<Server>: accepted new client: {:#?}.", result));
@@ -457,7 +457,7 @@ impl NetworkHandler {
                     }
                     None => {
                         self.queue_debug(format!("GnsSocket<Server>: no available peer ids, this should not happen"));
-                        server.close_connection(event.connection(), 0, "Server is full", false);
+                        server.close_connection(event.connection(), 2000, "Server is full", false);
                     },
                 }
             }
@@ -468,7 +468,7 @@ impl NetworkHandler {
               match self.connected_clients.remove(&conn) {
                 Some(peer_id) => {
                   self.queue_debug(format!("GnsSocket<Server>: {:#?} disconnected with peer id: {:#?}.", conn, peer_id));
-                  peer_disconnects_to_emit.push(peer_id.try_into().unwrap());
+                  peer_disconnects_to_emit.push(peer_id);
                 }
                 None => {
                   self.queue_debug(format!("GnsSocket<Server>: {:#?} disconnected, but not found in connected clients", conn));
@@ -476,7 +476,7 @@ impl NetworkHandler {
               }
               // Make sure we cleanup the connection, mandatory as per GNS doc.
               self.queue_debug(format!("GnsSocket<Server>: closing connection for {:#?}.", conn));
-              server.close_connection(conn, 0, "", false);
+              server.close_connection(conn, 1002, "Closing connection ended by client", false);
             }
 
             // A client state is changing, perhaps disconnecting
@@ -519,11 +519,12 @@ impl NetworkHandler {
         self.server = Some(server);
 
         for peer_id in peer_connects_to_emit {
-            self.signals().on_peer_connect().emit(peer_id);
+            self.signals().on_peer_connect().emit(peer_id as i64);
         }
 
         for peer_id in peer_disconnects_to_emit {
-            self.signals().on_peer_disconnect().emit(peer_id);
+            self.signals().on_peer_disconnect().emit(peer_id as i64);
+            self.available_peer_ids.push(peer_id);
         }
 
         for (peer_id, packet) in packets_to_emit {

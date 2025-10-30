@@ -5,15 +5,19 @@ var num_regex = RegEx.new()
 
 func _enter_tree() -> void:
 	LowLevelNetworkHandler.on_connect_to_server.connect(_on_connect_to_server)
+	ClientNetworkGlobals.handle_disconnect_from_server.connect(set_disconnected_message)
 
 func _exit_tree() -> void:
 	LowLevelNetworkHandler.on_connect_to_server.disconnect(_on_connect_to_server)
+	ClientNetworkGlobals.handle_disconnect_from_server.disconnect(set_disconnected_message)
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	if LowLevelNetworkHandler.is_dedicated_server:
 		get_tree().call_deferred("change_scene_to_file", "res://main.tscn")
 		return
+
+	set_disconnected_message()
 	
 	if OS.get_name() == "macOS":
 		get_window().content_scale_factor = 1.5
@@ -79,3 +83,12 @@ func _on_connect_to_server() -> void:
 
 func _on_full_screen_button_toggled(toggled_on: bool) -> void:
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if toggled_on else DisplayServer.WINDOW_MODE_WINDOWED)
+
+
+func set_disconnected_message() -> void:
+	if !ClientNetworkGlobals._disconnected_message.is_empty():
+		$VBoxContainer/DisconnectedLabel.text = ClientNetworkGlobals._disconnected_message
+		ClientNetworkGlobals._disconnected_message = ""
+		$VBoxContainer/DisconnectedLabel.visible = true
+	else:
+		$VBoxContainer/DisconnectedLabel.visible = false

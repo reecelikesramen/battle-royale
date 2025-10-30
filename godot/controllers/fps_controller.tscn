@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=15 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://dxexvk5ydnrdq" path="res://controllers/scripts/fps_controller.gd" id="1_ca8e7"]
 [ext_resource type="Material" path="res://materials/player.tres" id="1_gf80s"]
@@ -14,6 +14,10 @@ resource_local_to_scene = true
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_gf80s"]
 resource_local_to_scene = true
 material = ExtResource("1_gf80s")
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_gshig"]
+top_radius = 0.02
+bottom_radius = 0.02
 
 [sub_resource type="Animation" id="Animation_ca8e7"]
 resource_name = "Crouch"
@@ -145,6 +149,10 @@ unique_name_in_owner = true
 
 [node name="ReflectionProbe" type="ReflectionProbe" parent="CameraController/Camera3D"]
 update_mode = 1
+
+[node name="LineOfSightMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+mesh = SubResource("CylinderMesh_gshig")
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="."]
 libraries = {

@@ -98,18 +98,6 @@ pub(crate) fn convert_to_wire<G, W>(v: &G) -> W where G: ToWire<W> { <G as ToWir
 #[inline]
 pub(crate) fn convert_to_godot<W, G>(v: &W) -> G where W: ToGodot<G> { <W as ToGodot<G>>::to_godot(v) }
 
-macro_rules! define_packet_wire_ty_default {
-    (Vector3) => {
-        [f32; 3]
-    };
-    (Vector2) => {
-        [f32; 2]
-    };
-    ($ty:ty) => {
-        $ty
-    };
-}
-
 macro_rules! define_packet_field_wire_ty {
     ($godot_ty:ty, $wire_ty:ty) => { $wire_ty };
     (Vector3) => { [f32; 3] };
@@ -123,21 +111,6 @@ macro_rules! define_packet_field_default {
     };
     ($godot_ty:ty) => {
         <$godot_ty as Default>::default()
-    };
-}
-
-macro_rules! define_packet_to_wire_default {
-    ($value:expr, Vector3, [f32; 3]) => {
-        [$value.x, $value.y, $value.z]
-    };
-    ($value:expr, Vector2, [f32; 2]) => {
-        [$value.x, $value.y]
-    };
-    ($value:expr, i64, u8) => {
-        u8::try_from($value).unwrap_or_else(|_| panic!("i64 value out of range for u8: {}", $value))
-    };
-    ($value:expr, $godot_ty:ty, $wire_ty:ty) => {
-        $value.clone()
     };
 }
 
@@ -159,21 +132,6 @@ macro_rules! define_packet_field_to_wire {
     };
     ($value:expr, $godot_ty:ty) => {
         crate::packet::macros::convert_to_wire::<$godot_ty, $godot_ty>(&$value)
-    };
-}
-
-macro_rules! define_packet_to_gd_default {
-    ($value:expr, Vector3, [f32; 3]) => {
-        Vector3::new($value[0], $value[1], $value[2])
-    };
-    ($value:expr, Vector2, [f32; 2]) => {
-        Vector2::new($value[0], $value[1])
-    };
-    ($value:expr, i64, u8) => {
-        i64::from($value)
-    };
-    ($value:expr, $godot_ty:ty, $wire_ty:ty) => {
-        $value.clone()
     };
 }
 
