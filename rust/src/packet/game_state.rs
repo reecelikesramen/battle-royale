@@ -14,8 +14,11 @@ define_packet! {
         player_position: {
             godot: Vector3,
         },
-        player_sight_direction: {
-            godot: Vector3,
+        camera_rotation: {
+            godot: f32,
+        },
+        player_rotation: {
+            godot: f32,
         },
         is_crouching: {
             godot: bool,

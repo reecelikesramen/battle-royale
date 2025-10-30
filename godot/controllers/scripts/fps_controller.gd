@@ -146,7 +146,7 @@ func _physics_process(delta: float) -> void:
 	
 	move_and_slide()
 	
-	LowLevelNetworkHandler.send_packet(GameStatePacket.create(_owner_id, position, get_sightline_unit_vector(), _is_crouching))
+	LowLevelNetworkHandler.send_packet(GameStatePacket.create(_owner_id, position, _camera_rotation.x, _player_rotation.y, _is_crouching))
 
 
 func crouch(state: bool):
@@ -182,29 +182,16 @@ func get_sightline_unit_vector() -> Vector3:
 	return sightline_vector
 
 
-func _update_line_of_sight_mesh(direction: Vector3) -> void:
-	if direction == Vector3.ZERO: return
-	if !is_instance_valid(line_of_sight_mesh): return
-	# Orient so that -Z faces the sight direction, then rotate -90° around X to convert a Y-up mesh to forward-facing
-	var facing: Basis = Basis.looking_at(direction, Vector3.UP)
-	var y_up_to_forward: Basis = Basis(Vector3.RIGHT, -PI / 2.0)
-	line_of_sight_mesh.transform.basis = facing * y_up_to_forward
-
-	# Move the mesh forward relative to its new facing direction
-	# -line_of_sight_mesh.transform.basis.z gives the current forward direction vector.
-	#var forward_vector: Vector3 = -line_of_sight_mesh.transform.basis.z
-	#var move_distance: float = 0.1 # Adjust this value as needed for the desired distance
-
-	#line_of_sight_mesh.transform.origin += forward_vector * move_distance
-
-
 func server_handle_game_state(peer_id: int, game_state: GameStatePacket) -> void:
 	if _owner_id != peer_id:
 		return
 
 	global_position = game_state.player_position
 	set_crouch(game_state.is_crouching)
-	_update_line_of_sight_mesh(game_state.player_sight_direction)
+	camera.transform.basis = Basis.from_euler(Vector3(game_state.camera_rotation, 0, 0))
+	camera.rotation.z = 0
+	
+	global_transform.basis = Basis.from_euler(Vector3(0, game_state.player_rotation, 0))
 	LowLevelNetworkHandler.broadcast_packet(game_state.to_payload())
 
 
@@ -213,7 +200,10 @@ func client_handle_game_state(game_state: GameStatePacket) -> void:
 
 	global_position = game_state.player_position
 	set_crouch(game_state.is_crouching)
-	_update_line_of_sight_mesh(game_state.player_sight_direction)
+	camera.transform.basis = Basis.from_euler(Vector3(game_state.camera_rotation, 0, 0))
+	camera.rotation.z = 0
+	
+	global_transform.basis = Basis.from_euler(Vector3(0, game_state.player_rotation, 0))
 
 
 func _on_animation_player_animation_started(anim_name: StringName) -> void:

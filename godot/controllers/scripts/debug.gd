@@ -2,6 +2,7 @@ extends PanelContainer
 
 @onready var property_container = %VBoxContainer
 var props = {}
+@onready var chat_hide_timer: Timer = null
 
 func _enter_tree() -> void:
 	ClientNetworkGlobals.handle_chat.connect(chat_message_added)
@@ -18,6 +19,13 @@ func _ready() -> void:
 	if LowLevelNetworkHandler.is_dedicated_server:
 		%ExitToMenuButton.visible = false
 
+	# Timer to auto-hide chat when debug overlay is off
+	chat_hide_timer = Timer.new()
+	chat_hide_timer.one_shot = true
+	chat_hide_timer.wait_time = 5.0
+	add_child(chat_hide_timer)
+	chat_hide_timer.timeout.connect(_on_chat_hide_timeout)
+
 
 func _process(_delta) -> void:
 	set_debug_property("FPS", Engine.get_frames_per_second())
@@ -26,6 +34,14 @@ func _process(_delta) -> void:
 func _input(event):
 	if event.is_action_pressed("debug"):
 		visible = !visible
+		if visible:
+			# When debug is on, keep chat always visible
+			_show_chat()
+			if chat_hide_timer:
+				chat_hide_timer.stop()
+		else:
+			# When debug is off, schedule auto-hide
+			_schedule_chat_hide()
 
 
 func set_debug_property(title: String, value):
@@ -59,3 +75,30 @@ func chat_message_added(packet: ChatPacket):
 	%ChatVBox.add_child(new_chat)
 	%ChatVBox.move_child(new_chat, 0)
 	%ScrollContainer.custom_minimum_size.y = clamp(31 * %ChatVBox.get_children().size(), 0, 31 * 6)
+
+	# Show chat (and fade in if animation exists), then schedule hide if debug is off
+	_show_chat()
+	_schedule_chat_hide()
+
+
+func _show_chat() -> void:
+	%ScrollContainer.visible = true
+
+
+func _schedule_chat_hide() -> void:
+	# Only auto-hide when debug overlay is off
+	if visible:
+		return
+	if chat_hide_timer:
+		chat_hide_timer.start(5.0)
+
+
+func _on_chat_hide_timeout() -> void:
+	# If debug got enabled meanwhile, do nothing
+	if visible:
+		return
+	%ScrollContainer.visible = false
+
+
+func _on_repeat_actions_button_toggled(toggled_on: bool) -> void:
+	pass # Replace with function body.
