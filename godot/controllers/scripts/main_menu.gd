@@ -12,7 +12,7 @@ func _exit_tree() -> void:
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	if LowLevelNetworkHandler.is_dedicated_server:
-		get_tree().change_scene_to_file("res://main.tscn")
+		get_tree().call_deferred("change_scene_to_file", "res://main.tscn")
 		return
 	
 	if OS.get_name() == "macOS":

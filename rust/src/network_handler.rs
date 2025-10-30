@@ -201,6 +201,12 @@ impl NetworkHandler {
         self.is_connected = false;
     }
 
+    #[func]
+    fn destroy_server(&mut self) {
+        self.server = None;
+        self.is_connected = false;
+    }
+
     fn _send_packet(&self, packet: &Packet) {
         if self.is_server {
             return;

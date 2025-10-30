@@ -8,9 +8,16 @@ func _ready() -> void:
 	print("I'm a server" if is_dedicated_server else "I'm a client")
 	if is_dedicated_server:
 		start_server_default()
-	pass # Replace with function body.
 
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(delta: float) -> void:
 	pass
+
+
+func _notification(what):
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		if is_server:
+			destroy_server()
+		else:
+			disconnect_client()

@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 env:
-  GODOT_VERSION: "4.3"
-  GODOT_EXPORT_TEMPLATES_VERSION: "4.3.stable"
+  GODOT_VERSION: "4.5"
+  GODOT_EXPORT_TEMPLATES_VERSION: "4.5.stable"
 
 jobs:
   build-rust:
@@ -174,7 +174,7 @@ jobs:
     
     runs-on: ubuntu-24.04
     container:
-      image: barichello/godot-ci:4.3
+      image: barichello/godot-ci:4.5
     
     steps:
     - name: Checkout code
@@ -198,7 +198,8 @@ jobs:
     - name: Verify and organize Rust library
       run: |
         # Ensure the library exists and is in the correct location for GDExtension
-        # The GDExtension file expects: res://../rust/target/release/{lib}
+        # The GDExtension file uses: res://../rust/target/release/{lib}
+        # This matches the repo structure: godot/HelloWorld.gdextension -> ../rust/target/release/
         mkdir -p rust/target/release
         
         # Find the downloaded library (it might be in a subdirectory from the artifact)
@@ -212,20 +213,94 @@ jobs:
           exit 1
         fi
         
+        echo "Library in repo structure: rust/target/release/"
         ls -la rust/target/release/
       
-    - name: Update macOS export preset for ARM64
+    - name: Show directory structure
+      run: |
+        # Show directory structure to verify repo layout
+        # Install tree if not available, or use find as fallback
+        if command -v tree &> /dev/null; then
+          echo "=== Directory structure (tree) ==="
+          tree -L 3 -l rust/ godot/ || tree -L 3 rust/ godot/
+        else
+          echo "=== Directory structure (find) ==="
+          echo "rust/"
+          find rust -maxdepth 3 -type f -o -type d | head -20
+          echo ""
+          echo "godot/"
+          find godot -maxdepth 3 -type f -o -type d | head -20
+        fi
+        echo ""
+        echo "=== Rust library location ==="
+        ls -la rust/target/release/ || echo "rust/target/release/ not found"
+        echo ""
+        echo "=== GDExtension file ==="
+        cat godot/HelloWorld.gdextension || echo "HelloWorld.gdextension not found"
+      
+    - name: Check macOS templates and update preset
       if: matrix.platform == 'macos'
       run: |
-        # Update export preset to ARM64 only
-        sed -i 's|binary_format/architecture="universal"|binary_format/architecture="arm64"|g' godot/export_presets.cfg
+        # Check what macOS templates are available
+        echo "Checking available export templates..."
+        TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_EXPORT_TEMPLATES_VERSION}/macos.app_template/Contents/MacOS/"
+        if [ -d "$TEMPLATE_DIR" ]; then
+          ls -la "$TEMPLATE_DIR" || true
+          # Check if arm64 binary exists
+          if ls "$TEMPLATE_DIR"/godot_macos*arm64* 1> /dev/null 2>&1; then
+            echo "ARM64 template found, keeping architecture as arm64"
+            # Don't change, export preset should work
+          else
+            echo "ARM64 template not found, using universal"
+            # Change to universal which should include arm64
+            sed -i 's|binary_format/architecture="arm64"|binary_format/architecture="universal"|g' godot/export_presets.cfg || true
+          fi
+        fi
       
     - name: Build
       run: |
+        # Run export from inside godot/ directory to match repo structure
+        # The GDExtension file uses res://../rust/target/release/ which is correct from godot/
         EXPORT_DIR="$(readlink -f build)"
         mkdir -v -p build
         cd godot
-        godot --headless --verbose --export-release "${{ matrix.preset }}" "$EXPORT_DIR/${{ matrix.output }}"
+        godot --headless --verbose --export-release "${{ matrix.preset }}" "../$EXPORT_DIR/${{ matrix.output }}"
+      
+    - name: Copy GDExtension libraries to export
+      run: |
+        # Copy libraries to export location so they're available at runtime
+        # The exported game will look for libraries using the paths in GDExtension file
+        # We're in repo root, and rust libraries are in rust/target/release/
+        EXPORT_DIR="$(readlink -f build)"
+        OUTPUT_FILE="$EXPORT_DIR/${{ matrix.output }}"
+        
+        # Determine where to copy the library based on platform
+        if [ "${{ matrix.platform }}" = "linux" ]; then
+          # For Linux, copy next to the executable
+          cp "rust/target/release/${{ matrix.rust-lib }}" "$(dirname "$OUTPUT_FILE")/"
+        elif [ "${{ matrix.platform }}" = "windows" ]; then
+          # For Windows, copy next to the executable
+          cp "rust/target/release/${{ matrix.rust-lib }}" "$(dirname "$OUTPUT_FILE")/"
+        elif [ "${{ matrix.platform }}" = "macos" ]; then
+          # For macOS .app bundles, copy into Contents/MacOS/
+          if [ -d "$OUTPUT_FILE/Contents/MacOS" ]; then
+            cp "rust/target/release/${{ matrix.rust-lib }}" "$OUTPUT_FILE/Contents/MacOS/"
+          elif [ -f "$OUTPUT_FILE" ]; then
+            # If it's a zip file, we need to extract, copy, and re-zip
+            TEMP_DIR=$(mktemp -d)
+            unzip -q "$OUTPUT_FILE" -d "$TEMP_DIR"
+            APP_NAME=$(basename "$OUTPUT_FILE" .zip)
+            if [ -d "$TEMP_DIR/$APP_NAME.app/Contents/MacOS" ]; then
+              cp "rust/target/release/${{ matrix.rust-lib }}" "$TEMP_DIR/$APP_NAME.app/Contents/MacOS/"
+              cd "$TEMP_DIR"
+              zip -r -q "$OUTPUT_FILE" "$APP_NAME.app"
+            fi
+            rm -rf "$TEMP_DIR"
+          fi
+        fi
+        
+        echo "Library copied to export location"
+        ls -la "$(dirname "$OUTPUT_FILE")/" || ls -la "$OUTPUT_FILE/Contents/MacOS/" || true
       
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
