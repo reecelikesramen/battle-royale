@@ -9,11 +9,13 @@ use std::io::{Error, ErrorKind, Result};
 pub(crate) enum PacketId {
     IdAssignment,
     GameState,
+    Chat,
 }
 
 pub(crate) enum Packet {
     IdAssignment(IdAssignmentPacket),
     GameState(GameStatePacket),
+    Chat(ChatPacket),
 }
 
 impl Packet {
@@ -21,6 +23,7 @@ impl Packet {
         match self {
             Packet::IdAssignment(_) => PacketId::IdAssignment,
             Packet::GameState(_) => PacketId::GameState,
+            Packet::Chat(_) => PacketId::Chat,
         }
     }
 
@@ -28,6 +31,7 @@ impl Packet {
         match self {
             Packet::IdAssignment(_) => IdAssignmentPacket::IS_RELIABLE,
             Packet::GameState(_) => GameStatePacket::IS_RELIABLE,
+            Packet::Chat(_) => ChatPacket::IS_RELIABLE,
         }
     }
 
@@ -36,6 +40,7 @@ impl Packet {
         bytes.extend(match self {
             Packet::IdAssignment(packet) => packet.encode(),
             Packet::GameState(packet) => packet.encode(),
+            Packet::Chat(packet) => packet.encode(),
         });
         bytes
     }
@@ -58,6 +63,7 @@ impl Packet {
                 packet_data,
             )?)),
             PacketId::GameState => Ok(Packet::GameState(GameStatePacket::decode(packet_data)?)),
+            PacketId::Chat => Ok(Packet::Chat(ChatPacket::decode(packet_data)?)),
         }
     }
 
@@ -65,6 +71,7 @@ impl Packet {
         match self {
             Packet::IdAssignment(packet) => packet.as_gd(),
             Packet::GameState(packet) => packet.as_gd(),
+            Packet::Chat(packet) => packet.as_gd(),
         }
     }
 }
