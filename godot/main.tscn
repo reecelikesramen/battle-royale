@@ -1,10 +1,9 @@
-[gd_scene load_steps=23 format=3 uid="uid://j7crtp8h0nc8"]
+[gd_scene load_steps=22 format=3 uid="uid://j7crtp8h0nc8"]
 
 [ext_resource type="Environment" uid="uid://b8030pxcma3ij" path="res://environment/WE_test.tres" id="1_0xm2m"]
 [ext_resource type="Material" uid="uid://coj2xaqc2thxc" path="res://materials/grid.tres" id="2_h2yge"]
 [ext_resource type="Shader" uid="uid://dvq3trjwd367g" path="res://shaders/grid.gdshader" id="3_1bvp3"]
 [ext_resource type="Texture2D" uid="uid://cewyuaqy0fesh" path="res://textures/grid.jpg" id="4_lquwl"]
-[ext_resource type="Script" uid="uid://belcple6tsclf" path="res://controllers/scripts/ui_connect.gd" id="5_lquwl"]
 [ext_resource type="Script" uid="uid://172t455bnixi" path="res://controllers/scripts/low_level_player_spawner.gd" id="6_7mycd"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_1bvp3"]
@@ -297,28 +296,6 @@ shaded = true
 text = "Crouch"
 font_size = 128
 
-[node name="Control" type="Control" parent="."]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("5_lquwl")
-
-[node name="PanelContainer" type="PanelContainer" parent="Control"]
-layout_mode = 0
-offset_right = 40.0
-offset_bottom = 40.0
-
-[node name="VBoxContainer" type="VBoxContainer" parent="Control/PanelContainer"]
-layout_mode = 2
-
-[node name="Button" type="Button" parent="Control/PanelContainer/VBoxContainer"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Connect"
-
 [node name="PlayerSpawner" type="Node" parent="."]
 script = ExtResource("6_7mycd")
 
@@ -326,3 +303,5 @@ script = ExtResource("6_7mycd")
 transform = Transform3D(0.6911473, -0.5281808, 0.49329552, 1.5333317e-08, 0.68255985, 0.7308297, -0.7227139, -0.505111, 0.47174945, 10.452567, 10.135494, 10.88443)
 rotation_edit_mode = 1
 fov = 64.8
+
+[node name="ReflectionProbe" type="ReflectionProbe" parent="FallbackCamera"]

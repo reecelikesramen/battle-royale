@@ -1,12 +1,12 @@
 extends NetworkHandler
 
-func isServer() -> bool:
-	return "--server" in OS.get_cmdline_user_args() or DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")
+var is_dedicated_server: bool:
+	get: return "--server" in OS.get_cmdline_user_args() or DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	print("I'm a server" if isServer() else "I'm a client")
-	if isServer():
+	print("I'm a server" if is_dedicated_server else "I'm a client")
+	if is_dedicated_server:
 		start_server_default()
 	pass # Replace with function body.
 

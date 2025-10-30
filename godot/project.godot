@@ -11,13 +11,13 @@ config_version=5
 [application]
 
 config/name="New Game Project"
-run/main_scene="uid://j7crtp8h0nc8"
+run/main_scene="uid://cnyy535rmpioo"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
 
 [autoload]
 
-LowLevelNetworkHandler="*res://main.gd"
+LowLevelNetworkHandler="*res://low_level_network_handler.gd"
 ClientNetworkGlobals="*res://controllers/scripts/client_network_globals.gd"
 ServerNetworkGlobals="*res://controllers/scripts/server_network_globals.gd"
 

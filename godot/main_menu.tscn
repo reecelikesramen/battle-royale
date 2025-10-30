@@ -1,0 +1,55 @@
+[gd_scene load_steps=3 format=3 uid="uid://cnyy535rmpioo"]
+
+[ext_resource type="Theme" uid="uid://rai2e421dmte" path="res://ui/themes/main-menu.tres" id="1_7vrkn"]
+[ext_resource type="Script" uid="uid://duc4w5l74gup" path="res://controllers/scripts/main_menu.gd" id="2_fu7sn"]
+
+[node name="CenterContainer" type="CenterContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+theme = ExtResource("1_7vrkn")
+script = ExtResource("2_fu7sn")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelContainer"]
+layout_mode = 2
+
+[node name="Header" type="Label" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "Reece's Game"
+horizontal_alignment = 1
+
+[node name="IPAddressEdit" type="LineEdit" parent="PanelContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "IP Address <localhost>"
+
+[node name="PortEdit" type="LineEdit" parent="PanelContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Port <45876>"
+
+[node name="ConnectButton" type="Button" parent="PanelContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Connect"
+
+[node name="FullScreenButton" type="Button" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+toggle_mode = true
+text = "Toggle Fullscreen
+"
+
+[node name="QuitButton" type="Button" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "Quit"
+
+[connection signal="text_changed" from="PanelContainer/VBoxContainer/IPAddressEdit" to="PanelContainer" method="_on_ip_address_text_changed"]
+[connection signal="text_changed" from="PanelContainer/VBoxContainer/PortEdit" to="PanelContainer" method="_on_port_text_changed"]
+[connection signal="pressed" from="PanelContainer/VBoxContainer/ConnectButton" to="PanelContainer" method="_on_connect_button_pressed"]
+[connection signal="pressed" from="PanelContainer/VBoxContainer/QuitButton" to="PanelContainer" method="_on_quit_button_pressed"]

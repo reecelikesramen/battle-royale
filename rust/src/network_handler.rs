@@ -7,7 +7,7 @@ use godot::classes::Node;
 use godot::classes::INode;
 use crate::packet::prelude::*;
 
-const DEFAULT_IP_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+const DEFAULT_IP_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const DEFAULT_PORT: i64 = 45876;
 
 /* TODO: unwrap must be banned */
@@ -177,6 +177,7 @@ impl NetworkHandler {
 
     #[func]
     fn start_client(&mut self, ip_address: String, port: i64) {
+        godot_print!("Starting client to {}:{}", ip_address, port);
         let addr = ip_address.parse().unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to parse IP address '{}': {}", ip_address, e);
             panic!("Invalid IP address");
@@ -192,6 +193,12 @@ impl NetworkHandler {
     #[func]
     fn start_client_default(&mut self) {
         self._start_client(DEFAULT_IP_ADDRESS, DEFAULT_PORT);
+    }
+
+    #[func]
+    fn disconnect_client(&mut self) {
+        self.client = None;
+        self.is_connected = false;
     }
 
     fn _send_packet(&self, packet: &Packet) {

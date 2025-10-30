@@ -3,7 +3,7 @@ extends Control
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	if LowLevelNetworkHandler.isServer():
+	if LowLevelNetworkHandler.is_dedicated_server:
 		visible = false
 	else:
 		visible = true

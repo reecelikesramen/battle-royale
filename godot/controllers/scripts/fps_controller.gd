@@ -39,7 +39,7 @@ var _is_crouching: bool = false
 var _do_uncrouch: bool = false
 
 func _input(event):
-	if event.is_action_pressed("exit"):
+	if event.is_action_pressed("exit") and Engine.is_editor_hint():
 		get_tree().quit()
 	if event.is_action_pressed("crouch") and TOGGLE_CROUCH:
 		toggle_crouch()
@@ -49,7 +49,7 @@ func _input(event):
 		crouch(false)
 
 func _ready():
-	if !LowLevelNetworkHandler.isServer():
+	if !LowLevelNetworkHandler.is_dedicated_server:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	#CROUCH_SHAPECAST.add_excep
 	

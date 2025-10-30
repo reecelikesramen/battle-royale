@@ -1,0 +1,316 @@
+name: Build All Platforms
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"
+  GODOT_EXPORT_TEMPLATES_VERSION: "4.3.stable"
+
+jobs:
+  build-rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact-name: rust-macos-arm64
+            library-name: librust.dylib
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact-name: rust-linux-x86_64
+            library-name: librust.so
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact-name: rust-windows-x86_64
+            library-name: rust.dll
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+      
+    - name: Cache Cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+      
+    - name: Cache Cargo target directory
+      uses: actions/cache@v4
+      with:
+        path: rust/target
+        key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.target }}-cargo-target-
+      
+    - name: Build Rust release
+      working-directory: rust
+      env:
+        GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg-buildtrees' || '' }}
+      run: |
+        cargo build --release --target ${{ matrix.target }}
+      
+    - name: Upload Rust library
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact-name }}
+        path: |
+          rust/target/${{ matrix.target }}/release/${{ matrix.library-name }}
+        retention-days: 7
+
+  build-godot:
+    needs: build-rust
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            runner: macos-14
+          - os: ubuntu-latest
+            runner: ubuntu-latest
+          - os: windows-latest
+            runner: windows-latest
+    
+    runs-on: ${{ matrix.runner }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download Godot (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        if [ "${{ matrix.os }}" = "macos-latest" ]; then
+          curl -L -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
+          unzip -q godot.zip
+          chmod +x Godot.app/Contents/MacOS/Godot
+          echo "GODOT_PATH=./Godot.app/Contents/MacOS/Godot" >> $GITHUB_ENV
+        else
+          curl -L -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip -d godot
+          chmod +x godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64
+          echo "GODOT_PATH=./godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" >> $GITHUB_ENV
+        fi
+      
+    - name: Download Godot (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/${env:GODOT_VERSION}/Godot_v${env:GODOT_VERSION}-stable_win64.exe.zip" -OutFile "godot.zip"
+        Expand-Archive -Path godot.zip -DestinationPath godot -Force
+        $env:GODOT_PATH = ".\godot\Godot_v${env:GODOT_VERSION}-stable_win64.exe"
+        echo "GODOT_PATH=$env:GODOT_PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
+      
+    - name: Cache export templates (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.HOME }}/.local/share/godot/export_templates
+        key: linux-godot-templates-${{ env.GODOT_EXPORT_TEMPLATES_VERSION }}
+        restore-keys: |
+          linux-godot-templates-
+      
+    - name: Cache export templates (macOS)
+      if: matrix.os == 'macos-latest'
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.HOME }}/Library/Application Support/Godot/export_templates
+        key: macos-godot-templates-${{ env.GODOT_EXPORT_TEMPLATES_VERSION }}
+        restore-keys: |
+          macos-godot-templates-
+      
+    - name: Install export templates (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        TEMPLATES_DIR="$HOME/.local/share/godot/export_templates/${GODOT_EXPORT_TEMPLATES_VERSION}"
+        if [ ! -d "$TEMPLATES_DIR" ] || [ -z "$(ls -A $TEMPLATES_DIR 2>/dev/null)" ]; then
+          mkdir -p "$TEMPLATES_DIR"
+          curl -L -o templates.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q -o templates.tpz -d "$TEMPLATES_DIR"
+        fi
+      
+    - name: Install export templates (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        TEMPLATES_DIR="$HOME/Library/Application Support/Godot/export_templates/${GODOT_EXPORT_TEMPLATES_VERSION}"
+        if [ ! -d "$TEMPLATES_DIR" ] || [ -z "$(ls -A "$TEMPLATES_DIR" 2>/dev/null)" ]; then
+          mkdir -p "$TEMPLATES_DIR"
+          curl -L -o templates.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q -o templates.tpz -d "$TEMPLATES_DIR"
+        fi
+      
+    - name: Cache export templates (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.APPDATA }}\Godot\export_templates
+        key: windows-godot-templates-${{ env.GODOT_EXPORT_TEMPLATES_VERSION }}
+        restore-keys: |
+          windows-godot-templates-
+      
+    - name: Install export templates (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        $TEMPLATES_DIR = "$env:APPDATA\Godot\export_templates\${env:GODOT_EXPORT_TEMPLATES_VERSION}"
+        if (!(Test-Path $TEMPLATES_DIR) -or !(Get-ChildItem $TEMPLATES_DIR -ErrorAction SilentlyContinue)) {
+          New-Item -ItemType Directory -Force -Path $TEMPLATES_DIR | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/${env:GODOT_VERSION}/Godot_v${env:GODOT_VERSION}-stable_export_templates.tpz" -OutFile "templates.tpz"
+          Expand-Archive -Path templates.tpz -DestinationPath $TEMPLATES_DIR -Force
+        }
+      
+    - name: Download Rust library
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ matrix.os == 'macos-latest' && 'rust-macos-arm64' || matrix.os == 'ubuntu-latest' && 'rust-linux-x86_64' || 'rust-windows-x86_64' }}
+        path: rust/target/release
+      
+    - name: Verify Rust library (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        if [ "${{ matrix.os }}" = "macos-latest" ]; then
+          if [ ! -f "rust/target/release/librust.dylib" ]; then
+            echo "Error: librust.dylib not found"
+            ls -la rust/target/release/
+            exit 1
+          fi
+        else
+          if [ ! -f "rust/target/release/librust.so" ]; then
+            echo "Error: librust.so not found"
+            ls -la rust/target/release/
+            exit 1
+          fi
+        fi
+      
+    - name: Verify Rust library (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        if (!(Test-Path "rust\target\release\rust.dll")) {
+          Write-Error "Error: rust.dll not found"
+          Get-ChildItem -Path "rust\target\release\" -Recurse
+          exit 1
+        }
+      
+    - name: Export macOS presets
+      if: matrix.os == 'macos-latest'
+      env:
+        GODOT_PATH: ${{ env.GODOT_PATH }}
+      run: |
+        PROJECT_PATH="$(pwd)/godot"
+        # Update export preset to ARM64 only temporarily (macOS uses BSD sed)
+        sed -i '' 's|binary_format/architecture="universal"|binary_format/architecture="arm64"|g' "$PROJECT_PATH/export_presets.cfg" || sed -i.bak 's|binary_format/architecture="universal"|binary_format/architecture="arm64"|g' "$PROJECT_PATH/export_presets.cfg"
+        "$GODOT_PATH" --path "$PROJECT_PATH" --export-release "macOS" "game-macos-arm64.app"
+        "$GODOT_PATH" --path "$PROJECT_PATH" --export-release "macOS Dedicated Server" "server-macos-arm64.app"
+      
+    - name: Export Linux preset
+      if: matrix.os == 'ubuntu-latest'
+      env:
+        GODOT_PATH: ${{ env.GODOT_PATH }}
+      run: |
+        PROJECT_PATH="$(pwd)/godot"
+        "$GODOT_PATH" --path "$PROJECT_PATH" --export-release "Linux" "game-linux-x86_64.x86_64"
+        "$GODOT_PATH" --path "$PROJECT_PATH" --export-release "Linux Dedicated Server" "server-linux-x86_64.x86_64"
+      
+    - name: Export Windows presets
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      env:
+        GODOT_PATH: ${{ env.GODOT_PATH }}
+      run: |
+        $PROJECT_PATH = "$PWD\godot"
+        & $env:GODOT_PATH --path $PROJECT_PATH --export-release "Windows" "game-windows-x86_64.exe"
+        & $env:GODOT_PATH --path $PROJECT_PATH --export-release "Windows Dedicated Server" "server-windows-x86_64.exe"
+      
+    - name: Upload Godot builds
+      uses: actions/upload-artifact@v4
+      with:
+        name: godot-${{ matrix.os }}
+        path: |
+          game-*.app
+          game-*.exe
+          game-*.x86_64
+          server-*.app
+          server-*.exe
+          server-*.x86_64
+        if-no-files-found: error
+        retention-days: 7
+
+  release:
+    needs: [build-rust, build-godot]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all Godot artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: release-artifacts
+        pattern: godot-*
+        merge-multiple: false
+      
+    - name: Extract and organize artifacts
+      run: |
+        mkdir -p release
+        for dir in release-artifacts/*/; do
+          if [ -d "$dir" ]; then
+            cp -r "$dir"* release/ 2>/dev/null || true
+          fi
+        done
+        ls -la release/
+      
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << EOF
+        ## Downloads
+        
+        ### macOS (ARM64)
+        - **game-macos-arm64.app** - Game application
+        - **server-macos-arm64.app** - Dedicated server
+        
+        ### Linux (x86_64)
+        - **game-linux-x86_64.x86_64** - Game application  
+        - **server-linux-x86_64.x86_64** - Dedicated server
+        
+        ### Windows (x86_64)
+        - **game-windows-x86_64.exe** - Game application
+        - **server-windows-x86_64.exe** - Dedicated server
+        EOF
+        echo "notes<<EOF" >> $GITHUB_OUTPUT
+        cat release_notes.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/**/*
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+

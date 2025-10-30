@@ -6,9 +6,8 @@ var props = {}
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	visible = false
-	if LowLevelNetworkHandler.isServer():
-		%Button.visible = false
-		%LineEdit.visible = false
+	if LowLevelNetworkHandler.is_dedicated_server:
+		%ExitToMenuButton.visible = false
 	
 func _process(_delta) -> void:
 	set_debug_property("FPS", Engine.get_frames_per_second())
@@ -26,13 +25,9 @@ func set_debug_property(title: String, value):
 	property.text = "%s: %s" % [title, value]
 
 
-func _on_connect_pressed() -> void:
-	print("Connect pressed")
-	if LowLevelNetworkHandler.isServer():
-		return
-	if !LowLevelNetworkHandler.is_connected:
-		LowLevelNetworkHandler.start_client_default()
-		print("Client started")
+func _on_exit_to_menu_button_pressed() -> void:
+	get_tree().change_scene_to_file("res://main_menu.tscn")
 
 
-#func _on_lin1Handler.test_submit_user_input(new_text)
+func _on_quit_button_pressed() -> void:
+	get_tree().quit()
