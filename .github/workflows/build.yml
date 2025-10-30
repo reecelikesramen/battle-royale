@@ -57,9 +57,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: rust/target
-        key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-v2-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-${{ matrix.target }}-cargo-target-
+          ${{ runner.os }}-${{ matrix.target }}-cargo-target-v2-
       
     # - name: Cache protobuf (Linux)
     #   if: matrix.os == 'ubuntu-latest'
@@ -76,7 +76,6 @@ jobs:
     - name: Install dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        sudo rm -rf /usr/local/lib/libprotobuf* /usr/local/include/google/protobuf || true
         sudo apt-get update
         sudo apt-get install -y protobuf-compiler libprotobuf-dev pkg-config libssl-dev
 
