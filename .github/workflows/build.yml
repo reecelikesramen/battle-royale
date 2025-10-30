@@ -77,36 +77,20 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential cmake pkg-config libssl-dev
-        
-        # Install protobuf 21 from source if not cached (must use -fPIC for shared library linking)
-        if [ ! -f "/usr/local/lib/libprotobuf.a" ]; then
-          cd /tmp
-          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protobuf-all-21.12.tar.gz
-          tar -xzf protobuf-all-21.12.tar.gz
-          cd protobuf-21.12
-          # CXXFLAGS=-fPIC is required for linking static lib into shared library (.so)
-          CXXFLAGS="-fPIC" ./configure --prefix=/usr/local --enable-static=yes --enable-shared=no
-          make -j$(nproc)
-          sudo make install
-          sudo ldconfig
-        fi
-        
-        # Set PKG_CONFIG_PATH for static linking
-        echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-    
+        sudo apt-get install -y protobuf-compiler libprotobuf-dev pkg-config libssl-dev
+
     - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
       run: |
-        brew install openssl@3 protobuf@21 pkg-config
+        brew install openssl protobuf@21 pkg-config
+        brew unlink protobuf@21 && brew link --force protobuf@21
         # protobuf@21 is keg-only, need to set paths explicitly
-        export PROTOBUF_PREFIX=$(brew --prefix protobuf@21)
-        export OPENSSL_PREFIX=$(brew --prefix openssl@3)
-        echo "PKG_CONFIG_PATH=$OPENSSL_PREFIX/lib/pkgconfig:$PROTOBUF_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-        echo "LDFLAGS=-L$OPENSSL_PREFIX/lib -L$PROTOBUF_PREFIX/lib" >> $GITHUB_ENV
-        echo "CPPFLAGS=-I$OPENSSL_PREFIX/include -I$PROTOBUF_PREFIX/include" >> $GITHUB_ENV
-        echo "CMAKE_PREFIX_PATH=$PROTOBUF_PREFIX:$CMAKE_PREFIX_PATH" >> $GITHUB_ENV
+        # export PROTOBUF_PREFIX=$(brew --prefix protobuf@21)
+        # export OPENSSL_PREFIX=$(brew --prefix openssl@3)
+        # echo "PKG_CONFIG_PATH=$OPENSSL_PREFIX/lib/pkgconfig:$PROTOBUF_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        # echo "LDFLAGS=-L$OPENSSL_PREFIX/lib -L$PROTOBUF_PREFIX/lib" >> $GITHUB_ENV
+        # echo "CPPFLAGS=-I$OPENSSL_PREFIX/include -I$PROTOBUF_PREFIX/include" >> $GITHUB_ENV
+        # echo "CMAKE_PREFIX_PATH=$PROTOBUF_PREFIX:$CMAKE_PREFIX_PATH" >> $GITHUB_ENV
     
     - name: Enable long paths (Windows)
       if: matrix.os == 'windows-latest'
@@ -218,19 +202,12 @@ jobs:
       
     - name: Show directory structure
       run: |
-        # Show directory structure to verify repo layout
-        # Install tree if not available, or use find as fallback
-        if command -v tree &> /dev/null; then
-          echo "=== Directory structure (tree) ==="
-          tree -L 3 -l rust/ godot/ || tree -L 3 rust/ godot/
-        else
-          echo "=== Directory structure (find) ==="
-          echo "rust/"
-          find rust -maxdepth 3 -type f -o -type d | head -20
-          echo ""
-          echo "godot/"
-          find godot -maxdepth 3 -type f -o -type d | head -20
-        fi
+        apt-get update && apt-get install -y tree
+        tree -L5 .
+        echo ""
+        tree -L5 rust/
+        echo ""
+        tree -L5 godot/
         echo ""
         echo "=== Rust library location ==="
         ls -la rust/target/release/ || echo "rust/target/release/ not found"
