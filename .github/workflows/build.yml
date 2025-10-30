@@ -203,11 +203,13 @@ jobs:
     - name: Show directory structure
       run: |
         apt-get update && apt-get install -y tree
-        tree -L5 .
-        echo ""
-        tree -L5 rust/
-        echo ""
-        tree -L5 godot/
+        tree -h || true
+        echo "Main dir:"
+        tree -L 5 . || true
+        echo "Rust dir:"
+        tree -L 5 rust/ || true
+        echo "Godot dir:"
+        tree -L 5 godot/ || true
         echo ""
         echo "=== Rust library location ==="
         ls -la rust/target/release/ || echo "rust/target/release/ not found"
