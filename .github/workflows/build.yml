@@ -76,6 +76,7 @@ jobs:
     - name: Install dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
+        sudo rm -rf /usr/local/lib/libprotobuf* /usr/local/include/google/protobuf || true
         sudo apt-get update
         sudo apt-get install -y protobuf-compiler libprotobuf-dev pkg-config libssl-dev
 
