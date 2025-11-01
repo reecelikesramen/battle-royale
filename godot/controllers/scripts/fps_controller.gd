@@ -57,6 +57,8 @@ var _server_input_queue: Array[FrameInput] = []
 var _server_last_frame: FrameInput
 var _server_last_received_timestamp_ms: int = -1
 var _telemetry_last_report_ms: int = 0
+var _last_grounded_ms: int = 0
+var _server_last_grounded_ms: int = 0
 var _pending_state_timestamp_ms: int = 0
 var _pending_state_position: Vector3 = Vector3.ZERO
 var _pending_state_velocity: Vector3 = Vector3.ZERO
@@ -85,6 +87,7 @@ const SERVER_INPUT_QUEUE_MAX := 64
 const SERVER_LOOK_DELTA_LIMIT := TAU * 1.5
 const TELEMETRY_INTERVAL_MS := 2000
 const CROUCH_TRUST_WINDOW_MS := 150
+const JUMP_GRACE_PERIOD_MS := 150
 
 func _input(event):
 	if !is_authority:
@@ -199,10 +202,12 @@ func _physics_process(delta: float) -> void:
 		_apply_authoritative_transform(delta)
 		return
 
-	if !is_on_floor():
+	var now_ms := Time.get_ticks_msec()
+	if is_on_floor():
+		_last_grounded_ms = now_ms
+	else:
 		velocity += get_gravity() * delta
 
-	var now_ms := Time.get_ticks_msec()
 	var live_frame := _make_frame_input(now_ms)
 	live_frame.delta = delta
 	var frame_to_apply := live_frame
@@ -228,6 +233,9 @@ func _physics_process(delta: float) -> void:
 		_record_frame(live_frame)
 
 	move_and_slide()
+	if is_on_floor():
+		velocity.y = 0.0
+		_last_grounded_ms = Time.get_ticks_msec()
 	_apply_authoritative_transform(delta)
 	_emit_telemetry(now_ms)
 
@@ -253,10 +261,16 @@ func _server_physics_step(delta: float) -> void:
 		var frame_delta := frame.delta
 		if frame_delta <= 0.0:
 			frame_delta = delta
-		if !is_on_floor():
+		var frame_time := frame.timestamp_ms if frame.timestamp_ms > 0 else now_ms
+		if is_on_floor():
+			_server_last_grounded_ms = frame_time
+		else:
 			velocity += get_gravity() * frame_delta
 		_apply_frame(frame, frame_delta, true)
 		move_and_slide()
+		if is_on_floor():
+			velocity.y = 0.0
+			_server_last_grounded_ms = frame_time
 
 	_broadcast_server_state(now_ms)
 	_emit_telemetry(now_ms)
@@ -352,6 +366,7 @@ func _apply_local_reconciliation() -> void:
 	var reconciled_velocity := velocity
 	var reconciled_mouse_rotation := _mouse_rotation
 	var reconciled_player_rotation := _player_rotation
+	var saved_last_grounded_ms := _last_grounded_ms
 
 	for frame in _recorded_frames:
 		var frame_delta := frame.delta
@@ -362,7 +377,10 @@ func _apply_local_reconciliation() -> void:
 		else:
 			velocity += get_gravity() * frame_delta
 		_apply_frame(frame, frame_delta, false)
-		global_position += velocity * frame_delta
+		move_and_slide()
+		if is_on_floor():
+			velocity.y = 0.0
+		frame.velocity = velocity
 		reconciled_position = global_position
 		reconciled_velocity = velocity
 		reconciled_mouse_rotation = _mouse_rotation
@@ -379,6 +397,7 @@ func _apply_local_reconciliation() -> void:
 	camera.transform.basis = Basis.from_euler(Vector3(_camera_rotation.x, 0, 0))
 	camera.rotation.z = 0
 	global_transform.basis = Basis.from_euler(Vector3(0, _player_rotation.y, 0))
+	_last_grounded_ms = max(_last_grounded_ms, saved_last_grounded_ms)
 
 	_rotation_input = 0.0
 	_tilt_input = 0.0
@@ -567,7 +586,10 @@ func _make_frame_input(now_ms: int) -> FrameInput:
 	frame.crouch_pressed = Input.is_action_just_pressed("crouch")
 	frame.crouch_released = Input.is_action_just_released("crouch")
 	frame.crouch_held = Input.is_action_pressed("crouch")
-	frame.was_on_floor = is_on_floor()
+	var grounded_recent := is_on_floor()
+	if !grounded_recent and _last_grounded_ms > 0:
+		grounded_recent = now_ms - _last_grounded_ms <= JUMP_GRACE_PERIOD_MS
+	frame.was_on_floor = grounded_recent
 	frame.look_abs = Vector2(_camera_rotation.x, _player_rotation.y)
 	frame.velocity = velocity
 	return frame
@@ -611,8 +633,19 @@ func _apply_frame(frame: FrameInput, delta: float, apply_crouch_actions: bool) -
 		global_transform.basis = Basis.from_euler(Vector3(0, _player_rotation.y, 0))
 		frame.look_abs = Vector2(_mouse_rotation.x, _mouse_rotation.y)
 
-	if frame.jump_pressed and (is_on_floor() or frame.was_on_floor):
+	var now_ms := frame.timestamp_ms if frame.timestamp_ms > 0 else Time.get_ticks_msec()
+	var last_grounded := 0
+	if LowLevelNetworkHandler.is_server:
+		last_grounded = _server_last_grounded_ms
+	else:
+		last_grounded = _last_grounded_ms
+	var within_grace := last_grounded > 0 and now_ms - last_grounded <= JUMP_GRACE_PERIOD_MS
+	if frame.jump_pressed and (frame.was_on_floor or is_on_floor() or within_grace):
 		velocity.y = JUMP_VELOCITY
+		if LowLevelNetworkHandler.is_server:
+			_server_last_grounded_ms = now_ms
+		else:
+			_last_grounded_ms = now_ms
 
 	var direction := (transform.basis * Vector3(frame.move.x, 0, frame.move.y)).normalized()
 	if direction:
@@ -752,10 +785,7 @@ func _apply_crouch_state(target: bool, force: bool = false) -> void:
 
 	if _is_crouching == target:
 		_do_uncrouch = false
-		if !force:
-			return
-		if !target:
-			return
+		return
 	
 	if target:
 		if _is_crouching and !force:

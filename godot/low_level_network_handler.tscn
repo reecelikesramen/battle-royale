@@ -3,10 +3,16 @@
 [ext_resource type="Script" uid="uid://cljo0h54ukqrs" path="res://low_level_network_handler.gd" id="1_yduhh"]
 
 [node name="NetworkHandler" type="NetworkHandler"]
-fake_ping_lag_send = 25
-fake_ping_lag_recv = 25
-fake_jitter_send = 5
-fake_jitter_recv = 5
-fake_dup_ms_max = 60
-fake_reorder_ms = 30
+fake_ping_lag_send = 0
+fake_ping_lag_recv = 0
+fake_loss_send = 0
+fake_loss_recv = 0
+fake_jitter_send = 0
+fake_jitter_recv = 0
+fake_dup_send = 0
+fake_dup_recv = 0
+fake_dup_ms_max = 0
+fake_reorder_send = 0
+fake_reorder_recv = 0
+fake_reorder_ms = 0
 script = ExtResource("1_yduhh")

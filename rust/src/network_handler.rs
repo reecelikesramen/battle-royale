@@ -194,19 +194,6 @@ impl NetworkHandler {
             server_debug_callback,
         );
 
-        self.set_fake_ping_lag_send(self.fake_ping_lag_send);
-        self.set_fake_ping_lag_recv(self.fake_ping_lag_recv);
-        self.set_fake_loss_send(self.fake_loss_send);
-        self.set_fake_loss_recv(self.fake_loss_recv);
-        self.set_fake_jitter_send(self.fake_jitter_send);
-        self.set_fake_jitter_recv(self.fake_jitter_recv);
-        self.set_fake_dup_send(self.fake_dup_send);
-        self.set_fake_dup_recv(self.fake_dup_recv);
-        self.set_fake_dup_ms_max(self.fake_dup_ms_max);
-        self.set_fake_reorder_send(self.fake_reorder_send);
-        self.set_fake_reorder_recv(self.fake_reorder_recv);
-        self.set_fake_reorder_ms(self.fake_reorder_ms);
-
         self.server = GnsSocket::new(self.gns_global.clone())
             .listen(ip_address, port.try_into().unwrap())
             .ok();
