@@ -53,37 +53,67 @@ jobs:
       uses: actions/cache@v4
       with:
         path: rust/target
-        key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ runner.os == 'Linux' && 'v2-' || '' }}${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ runner.os == 'Linux' && 'v3-' || '' }}${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ runner.os == 'Linux' && 'v2-' || '' }}
+          ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ runner.os == 'Linux' && 'v3-' || '' }}
       
-    # - name: Cache protobuf (Linux)
-    #   if: matrix.os == 'ubuntu-latest'
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: |
-    #       /usr/local/lib/libprotobuf.a
-    #       /usr/local/lib/pkgconfig/protobuf.pc
-    #       /usr/local/include/google/protobuf
-    #     key: linux-protobuf-21.12-static-fpic
-    #     restore-keys: |
-    #       linux-protobuf-
+    - name: Cache protobuf (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/cache@v4
+      with:
+        path: |
+          /usr/local/lib/libprotobuf.a
+          /usr/local/lib/libprotoc.a
+          /usr/local/lib/cmake/protobuf
+          /usr/local/lib/pkgconfig/protobuf.pc
+          /usr/local/include/google/protobuf
+          /usr/local/bin/protoc
+        key: linux-protobuf-21.12-cmake-config-v1
+        restore-keys: |
+          linux-protobuf-21.12-cmake-config-
     
     - name: Install dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        # Remove old cached protobuf from /usr/local that conflicts with system packages
-        sudo rm -rf /usr/local/lib/libprotobuf* /usr/local/include/google/protobuf /usr/local/share/cmake-*/Modules/FindProtobuf.cmake || true
-        
         sudo apt-get update
         sudo apt-get install -y \
           clang \
-          protobuf-compiler \
-          libprotobuf-dev \
-          libabsl-dev \
           pkg-config \
           libssl-dev \
-          cmake
+          libabsl-dev \
+          cmake \
+          build-essential \
+          autoconf \
+          libtool \
+          wget
+        
+        # Check if protobuf is already cached
+        if [ ! -f /usr/local/bin/protoc ]; then
+          echo "Building protobuf 21.12 from source with CMake config..."
+          cd /tmp
+          wget -q https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protobuf-all-21.12.tar.gz
+          tar -xzf protobuf-all-21.12.tar.gz
+          cd protobuf-21.12
+          
+          mkdir build && cd build
+          cmake ../cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -Dprotobuf_BUILD_TESTS=OFF \
+            -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -Dprotobuf_ABSL_PROVIDER=package
+          
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+          
+          echo "Protobuf installed to /usr/local"
+          ls -la /usr/local/lib/cmake/protobuf/ || true
+        else
+          echo "Using cached protobuf installation"
+          sudo ldconfig
+        fi
 
     - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
