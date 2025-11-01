@@ -76,15 +76,14 @@ jobs:
         sudo rm -rf /usr/local/lib/libprotobuf* /usr/local/include/google/protobuf /usr/local/share/cmake-*/Modules/FindProtobuf.cmake || true
         
         sudo apt-get update
-        sudo apt-get install -y protobuf-compiler libprotobuf-dev pkg-config libssl-dev cmake
-        
-        # Debug: Find where protobuf cmake files are located
-        echo "=== Searching for protobuf cmake files ==="
-        find /usr -name "*rotobuf*.cmake" 2>/dev/null || true
-        echo "=== Checking pkg-config for protobuf ==="
-        pkg-config --variable=prefix protobuf || true
-        pkg-config --cflags protobuf || true
-        pkg-config --libs protobuf || true
+        sudo apt-get install -y \
+          clang \
+          protobuf-compiler \
+          libprotobuf-dev \
+          libabsl-dev \
+          pkg-config \
+          libssl-dev \
+          cmake
 
     - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
