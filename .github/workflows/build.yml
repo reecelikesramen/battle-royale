@@ -114,12 +114,6 @@ jobs:
       env:
         GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg-buildtrees' || '' }}
         GNS_VCPKG_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg' || '' }}
-        CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr;/usr/lib/x86_64-linux-gnu' || '' }}
-        Protobuf_ROOT: ${{ runner.os == 'Linux' && '/usr' || '' }}
-        Protobuf_INCLUDE_DIR: ${{ runner.os == 'Linux' && '/usr/include' || '' }}
-        Protobuf_LIBRARY: ${{ runner.os == 'Linux' && '/usr/lib/x86_64-linux-gnu/libprotobuf.so' || '' }}
-        Protobuf_PROTOC_EXECUTABLE: ${{ runner.os == 'Linux' && '/usr/bin/protoc' || '' }}
-        PKG_CONFIG_PATH: ${{ runner.os == 'Linux' && '/usr/lib/x86_64-linux-gnu/pkgconfig' || '' }}
       run: |
         cargo build --release --target ${{ matrix.target }}
       
