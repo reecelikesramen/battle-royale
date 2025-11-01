@@ -19,7 +19,7 @@ jobs:
             target: aarch64-apple-darwin
             artifact-name: rust-macos-arm64
             library-name: librust.dylib
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact-name: rust-linux-x86_64
             library-name: librust.so
@@ -57,26 +57,73 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-${{ matrix.os }}-${{ matrix.target }}-cargo-target-${{ runner.os == 'Linux' && 'v4-' || '' }}
       
-    # - name: Cache protobuf (Linux)
-    #   if: matrix.os == 'ubuntu-latest'
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: |
-    #       /usr/local/lib/libprotobuf.a
-    #       /usr/local/lib/pkgconfig/protobuf.pc
-    #       /usr/local/include/google/protobuf
-    #     key: linux-protobuf-21.12-static-fpic
-    #     restore-keys: |
-    #       linux-protobuf-
+    - name: Cache protobuf (Linux)
+      if: matrix.os == 'ubuntu-22.04'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/protobuf-install/lib/libprotobuf.a
+          ~/protobuf-install/lib/libprotoc.a
+          ~/protobuf-install/lib/cmake/protobuf
+          ~/protobuf-install/lib/pkgconfig/protobuf.pc
+          ~/protobuf-install/include/google/protobuf
+          ~/protobuf-install/bin/protoc
+        key: linux-protobuf-21.12-cmake-config-v2
+        restore-keys: |
+          linux-protobuf-21.12-cmake-config-
     
     - name: Install dependencies (Linux)
-      if: matrix.os == 'ubuntu-latest'
+      if: matrix.os == 'ubuntu-22.04'
       run: |
-        # Remove old cached protobuf from /usr/local that conflicts with system packages
-        sudo rm -rf /usr/local/lib/libprotobuf* /usr/local/include/google/protobuf /usr/local/share/cmake-*/Modules/FindProtobuf.cmake || true
-        
         sudo apt-get update
-        sudo apt-get install -y protobuf-compiler libprotobuf-dev pkg-config libssl-dev
+        sudo apt-get install -y \
+          clang \
+          pkg-config \
+          libssl-dev \
+          libabsl-dev \
+          cmake \
+          build-essential \
+          autoconf \
+          libtool \
+          wget
+        
+        # Check if protobuf is already installed in /usr/local
+        if [ ! -f /usr/local/bin/protoc ]; then
+          # Check if we have a cached build in ~/protobuf-install
+          if [ -f ~/protobuf-install/bin/protoc ]; then
+            echo "Found cached protobuf, installing to /usr/local..."
+            sudo cp -r ~/protobuf-install/* /usr/local/
+            sudo ldconfig
+          else
+            echo "Building protobuf 21.12 from source with CMake config..."
+            cd /tmp
+            wget -q https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protobuf-all-21.12.tar.gz
+            tar -xzf protobuf-all-21.12.tar.gz
+            cd protobuf-21.12
+            
+            mkdir build && cd build
+            cmake ../cmake \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -Dprotobuf_BUILD_TESTS=OFF \
+              -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX=~/protobuf-install \
+              -Dprotobuf_ABSL_PROVIDER=package
+            
+            make -j$(nproc)
+            make install
+            
+            echo "Installing cached build to /usr/local..."
+            sudo cp -r ~/protobuf-install/* /usr/local/
+            sudo ldconfig
+            
+            echo "Protobuf installed to /usr/local"
+            ls -la /usr/local/lib/cmake/protobuf/ || true
+          fi
+        else
+          echo "Using existing protobuf installation in /usr/local"
+          sudo ldconfig
+        fi
 
     - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
@@ -107,9 +154,7 @@ jobs:
       env:
         GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg-buildtrees' || '' }}
         GNS_VCPKG_ROOT: ${{ runner.os == 'Windows' && 'C:\\vcpkg' || '' }}
-        CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr;/usr/lib/x86_64-linux-gnu' || '' }}
-        Protobuf_DIR:       ${{ runner.os == 'Linux' && '/usr/lib/x86_64-linux-gnu/cmake/protobuf' || '' }}
-        PROTOBUF_PROTOC_EXECUTABLE: ${{ runner.os == 'Linux' && '/usr/bin/protoc' || '' }}
+        CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr/local;/usr;/usr/lib/x86_64-linux-gnu' || '' }}
       run: |
         cargo build --release --target ${{ matrix.target }}
       
