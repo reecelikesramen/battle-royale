@@ -29,6 +29,7 @@ func _ready() -> void:
 
 func _process(_delta) -> void:
 	set_debug_property("FPS", Engine.get_frames_per_second())
+	set_debug_property("Ping", "%d ms" % LowLevelNetworkHandler.client_ping)
 
 
 func _input(event):

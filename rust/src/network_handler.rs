@@ -69,6 +69,8 @@ struct NetworkHandler {
 
     /* client-side vars */
     client: Option<GnsSocket<IsClient>>,
+    #[var]
+    client_ping: i64,
 
     /* common vars */
     #[var]
@@ -144,6 +146,7 @@ impl INode for NetworkHandler {
             available_peer_ids: (0..PLAYER_COUNT).rev().collect(),
             connected_clients: HashMap::new(),
             client: None,
+            client_ping: 0,
             fake_ping_lag_send: 0,
             fake_ping_lag_recv: 0,
             fake_loss_send: 0,
@@ -373,6 +376,8 @@ impl NetworkHandler {
             panic!("Client socket not initialized");
         });
 
+        self.client_ping = client.get_connection_real_time_status(client.connection(), 0).and_then(|(status, _)| Ok(status.ping())).unwrap_or(0) as i64;
+
         let mut packets_to_emit = Vec::new();
 
         let poll_deadline = Instant::now() + Duration::from_millis(POLL_TIME_BUDGET_MS);
@@ -470,6 +475,7 @@ impl NetworkHandler {
                         ));
                         panic!()
                     });
+
                 self.queue_debug(format!(
                   "== Client {:#?}\n\tIP: {:#?}\n\tPing: {:#?}\n\tOut/sec: {:#?}\n\tIn/sec: {:#?}",
                     nick,
