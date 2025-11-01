@@ -1,6 +1,6 @@
 extends Node
 
-signal handle_game_state(peer_id: int, game_state: GameStatePacket)
+signal handle_player_input(peer_id: int, input: PlayerInputPacket)
 signal handle_chat(peer_id: int, chat: ChatPacket)
 
 var peer_ids: Array[int]
@@ -14,7 +14,10 @@ func _ready() -> void:
 func on_peer_connected(peer_id: int) -> void:
 	peer_ids.append(peer_id)
 
-	LowLevelNetworkHandler.broadcast_packet(IdAssignmentPacket.create(peer_id, peer_ids))
+	var id_assignment := IdAssignmentPacket.new()
+	id_assignment.id = peer_id
+	id_assignment.remote_ids = peer_ids.duplicate()
+	LowLevelNetworkHandler.broadcast_packet(id_assignment.to_payload())
 
 
 func on_peer_disconnected(peer_id: int) -> void:
@@ -24,8 +27,8 @@ func on_peer_disconnected(peer_id: int) -> void:
 
 
 func on_server_packet(peer_id: int, packet) -> void:
-	if packet is GameStatePacket:
-		handle_game_state.emit(peer_id, packet)
+	if packet is PlayerInputPacket:
+		handle_player_input.emit(peer_id, packet)
 	elif packet is ChatPacket:
 		handle_chat.emit(peer_id, packet)
 	else:

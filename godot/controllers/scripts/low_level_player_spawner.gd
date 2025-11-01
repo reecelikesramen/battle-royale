@@ -23,7 +23,9 @@ func spawn_player(id: int) -> void:
 
 
 func despawn_player(id: int) -> void:
-	LowLevelNetworkHandler.broadcast_packet(PlayerDisconnectedPacket.create(id))
+	var disconnect_packet := PlayerDisconnectedPacket.new()
+	disconnect_packet.player_id = id
+	LowLevelNetworkHandler.broadcast_packet(disconnect_packet.to_payload())
 	var player = players[id]
 	player.despawn()
 	player.queue_free()

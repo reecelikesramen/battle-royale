@@ -78,20 +78,11 @@ What gets generated
 Notes
    - The macro does not modify `PacketId` or the `Packet` enum; add new variants in `packet.rs` (or introduce a separate registration macro later).
 */
-
-use godot::prelude::*;
-
 pub(crate) trait ToWire<W> { fn to_wire(&self) -> W; }
 pub(crate) trait ToGodot<G> { fn to_godot(&self) -> G; }
 
 impl<T: Clone> ToWire<T> for T { fn to_wire(&self) -> T { self.clone() } }
 impl<T: Clone> ToGodot<T> for T { fn to_godot(&self) -> T { self.clone() } }
-impl ToWire<[f32; 3]> for Vector3 { fn to_wire(&self) -> [f32; 3] { [self.x, self.y, self.z] } }
-impl ToGodot<Vector3> for [f32; 3] { fn to_godot(&self) -> Vector3 { Vector3::new(self[0], self[1], self[2]) } }
-impl ToWire<[f32; 2]> for Vector2 { fn to_wire(&self) -> [f32; 2] { [self.x, self.y] } }
-impl ToGodot<Vector2> for [f32; 2] { fn to_godot(&self) -> Vector2 { Vector2::new(self[0], self[1]) } }
-impl ToWire<u8> for i64 { fn to_wire(&self) -> u8 { u8::try_from(*self).unwrap_or_else(|_| panic!("i64 value out of range for u8: {}", self)) } }
-impl ToGodot<i64> for u8 { fn to_godot(&self) -> i64 { i64::from(*self) } }
 
 #[inline]
 pub(crate) fn convert_to_wire<G, W>(v: &G) -> W where G: ToWire<W> { <G as ToWire<W>>::to_wire(v) }
@@ -183,12 +174,21 @@ macro_rules! define_packet {
 
             #[godot_api]
             impl $name {
-                #[func]
-                pub(crate) fn new($( $field: $godot_ty ),+) -> Gd<Self> {
+                pub(crate) fn with_fields($( $field: $godot_ty ),+) -> Gd<Self> {
                     Gd::from_init_fn(|base| Self { base, $( $field ),+ })
                 }
 
                 #[func]
+                pub(crate) fn new() -> Gd<Self> {
+                    Gd::from_init_fn(|base| Self {
+                        base,
+                        $( $field: define_packet_field_default!(
+                            $godot_ty
+                            $(, $default)?
+                        ) ),+
+                    })
+                }
+
                 pub(crate) fn create($( $field: $godot_ty ),+) -> Gd<GdPacket> {
                     Gd::from_init_fn(|base| GdPacket {
                         base,
@@ -232,7 +232,7 @@ macro_rules! define_packet {
 
             impl [<$name Wire>] {
                 pub(crate) fn as_gd(&self) -> Gd<Object> {
-                    $name::new(
+                    $name::with_fields(
                         $( define_packet_field_to_gd!(
                             self.$field,
                             $godot_ty

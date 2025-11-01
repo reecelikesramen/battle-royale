@@ -21,6 +21,10 @@ LowLevelNetworkHandler="*res://low_level_network_handler.tscn"
 ClientNetworkGlobals="*res://controllers/scripts/client_network_globals.gd"
 ServerNetworkGlobals="*res://controllers/scripts/server_network_globals.gd"
 
+[debug]
+
+gdscript/warnings/integer_division=0
+
 [input]
 
 move_forward={

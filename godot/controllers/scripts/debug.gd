@@ -63,7 +63,10 @@ func _on_quit_button_pressed() -> void:
 
 func _on_chat_edit_text_submitted(new_text: String) -> void:
 	%ChatEdit.text = ""
-	LowLevelNetworkHandler.send_packet(ChatPacket.create(ClientNetworkGlobals.username, new_text))
+	var chat_packet := ChatPacket.new()
+	chat_packet.username = ClientNetworkGlobals.username
+	chat_packet.message = new_text
+	LowLevelNetworkHandler.send_packet(chat_packet.to_payload())
 
 
 func chat_message_added(packet: ChatPacket):

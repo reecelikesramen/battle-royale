@@ -14,12 +14,15 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, Ipv4Addr},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const DEFAULT_IP_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 const DEFAULT_PORT: i64 = 45876;
-const PLAYER_COUNT: u8 = 2;
+const PLAYER_COUNT: u8 = 100;
+const MAX_MESSAGES_PER_POLL: usize = 256;
+const MAX_EVENTS_PER_POLL: usize = 128;
+const POLL_TIME_BUDGET_MS: u64 = 2;
 
 /* TODO: unwrap must be banned */
 
@@ -187,9 +190,22 @@ impl NetworkHandler {
         // Setup debugging to log everything.
         // Use function pointer to safely queue messages from GNS thread
         self.gns_global.utils().enable_debug_output(
-            ESteamNetworkingSocketsDebugOutputType::k_ESteamNetworkingSocketsDebugOutputType_Everything,
+            ESteamNetworkingSocketsDebugOutputType::k_ESteamNetworkingSocketsDebugOutputType_None,
             server_debug_callback,
         );
+
+        self.set_fake_ping_lag_send(self.fake_ping_lag_send);
+        self.set_fake_ping_lag_recv(self.fake_ping_lag_recv);
+        self.set_fake_loss_send(self.fake_loss_send);
+        self.set_fake_loss_recv(self.fake_loss_recv);
+        self.set_fake_jitter_send(self.fake_jitter_send);
+        self.set_fake_jitter_recv(self.fake_jitter_recv);
+        self.set_fake_dup_send(self.fake_dup_send);
+        self.set_fake_dup_recv(self.fake_dup_recv);
+        self.set_fake_dup_ms_max(self.fake_dup_ms_max);
+        self.set_fake_reorder_send(self.fake_reorder_send);
+        self.set_fake_reorder_recv(self.fake_reorder_recv);
+        self.set_fake_reorder_ms(self.fake_reorder_ms);
 
         self.server = GnsSocket::new(self.gns_global.clone())
             .listen(ip_address, port.try_into().unwrap())
@@ -222,7 +238,7 @@ impl NetworkHandler {
 
         // Setup debugging using function pointer to safely queue messages from GNS thread
         self.gns_global.utils().enable_debug_output(
-            ESteamNetworkingSocketsDebugOutputType::k_ESteamNetworkingSocketsDebugOutputType_Everything,
+            ESteamNetworkingSocketsDebugOutputType::k_ESteamNetworkingSocketsDebugOutputType_None,
             client_debug_callback,
         );
 
@@ -372,27 +388,35 @@ impl NetworkHandler {
 
         let mut packets_to_emit = Vec::new();
 
-        // Process some messages, we arbitrary define 100 as being the max number of messages we can handle per iteration.
-        let _messages_processed = client.poll_messages::<100>(|message| {
-            let packet = Packet::decode(message.payload());
+        let poll_deadline = Instant::now() + Duration::from_millis(POLL_TIME_BUDGET_MS);
+        loop {
+            let processed = client.poll_messages::<MAX_MESSAGES_PER_POLL>(|message| {
+                let packet = Packet::decode(message.payload());
 
-            match packet {
-                Ok(packet) => {
-                    packets_to_emit.push(packet.as_gd());
+                match packet {
+                    Ok(packet) => {
+                        packets_to_emit.push(packet.as_gd());
+                    }
+                    Err(e) => {
+                        self.queue_debug(format!(
+                            "ERROR: Failed to decode packet: {}, raw data {:x?}",
+                            e,
+                            &message.payload()
+                        ));
+                    }
                 }
-                Err(e) => {
-                    self.queue_debug(format!(
-                        "ERROR: Failed to decode packet: {}, raw data {:x?}",
-                        e,
-                        &message.payload()
-                    ));
-                }
+            });
+            let processed_count = processed.unwrap_or(0);
+
+            if processed_count == 0 || Instant::now() >= poll_deadline {
+                break;
             }
-        });
+        }
 
         let mut emit_disconnect = -1;
         let mut emit_connect = false;
-        client.poll_event::<100>(|event| match (event.old_state(), event.info().state()) {
+        loop {
+            let processed = client.poll_event::<MAX_EVENTS_PER_POLL>(|event| match (event.old_state(), event.info().state()) {
             (
                 ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_None,
                 ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
@@ -415,6 +439,11 @@ impl NetworkHandler {
                 self.queue_debug(format!("GnsSocket<Client>: {:#?} => {:#?}.", previous, current));
             }
         });
+
+            if processed == 0 || Instant::now() >= poll_deadline {
+                break;
+            }
+        }
 
         if emit_disconnect != -1 {
             self.is_connected = false;
@@ -471,97 +500,122 @@ impl NetworkHandler {
         let mut packets_to_emit: Vec<(i64, Gd<Object>)> = Vec::new();
         let mut peer_connects_to_emit: Vec<u8> = Vec::new();
         let mut peer_disconnects_to_emit: Vec<u8> = Vec::new();
+        let poll_deadline = Instant::now() + Duration::from_millis(POLL_TIME_BUDGET_MS);
 
         // Process connections events.
-        let _events_processed = server.poll_event::<100>(|event| {
-          match (event.old_state(), event.info().state()) {
-            // A client is about to connect, accept it.
-            (
-              ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_None,
-              ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
-            ) => {
-                if self.available_peer_ids.is_empty() {
-                    self.queue_debug(format!("GnsSocket<Server>: no available peer ids"));
-                    server.close_connection(event.connection(), 1001, "Server is full", false);
-                } else {
-                    let result = server.accept(event.connection());
-                    self.queue_debug(format!("GnsSocket<Server>: accepted new client: {:#?}.", result));
-                    self.queue_debug(format!("GnsSocket<Server>: number of clients: {:#?}.", self.connected_clients.len()));
-                }
-            }
-
-            // A client is connected, we previously accepted it and don't do anything here.
-            // In a more sophisticated scenario we could initial sending some messages.
-            (
-              ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
-              ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connected,
-            ) => {
-                match self.available_peer_ids.pop() {
-                    Some(peer_id) => {
-                        self.connected_clients.insert(event.connection(), peer_id.try_into().unwrap());
-                        self.queue_debug(format!("GnsSocket<Server>: new client connected with peer id: {:#?}.", peer_id));
-                        peer_connects_to_emit.push(peer_id);
+        loop {
+            let processed = server
+                .poll_event::<MAX_EVENTS_PER_POLL>(|event| {
+                    match (event.old_state(), event.info().state()) {
+                        (
+                            ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_None,
+                            ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
+                        ) => {
+                            if self.available_peer_ids.is_empty() {
+                                self.queue_debug(format!("GnsSocket<Server>: no available peer ids"));
+                                server.close_connection(event.connection(), 1001, "Server is full", false);
+                            } else {
+                                let result = server.accept(event.connection());
+                                self.queue_debug(format!("GnsSocket<Server>: accepted new client: {:#?}.", result));
+                                self.queue_debug(format!(
+                                    "GnsSocket<Server>: number of clients: {:#?}.",
+                                    self.connected_clients.len()
+                                ));
+                            }
+                        }
+                        (
+                            ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connecting,
+                            ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connected,
+                        ) => {
+                            match self.available_peer_ids.pop() {
+                                Some(peer_id) => {
+                                    self.connected_clients.insert(event.connection(), peer_id.try_into().unwrap());
+                                    self.queue_debug(format!(
+                                        "GnsSocket<Server>: new client connected with peer id: {:#?}.",
+                                        peer_id
+                                    ));
+                                    peer_connects_to_emit.push(peer_id);
+                                }
+                                None => {
+                                    self.queue_debug(format!(
+                                        "GnsSocket<Server>: no available peer ids, this should not happen"
+                                    ));
+                                    server.close_connection(event.connection(), 2000, "Server is full", false);
+                                }
+                            }
+                        }
+                        (
+                            _,
+                            ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ClosedByPeer
+                                | ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ProblemDetectedLocally,
+                        ) => {
+                            let conn = event.connection();
+                            match self.connected_clients.remove(&conn) {
+                                Some(peer_id) => {
+                                    self.queue_debug(format!(
+                                        "GnsSocket<Server>: {:#?} disconnected with peer id: {:#?}.",
+                                        conn,
+                                        peer_id
+                                    ));
+                                    peer_disconnects_to_emit.push(peer_id);
+                                }
+                                None => {
+                                    self.queue_debug(format!(
+                                        "GnsSocket<Server>: {:#?} disconnected, but not found in connected clients",
+                                        conn
+                                    ));
+                                }
+                            }
+                            self.queue_debug(format!("GnsSocket<Server>: closing connection for {:#?}.", conn));
+                            server.close_connection(conn, 1002, "Closing connection ended by client", false);
+                        }
+                        (previous, current) => {
+                            self.queue_debug(format!("GnsSocket<Server>: {:#?} => {:#?}.", previous, current));
+                        }
                     }
-                    None => {
-                        self.queue_debug(format!("GnsSocket<Server>: no available peer ids, this should not happen"));
-                        server.close_connection(event.connection(), 2000, "Server is full", false);
-                    },
-                }
+                });
+
+            if processed == 0 || Instant::now() >= poll_deadline {
+                break;
             }
+        }
 
-            (_, ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ClosedByPeer | ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_ProblemDetectedLocally) => {
-              // Remove the client from the list and close the connection.
-              let conn = event.connection();
-              match self.connected_clients.remove(&conn) {
-                Some(peer_id) => {
-                  self.queue_debug(format!("GnsSocket<Server>: {:#?} disconnected with peer id: {:#?}.", conn, peer_id));
-                  peer_disconnects_to_emit.push(peer_id);
-                }
-                None => {
-                  self.queue_debug(format!("GnsSocket<Server>: {:#?} disconnected, but not found in connected clients", conn));
-                }
-              }
-              // Make sure we cleanup the connection, mandatory as per GNS doc.
-              self.queue_debug(format!("GnsSocket<Server>: closing connection for {:#?}.", conn));
-              server.close_connection(conn, 1002, "Closing connection ended by client", false);
+        // Process messages with bounded batches and time budget.
+        loop {
+            let processed = server
+                .poll_messages::<MAX_MESSAGES_PER_POLL>(|message| {
+                    let packet = Packet::decode(message.payload());
+
+                    let peer_id: i64 = match self.connected_clients.get(&message.connection()) {
+                        Some(peer_id) => (*peer_id).try_into().unwrap(),
+                        None => {
+                            self.queue_debug(format!(
+                                "ERROR: Failed to get peer id for connection: {:#?}",
+                                message.connection()
+                            ));
+                            return;
+                        }
+                    };
+
+                    match packet {
+                        Ok(packet) => {
+                            packets_to_emit.push((peer_id, packet.as_gd()));
+                        }
+                        Err(e) => {
+                            self.queue_debug(format!(
+                                "ERROR: Failed to decode packet: {}, raw data {:x?}",
+                                e,
+                                &message.payload()
+                            ));
+                        }
+                    }
+                });
+            let processed_count = processed.unwrap_or(0);
+
+            if processed_count == 0 || Instant::now() >= poll_deadline {
+                break;
             }
-
-            // A client state is changing, perhaps disconnecting
-            // If a client disconnected and it's connection get cleaned up, its state goes back to `ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_None`
-            (previous, current) => {
-              self.queue_debug(format!("GnsSocket<Server>: {:#?} => {:#?}.", previous, current));
-            }
-          }
-        });
-
-        // Process some messages, we arbitrary define 100 as being the max number of messages we can handle per iteration.
-        let _messages_processed = server.poll_messages::<100>(|message| {
-            let packet = Packet::decode(message.payload());
-
-            let peer_id: i64 = match self.connected_clients.get(&message.connection()) {
-                Some(peer_id) => (*peer_id).try_into().unwrap(),
-                None => {
-                    self.queue_debug(format!(
-                        "ERROR: Failed to get peer id for connection: {:#?}",
-                        message.connection()
-                    ));
-                    return;
-                }
-            };
-
-            match packet {
-                Ok(packet) => {
-                    packets_to_emit.push((peer_id, packet.as_gd()));
-                }
-                Err(e) => {
-                    self.queue_debug(format!(
-                        "ERROR: Failed to decode packet: {}, raw data {:x?}",
-                        e,
-                        &message.payload()
-                    ));
-                }
-            }
-        });
+        }
 
         self.server = Some(server);
 
@@ -586,6 +640,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_ping_lag_send(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Send,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -593,6 +650,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_ping_lag_send = 0;
         });
+        self.fake_ping_lag_send = value;
     }
     
     #[func]
@@ -602,6 +660,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_ping_lag_recv(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Recv,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -609,6 +670,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_ping_lag_recv = 0;
         });
+        self.fake_ping_lag_recv = value;
     }
 
     #[func]
@@ -618,6 +680,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_loss_send(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLoss_Send,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -625,6 +690,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_loss_send = 0;
         });
+        self.fake_loss_send = value;
     }
 
     #[func]
@@ -634,6 +700,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_loss_recv(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLoss_Recv,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -641,6 +710,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_loss_recv = 0;
         });
+        self.fake_loss_recv = value;
     }
 
     #[func]
@@ -650,6 +720,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_jitter_send(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketJitter_Send_Avg,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -657,6 +730,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_jitter_send = 0;
         });
+        self.fake_jitter_send = value;
     }
 
     #[func]
@@ -666,6 +740,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_jitter_recv(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketJitter_Recv_Avg,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -673,6 +750,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_jitter_recv = 0;
         });
+        self.fake_jitter_recv = value;
     }
 
     #[func]
@@ -682,6 +760,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_dup_send(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_Send,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -689,6 +770,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_dup_send = 0;
         });
+        self.fake_dup_send = value;
     }
     
     #[func]
@@ -698,6 +780,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_dup_recv(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_Recv,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -705,6 +790,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_dup_recv = 0;
         });
+        self.fake_dup_recv = value;
     }
 
     #[func]
@@ -714,6 +800,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_dup_ms_max(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_TimeMax,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -721,6 +810,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_dup_ms_max = 0;
         });
+        self.fake_dup_ms_max = value;
     }
 
     #[func]
@@ -730,6 +820,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_reorder_send(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Send,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -737,6 +830,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_reorder_send = 0;
         });
+        self.fake_reorder_send = value;
     }
 
     #[func]
@@ -746,6 +840,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_reorder_recv(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Recv,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -753,6 +850,7 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_reorder_recv = 0;
         });
+        self.fake_reorder_recv = value;
     }
 
     #[func]
@@ -762,6 +860,9 @@ impl NetworkHandler {
 
     #[func]
     fn set_fake_reorder_ms(&mut self, value: i64) {
+        if !self.is_server {
+            return;
+        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Time,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -769,5 +870,6 @@ impl NetworkHandler {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
             self.fake_reorder_ms = 0;
         });
+        self.fake_reorder_ms = value;
     }
 }

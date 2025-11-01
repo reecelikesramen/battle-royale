@@ -3,7 +3,7 @@ extends Node
 signal handle_local_id_assignment(local_id: int)
 signal handle_remote_id_assignment(remote_id: int)
 signal handle_player_disconnected(player_id: int)
-signal handle_game_state(game_state: GameStatePacket)
+signal handle_player_state(player_state: PlayerStatePacket)
 signal handle_chat(message: ChatPacket)
 signal handle_disconnect_from_server()
 
@@ -54,8 +54,8 @@ func _ready() -> void:
 func on_client_packet(data) -> void:
 	if data is IdAssignmentPacket:
 		manage_ids(data)
-	elif data is GameStatePacket:
-		handle_game_state.emit(data)
+	elif data is PlayerStatePacket:
+		handle_player_state.emit(data)
 	elif data is ChatPacket:
 		handle_chat.emit(data)
 	elif data is PlayerDisconnectedPacket:

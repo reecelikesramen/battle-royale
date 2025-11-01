@@ -8,15 +8,17 @@ use std::io::{Error, ErrorKind, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 pub(crate) enum PacketId {
     IdAssignment,
-    GameState,
     Chat,
+    PlayerInput,
+    PlayerState,
     PlayerDisconnected,
     Null,
 }
 
 pub(crate) enum Packet {
     IdAssignment(IdAssignmentPacketWire),
-    GameState(GameStatePacketWire),
+    PlayerInput(PlayerInputPacketWire),
+    PlayerState(PlayerStatePacketWire),
     Chat(ChatPacketWire),
     PlayerDisconnected(PlayerDisconnectedPacketWire),
     Null(NullPacketWire),
@@ -26,7 +28,8 @@ impl Packet {
     fn id(&self) -> PacketId {
         match self {
             Packet::IdAssignment(_) => PacketId::IdAssignment,
-            Packet::GameState(_) => PacketId::GameState,
+            Packet::PlayerInput(_) => PacketId::PlayerInput,
+            Packet::PlayerState(_) => PacketId::PlayerState,
             Packet::Chat(_) => PacketId::Chat,
             Packet::PlayerDisconnected(_) => PacketId::PlayerDisconnected,
             Packet::Null(_) => PacketId::Null,
@@ -36,7 +39,8 @@ impl Packet {
     pub(crate) fn is_reliable(&self) -> bool {
         match self {
             Packet::IdAssignment(_) => IdAssignmentPacketWire::IS_RELIABLE,
-            Packet::GameState(_) => GameStatePacketWire::IS_RELIABLE,
+            Packet::PlayerInput(_) => PlayerInputPacketWire::IS_RELIABLE,
+            Packet::PlayerState(_) => PlayerStatePacketWire::IS_RELIABLE,
             Packet::Chat(_) => ChatPacketWire::IS_RELIABLE,
             Packet::PlayerDisconnected(_) => PlayerDisconnectedPacketWire::IS_RELIABLE,
             Packet::Null(_) => NullPacketWire::IS_RELIABLE,
@@ -47,7 +51,8 @@ impl Packet {
         let mut bytes = vec![self.id().to_u8().unwrap()];
         bytes.extend(match self {
             Packet::IdAssignment(packet) => packet.encode(),
-            Packet::GameState(packet) => packet.encode(),
+            Packet::PlayerInput(packet) => packet.encode(),
+            Packet::PlayerState(packet) => packet.encode(),
             Packet::Chat(packet) => packet.encode(),
             Packet::PlayerDisconnected(packet) => packet.encode(),
             Packet::Null(packet) => packet.encode(),
@@ -72,7 +77,8 @@ impl Packet {
             PacketId::IdAssignment => Ok(Packet::IdAssignment(IdAssignmentPacketWire::decode(
                 packet_data,
             )?)),
-            PacketId::GameState => Ok(Packet::GameState(GameStatePacketWire::decode(packet_data)?)),
+            PacketId::PlayerInput => Ok(Packet::PlayerInput(PlayerInputPacketWire::decode(packet_data)?)),
+            PacketId::PlayerState => Ok(Packet::PlayerState(PlayerStatePacketWire::decode(packet_data)?)),
             PacketId::Chat => Ok(Packet::Chat(ChatPacketWire::decode(packet_data)?)),
             PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(
                 PlayerDisconnectedPacketWire::decode(packet_data)?,
@@ -84,7 +90,8 @@ impl Packet {
     pub(crate) fn as_gd(&self) -> Gd<Object> {
         match self {
             Packet::IdAssignment(packet) => packet.as_gd(),
-            Packet::GameState(packet) => packet.as_gd(),
+            Packet::PlayerInput(packet) => packet.as_gd(),
+            Packet::PlayerState(packet) => packet.as_gd(),
             Packet::Chat(packet) => packet.as_gd(),
             Packet::PlayerDisconnected(packet) => packet.as_gd(),
             Packet::Null(packet) => packet.as_gd(),
