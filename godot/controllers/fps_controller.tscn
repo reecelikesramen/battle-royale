@@ -208,6 +208,7 @@ layout_mode = 2
 placeholder_text = "Press enter to send chat"
 
 [node name="RepeatActionsButton" type="Button" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
 layout_mode = 2
 toggle_mode = true
 text = "Repeat Actions
