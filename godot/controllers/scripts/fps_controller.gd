@@ -1,16 +1,20 @@
+class_name FPSController
+
 extends CharacterBody3D
 
 @onready var camera: Camera3D = $CameraController/Camera3D
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
 @onready var crouch_shapecast: ShapeCast3D = $CrouchShapeCast3D
 
-@export var SPEED = 5.0
-@export var JUMP_VELOCITY = 4.5
-@export var TILT_LOWER_LIMIT = deg_to_rad(-90.0)
-@export var TILT_UPPER_LIMIT = deg_to_rad(90.0)
-@export var MOUSE_SENSITIVITY = 0.5
+@export var SPEED: float = 5.0
+@export var JUMP_VELOCITY: float = 4.5
+@export var ACCELERATION: float = 0.1
+@export var DECELERATION: float = 0.25
+@export var TILT_LOWER_LIMIT: float = deg_to_rad(-90.0)
+@export var TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
+@export var MOUSE_SENSITIVITY: float = 0.5
 @export var TOGGLE_CROUCH: bool = true
-@export_range(5, 10, 0.1) var CROUCH_SPEED = 7.0
+@export_range(5, 10, 0.1) var CROUCH_SPEED: float = 7.0
 
 const ACTION_REPEAT_WINDOW_MS := 10000
 
@@ -649,11 +653,11 @@ func _apply_frame(frame: FrameInput, delta: float, apply_crouch_actions: bool) -
 
 	var direction := (transform.basis * Vector3(frame.move.x, 0, frame.move.y)).normalized()
 	if direction:
-		velocity.x = direction.x * SPEED
-		velocity.z = direction.z * SPEED
+		velocity.x = lerp(velocity.x, direction.x * SPEED, ACCELERATION)
+		velocity.z = lerp(velocity.z, direction.z * SPEED, ACCELERATION)
 	else:
-		velocity.x = move_toward(velocity.x, 0, SPEED)
-		velocity.z = move_toward(velocity.z, 0, SPEED)
+		velocity.x = move_toward(velocity.x, 0, DECELERATION)
+		velocity.z = move_toward(velocity.z, 0, DECELERATION)
 
 
 func _send_player_input(timestamp_ms: int, frame: FrameInput) -> void:

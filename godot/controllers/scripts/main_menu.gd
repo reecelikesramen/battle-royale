@@ -14,8 +14,14 @@ func _exit_tree() -> void:
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	if LowLevelNetworkHandler.is_dedicated_server:
-		get_tree().call_deferred("change_scene_to_file", "res://main.tscn")
+		get_tree().call_deferred("change_scene_to_file", "res://new_map_v2/new_map_v2.tscn")
 		return
+	
+	print("hello!! %s" % Input.mouse_mode)
+	
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+	print("helloooooooooo %s" % Input.mouse_mode)
 
 	set_disconnected_message()
 	
@@ -78,7 +84,7 @@ func _on_connect_button_pressed() -> void:
 
 
 func _on_connect_to_server() -> void:
-	get_tree().change_scene_to_file("res://main.tscn")
+	get_tree().change_scene_to_file("res://new_map_v2/new_map_v2.tscn")
 
 
 func _on_full_screen_button_toggled(toggled_on: bool) -> void:

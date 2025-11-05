@@ -1,0 +1,60 @@
+[gd_scene load_steps=10 format=3 uid="uid://cjo1ojc5g1lp4"]
+
+[ext_resource type="PackedScene" uid="uid://88a0imp81kyn" path="res://water/WaterPlane.tscn" id="1_ji47x"]
+[ext_resource type="Terrain3DMaterial" uid="uid://bmakpmpll0fv5" path="res://new_map_v2/map_material.res" id="2_tbeux"]
+[ext_resource type="Terrain3DAssets" uid="uid://dal3jhw6241qg" path="res://demo/data/assets.tres" id="3_8tace"]
+[ext_resource type="Environment" uid="uid://b8030pxcma3ij" path="res://environment/WE_test.tres" id="4_8tace"]
+[ext_resource type="Script" uid="uid://172t455bnixi" path="res://controllers/scripts/low_level_player_spawner.gd" id="5_ndrii"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_8tace"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_8tace"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_8tace"]
+size = Vector3(20, 20, 20)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ndrii"]
+size = Vector3(20, 20, 20)
+
+[node name="Node3D" type="Node3D"]
+
+[node name="WaterPlane" parent="." instance=ExtResource("1_ji47x")]
+transform = Transform3D(4000, 0, 0, 0, 1, 0, 0, 0, 4000, 55.985363, 14.181557, -39.36921)
+
+[node name="Terrain3D" type="Terrain3D" parent="."]
+data_directory = "res://new_map_v2/terrain_data"
+material = ExtResource("2_tbeux")
+assets = ExtResource("3_8tace")
+collision_mode = 3
+top_level = true
+metadata/_edit_lock_ = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = ExtResource("4_8tace")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.37028158, 0.062475905, -0.9268163, 0.92143416, -0.15111217, 0.35794494, -0.11769027, -0.98654044, -0.11352146, 0, 54.03824, 0)
+
+[node name="PlayerSpawner" type="Node" parent="."]
+script = ExtResource("5_ndrii")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.99744076, 0.020425986, -0.06851761, 0, 0.9583226, 0.28568837, 0.07149744, -0.28495723, 0.95587003, 26.35603, 63.462936, 18.379356)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.4251964, 20.953222, -76.5012)
+mesh = SubResource("CylinderMesh_8tace")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="MeshInstance3D"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="MeshInstance3D/StaticBody3D"]
+shape = SubResource("CylinderShape3D_8tace")
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25.385756, 32.182358, -117.35655)
+mesh = SubResource("BoxMesh_8tace")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="MeshInstance3D2"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="MeshInstance3D2/StaticBody3D"]
+shape = SubResource("BoxShape3D_ndrii")

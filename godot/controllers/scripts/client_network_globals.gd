@@ -43,6 +43,8 @@ enum DisconnectReason {
 
 var username: String
 var id: int = -1
+var player: FPSController
+var debug
 var remote_ids: Array[int]
 var _disconnected_message: String = ""
 

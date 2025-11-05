@@ -16,6 +16,16 @@ func _exit_tree() -> void:
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	visible = false
+	
+	# set debug to client globals if the scene root (player) is authority
+	var player = get_owner() as FPSController
+	if !player.is_authority:
+		print("%s not authority" % LowLevelNetworkHandler.is_server)
+		return
+	else:
+		print("%s is authority" % LowLevelNetworkHandler.is_server)
+		ClientNetworkGlobals.debug = self
+	
 	%ScrollContainer.visible = false
 	if LowLevelNetworkHandler.is_dedicated_server:
 		%ExitToMenuButton.visible = false
@@ -66,7 +76,10 @@ func _on_quit_button_pressed() -> void:
 func _on_chat_edit_text_submitted(new_text: String) -> void:
 	%ChatEdit.text = ""
 	_record_action_repeat_chat(new_text)
-	LowLevelNetworkHandler.send_packet(ChatPacket.create(ClientNetworkGlobals.username, new_text))
+	var packet = ChatPacket.new()
+	packet.username = ClientNetworkGlobals.username
+	packet.message = new_text
+	LowLevelNetworkHandler.send_packet(packet)
 
 
 func chat_message_added(packet: ChatPacket):

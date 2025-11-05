@@ -1,0 +1,20 @@
+[gd_scene load_steps=4 format=3 uid="uid://blaieaqp413k7"]
+
+[ext_resource type="Script" uid="uid://cib2rig7vup10" path="res://addons/terrain_3d/tools/importer.gd" id="1_60b8f"]
+[ext_resource type="Terrain3DMaterial" uid="uid://b7cmhhwne5qc5" path="res://materials/map.res" id="1_kcdxh"]
+[ext_resource type="Terrain3DAssets" uid="uid://yjtak4rqo2kq" path="res://materials/map_assets.res" id="2_34j6c"]
+
+[node name="Importer" type="Terrain3D"]
+data_directory = "res://test"
+material = ExtResource("1_kcdxh")
+assets = ExtResource("2_34j6c")
+mesh_lods = 8
+show_checkered = true
+show_colormap = true
+top_level = true
+script = ExtResource("1_60b8f")
+height_file_name = "/Users/rholmdahl/Documents/game/first-test/godot/textures/map/Rugged Terrain Height Map EXR.exr"
+color_file_name = "/Users/rholmdahl/Documents/game/first-test/godot/textures/map/Rugged Terrain Diffuse EXR.exr"
+import_position = Vector2i(-2048, -2048)
+import_scale = 2000.0
+metadata/_edit_lock_ = true

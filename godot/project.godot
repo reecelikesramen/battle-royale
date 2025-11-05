@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="New Game Project"
+config/name="Battle Royale"
 run/main_scene="uid://cnyy535rmpioo"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
@@ -24,6 +24,10 @@ ServerNetworkGlobals="*res://controllers/scripts/server_network_globals.gd"
 [debug]
 
 gdscript/warnings/integer_division=0
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/terrain_3d/plugin.cfg")
 
 [input]
 

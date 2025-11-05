@@ -16,8 +16,12 @@ func _ready() -> void:
 func spawn_player(id: int) -> void:
 	var player = LOW_LEVEL_NETWORK_PLAYER.instantiate()
 	player._owner_id = id
+	if id == ClientNetworkGlobals.id:
+		ClientNetworkGlobals.player = player
 	player.name = "Player_%d" % id # Optional, but it beats the name "@CharacterBody2D@2/3/4..."
+	player.position = Vector3(0, 21.079, -76.501)
 	players[id] = player
+	
 	
 	call_deferred("add_child", player)
 
