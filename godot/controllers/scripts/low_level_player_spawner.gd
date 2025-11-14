@@ -1,8 +1,8 @@
 extends Node
 
-const LOW_LEVEL_NETWORK_PLAYER = preload("res://controllers/fps_controller.tscn")
+const LOW_LEVEL_NETWORK_PLAYER := preload("res://controllers/fps_controller.tscn")
 
-var players: Dictionary = {}
+var players: Dictionary[int, FPSController] = {}
 
 func _ready() -> void:
 	LowLevelNetworkHandler.on_peer_connect.connect(spawn_player)
@@ -14,12 +14,13 @@ func _ready() -> void:
 
 
 func spawn_player(id: int) -> void:
-	var player = LOW_LEVEL_NETWORK_PLAYER.instantiate()
+	var player: FPSController = LOW_LEVEL_NETWORK_PLAYER.instantiate()
 	player._owner_id = id
 	if id == ClientNetworkGlobals.id:
 		ClientNetworkGlobals.player = player
 	player.name = "Player_%d" % id # Optional, but it beats the name "@CharacterBody2D@2/3/4..."
-	player.position = Vector3(0, 21.079, -76.501)
+	player.global_position = Vector3(0, 21.079, -76.501)
+	player.game_position = player.global_position
 	players[id] = player
 	
 	

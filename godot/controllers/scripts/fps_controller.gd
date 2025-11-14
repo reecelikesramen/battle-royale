@@ -51,6 +51,7 @@ var _look_abs: Vector2 = Vector2()
 var game_transform: Transform3D = Transform3D()
 var game_position: Vector3:
 	get: return game_transform.origin
+	set(value): game_transform.origin = value
 var game_velocity: Vector3 = Vector3()
 var game_movement_state_id: int = 0
 var game_sequence_id: int = 65535
@@ -143,7 +144,7 @@ func _client_authority_physics_step(delta: float) -> void:
 	player_input.jump = Input.is_action_pressed("jump")
 	player_input.crouch = Input.is_action_pressed("crouch")
 	player_input.sprint = Input.is_action_pressed("sprint")
-	_unacked_inputs.insert(player_input.sequence_id, player_input.timestamp_us, player_input)
+	_unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)
 	LowLevelNetworkHandler.send_packet(player_input.to_payload())
 	current_frame_input = player_input
 
@@ -227,6 +228,8 @@ func _client_authority_reconcile_visual_state(delta: float) -> void:
 	color_vel.g = delta_vel.z
 	color_vel.b = delta_vel.y
 	$CameraController/Camera3D/DeltaVel.color = color_vel
+
+	$CameraController/Camera3D/InputBuffer.text = "Inputs Size: %d\nInputs Oldest: %d\nInputs Newest: %d\nInputs Buffer Delay: %d" % [_unacked_inputs.size(), _unacked_inputs.oldest_sequence_id(), _unacked_inputs.newest_sequence_id(), _unacked_inputs.buffer_delay_us()]
 
 	# TODO: maybe even give snap to game state a lerp so its not instant
 	# Snap or lerp to horizontal game position
@@ -409,4 +412,11 @@ func client_handle_player_state(player_state: PlayerStatePacket) -> void:
 		if PacketSequence.is_newer(ack_sequence, game_sequence_id):
 			_client_authority_update_game_state(player_state)
 	else:
-		_player_state_buffer.insert(player_state.last_input_sequence_id, player_state.timestamp_us, player_state)
+		#if _owner_id == 0:
+			#print("Size: %d | Oldest: %d | Newest: %d | Delay US: %d" % [_player_state_buffer.size(), _player_state_buffer.oldest_sequence_id(), _player_state_buffer.newest_sequence_id(), _player_state_buffer.buffer_delay_us()])
+		_player_state_buffer.insert(player_state.last_input_sequence_id, Time.get_ticks_usec(), player_state.timestamp_us, player_state)
+
+
+func despawn() -> void:
+	print("I'm (%s) being despawned!" % name)
+	if is_authority: get_tree().change_scene_to_file("res://main_menu.tscn")

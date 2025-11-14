@@ -4,9 +4,3 @@
 
 [node name="NetworkHandler" type="NetworkHandler"]
 script = ExtResource("1_yduhh")
-fake_ping_lag_send = 25
-fake_ping_lag_recv = 25
-fake_jitter_send = 5
-fake_jitter_recv = 5
-fake_dup_ms_max = 60
-fake_reorder_ms = 30

@@ -107,4 +107,24 @@ impl JitterBuffer {
 
         consumed
     }
+
+    #[func]
+    fn size(&self) -> i64 {
+        self.packets.len() as i64
+    }
+
+    #[func]
+    fn last_sequence_id(&self) -> i64 {
+        self.last_sequence_id as i64
+    }
+
+    #[func]
+    fn last_received_timestamp_us(&self) -> i64 {
+        self.last_received_timestamp_us as i64
+    }
+
+    #[func]
+    fn next_sequence_id(&self) -> i64 {
+        self.next_sequence_id as i64
+    }
 }

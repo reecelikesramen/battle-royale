@@ -3,12 +3,13 @@ use num_traits::FromPrimitive;
 use crate::math::sequence::{seq_is_newer, seq_diff};
 
 const BUFFER_SIZE: usize = 128;
-const MAX_DELAY_US: i64 = 150_000; // 150ms
-const MIN_DELAY_US: i64 = 033_000; // 33ms
+const MAX_DELAY_US: i64 = 150_000i64; // 150ms
+const MIN_DELAY_US: i64 = 33_000i64; // 33ms
 
 #[derive(Clone)]
 struct BufferEntry {
-    timestamp_us: i64,
+    arrival_timestamp_us: i64,  // when this client received the packet
+    server_timestamp_us: i64,
     value: Variant,
 }
 
@@ -60,7 +61,7 @@ impl IRefCounted for SequenceRingBuffer {
 #[godot_api]
 impl SequenceRingBuffer {
     #[func]
-    fn insert(&mut self, sequence_id: i64, timestamp_us: i64, value: Variant) -> bool {
+    fn insert(&mut self, sequence_id: i64, arrival_timestamp_us: i64, server_timestamp_us: i64, value: Variant) -> bool {
         let Some(seq_id) = u16::from_i64(sequence_id) else {
             godot_warn!("Invalid sequence id: {sequence_id}");
             return false;
@@ -81,16 +82,16 @@ impl SequenceRingBuffer {
         let extends_front = self.count == 0 || seq_is_newer(seq_id, self.newest_sequence_id);
 
         // adaptive delay
-        let mut prev_timestamp_us = None;
+        let mut prev_arrival_timestamp_us = None;
         if self.count > 0 && extends_front {
             let prev_index = (self.newest_sequence_id & self.mask) as usize;
 
             if let Some(ref prev_entry) = self.buffer[prev_index] {
-                prev_timestamp_us = Some(prev_entry.timestamp_us);
+                prev_arrival_timestamp_us = Some(prev_entry.arrival_timestamp_us);
             }
         }
 
-        self.buffer[index] = Some(BufferEntry { timestamp_us, value });
+        self.buffer[index] = Some(BufferEntry { arrival_timestamp_us, server_timestamp_us, value });
 
         if was_empty {
             self.count += 1;
@@ -103,12 +104,12 @@ impl SequenceRingBuffer {
         }
 
         if extends_front {
-            if let Some(prev_timestamp_us) = prev_timestamp_us {
-                let delta_us = timestamp_us - prev_timestamp_us;
+            if let Some(prev_arrival_timestamp_us) = prev_arrival_timestamp_us {
+                let delta_us = arrival_timestamp_us - prev_arrival_timestamp_us;
                 if delta_us > 0 {
                     self.buffer_delay_us = delta_us.clamp(MIN_DELAY_US, MAX_DELAY_US);
                 } else {
-                    godot_warn!("Timestamp is older than previous entry: {} < {}", timestamp_us, prev_timestamp_us);
+                    godot_warn!("Timestamp is older than previous entry: {} < {}", arrival_timestamp_us, prev_arrival_timestamp_us);
                 }
             }
             self.newest_sequence_id = seq_id;
@@ -191,20 +192,45 @@ impl SequenceRingBuffer {
                     break;
                 }
 
-                let next_seq = self.oldest_sequence_id.wrapping_add(1);
-                let next_index = (next_seq & self.mask) as usize;
+                let mut candidate = self.oldest_sequence_id.wrapping_add(1);
+                let mut next_entry = None;
+                while candidate != self.newest_sequence_id.wrapping_add(1) {
+                    let index = (candidate & self.mask) as usize;
+                    if let Some(ref entry) = self.buffer[index] {
+                        next_entry = Some((candidate, entry.arrival_timestamp_us));
+                        break;
+                    }
+                    candidate = candidate.wrapping_add(1);
+                }
 
-                if let Some(ref next_entry) = self.buffer[next_index] {
-                    if target_time > next_entry.timestamp_us {
-                        let old_index = (self.oldest_sequence_id & self.mask) as usize;
+                let Some((next_seq, next_arrival_timestamp_us)) = next_entry else { break; };
+
+                if target_time > next_arrival_timestamp_us {
+                    let old_index = (self.oldest_sequence_id & self.mask) as usize;
+                    if self.buffer[old_index].is_some() {
                         self.buffer[old_index] = None;
                         self.count -= 1;
-                        self.oldest_sequence_id = next_seq;
-                        continue;
                     }
+                    self.oldest_sequence_id = next_seq;
+                    continue;
                 }
 
                 break;
+
+                // let next_seq = self.oldest_sequence_id.wrapping_add(1);
+                // let next_index = (next_seq & self.mask) as usize;
+
+                // if let Some(ref next_entry) = self.buffer[next_index] {
+                //     if target_time > next_entry.timestamp_us {
+                //         let old_index = (self.oldest_sequence_id & self.mask) as usize;
+                //         self.buffer[old_index] = None;
+                //         self.count -= 1;
+                //         self.oldest_sequence_id = next_seq;
+                //         continue;
+                //     }
+                // }
+
+                // break;
             }
         }
 
@@ -239,7 +265,7 @@ impl SequenceRingBuffer {
             let index = (current & self.mask) as usize;
 
             if let Some(ref entry) = self.buffer[index] {
-                if entry.timestamp_us <= target_time {
+                if entry.server_timestamp_us <= target_time {
                     from = Some(entry)
                 } else if to.is_none() {
                     to = Some(entry);
@@ -259,13 +285,13 @@ impl SequenceRingBuffer {
         }
 
         if let (Some(from), Some(to)) = (from, to) {
-            let mut span = to.timestamp_us - from.timestamp_us;
+            let mut span = to.server_timestamp_us - from.server_timestamp_us;
             if span < 0 {
-                godot_warn!("Timestamp is older than previous entry: {} < {}", to.timestamp_us, from.timestamp_us);
+                godot_warn!("Timestamp is older than previous entry: {} < {}", to.server_timestamp_us, from.server_timestamp_us);
             }
             span = span.max(1);
-            let alpha = ((target_time - from.timestamp_us) as f64 / span as f64).clamp(0.0, 1.0);
-            let extrapolation_us = (target_time - to.timestamp_us).max(0);
+            let alpha = ((target_time - from.server_timestamp_us) as f64 / span as f64).clamp(0.0, 1.0);
+            let extrapolation_us = (target_time - to.server_timestamp_us).max(0);
             pair.bind_mut().from = from.value.clone();
             pair.bind_mut().to = to.value.clone();
             pair.bind_mut().alpha = alpha;
@@ -277,5 +303,25 @@ impl SequenceRingBuffer {
         }
             
         pair
+    }
+
+    #[func]
+    fn size(&self) -> i64 {
+        self.count as i64
+    }
+
+    #[func]
+    fn oldest_sequence_id(&self) -> i64 {
+        self.oldest_sequence_id as i64
+    }
+
+    #[func]
+    fn newest_sequence_id(&self) -> i64 {
+        self.newest_sequence_id as i64
+    }
+
+    #[func]
+    fn buffer_delay_us(&self) -> i64 {
+        self.buffer_delay_us
     }
 }

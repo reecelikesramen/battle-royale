@@ -316,10 +316,9 @@ offset_right = 376.0
 offset_bottom = 88.0
 
 [node name="InputBuffer" type="Label" parent="CameraController/Camera3D"]
-offset_left = 336.0
-offset_top = 96.0
-offset_right = 376.0
-offset_bottom = 119.0
+offset_left = 384.0
+offset_right = 594.0
+offset_bottom = 201.0
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="."]
 libraries = {
