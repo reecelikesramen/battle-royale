@@ -80,44 +80,6 @@ struct NetworkHandler {
     gns_global: Arc<GnsGlobal>,
     last_update: Instant,
 
-    /* config/debug exports */
-    #[export]
-    #[var(get=get_fake_ping_lag_send, set=set_fake_ping_lag_send)]
-    fake_ping_lag_send: i64,
-    #[export]
-    #[var(get=get_fake_ping_lag_recv, set=set_fake_ping_lag_recv)]
-    fake_ping_lag_recv: i64,
-    #[export]
-    #[var(get=get_fake_loss_send, set=set_fake_loss_send)]
-    fake_loss_send: i64,
-    #[export]
-    #[var(get=get_fake_loss_recv, set=set_fake_loss_recv)]
-    fake_loss_recv: i64,
-    #[export]
-    #[var(get=get_fake_jitter_send, set=set_fake_jitter_send)]
-    fake_jitter_send: i64,
-    #[export]
-    #[var(get=get_fake_jitter_recv, set=set_fake_jitter_recv)]
-    fake_jitter_recv: i64,
-    #[export]
-    #[var(get=get_fake_dup_send, set=set_fake_dup_send)]
-    fake_dup_send: i64,
-    #[export]
-    #[var(get=get_fake_dup_recv, set=set_fake_dup_recv)]
-    fake_dup_recv: i64,
-    #[export]
-    #[var(get=get_fake_dup_ms_max, set=set_fake_dup_ms_max)]
-    fake_dup_ms_max: i64,
-    #[export]
-    #[var(get=get_fake_reorder_send, set=set_fake_reorder_send)]
-    fake_reorder_send: i64,
-    #[export]
-    #[var(get=get_fake_reorder_recv, set=set_fake_reorder_recv)]
-    fake_reorder_recv: i64,
-    #[export]
-    #[var(get=get_fake_reorder_ms, set=set_fake_reorder_ms)]
-    fake_reorder_ms: i64,
-
     /* thread-safe debug message queue */
     debug_messages: Arc<Mutex<VecDeque<String>>>,
 }
@@ -147,18 +109,6 @@ impl INode for NetworkHandler {
             connected_clients: HashMap::new(),
             client: None,
             client_ping: 0,
-            fake_ping_lag_send: 0,
-            fake_ping_lag_recv: 0,
-            fake_loss_send: 0,
-            fake_loss_recv: 0,
-            fake_jitter_send: 0,
-            fake_jitter_recv: 0,
-            fake_dup_send: 0,
-            fake_dup_recv: 0,
-            fake_dup_ms_max: 0,
-            fake_reorder_send: 0,
-            fake_reorder_recv: 0,
-            fake_reorder_ms: 0,
             debug_messages: debug_queue,
         }
     }
@@ -627,11 +577,6 @@ impl NetworkHandler {
     }
 
     #[func]
-    fn get_fake_ping_lag_send(&self) -> i64 {
-        self.fake_ping_lag_send
-    }
-
-    #[func]
     fn set_fake_ping_lag_send(&mut self, value: i64) {
         if !self.is_server {
             return;
@@ -641,16 +586,9 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_ping_lag_send = 0;
         });
-        self.fake_ping_lag_send = value;
     }
     
-    #[func]
-    fn get_fake_ping_lag_recv(&self) -> i64 {
-        self.fake_ping_lag_recv
-    }
-
     #[func]
     fn set_fake_ping_lag_recv(&mut self, value: i64) {
         if !self.is_server {
@@ -661,14 +599,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_ping_lag_recv = 0;
         });
-        self.fake_ping_lag_recv = value;
-    }
-
-    #[func]
-    fn get_fake_loss_send(&self) -> i64 {
-        self.fake_loss_send
     }
 
     #[func]
@@ -681,14 +612,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_loss_send = 0;
         });
-        self.fake_loss_send = value;
-    }
-
-    #[func]
-    fn get_fake_loss_recv(&self) -> i64 {
-        self.fake_loss_recv
     }
 
     #[func]
@@ -701,14 +625,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_loss_recv = 0;
         });
-        self.fake_loss_recv = value;
-    }
-
-    #[func]
-    fn get_fake_jitter_send(&self) -> i64 {
-        self.fake_jitter_send
     }
 
     #[func]
@@ -721,14 +638,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_jitter_send = 0;
         });
-        self.fake_jitter_send = value;
-    }
-
-    #[func]
-    fn get_fake_jitter_recv(&self) -> i64 {
-        self.fake_jitter_recv
     }
 
     #[func]
@@ -741,14 +651,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_jitter_recv = 0;
         });
-        self.fake_jitter_recv = value;
-    }
-
-    #[func]
-    fn get_fake_dup_send(&self) -> i64 {
-        self.fake_dup_send
     }
 
     #[func]
@@ -761,16 +664,9 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_dup_send = 0;
         });
-        self.fake_dup_send = value;
     }
     
-    #[func]
-    fn get_fake_dup_recv(&self) -> i64 {
-        self.fake_dup_recv
-    }
-
     #[func]
     fn set_fake_dup_recv(&mut self, value: i64) {
         if !self.is_server {
@@ -781,14 +677,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_dup_recv = 0;
         });
-        self.fake_dup_recv = value;
-    }
-
-    #[func]
-    fn get_fake_dup_ms_max(&self) -> i64 {
-        self.fake_dup_ms_max
     }
 
     #[func]
@@ -801,14 +690,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_dup_ms_max = 0;
         });
-        self.fake_dup_ms_max = value;
-    }
-
-    #[func]
-    fn get_fake_reorder_send(&self) -> i64 {
-        self.fake_reorder_send
     }
 
     #[func]
@@ -821,14 +703,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_reorder_send = 0;
         });
-        self.fake_reorder_send = value;
-    }
-
-    #[func]
-    fn get_fake_reorder_recv(&self) -> i64 {
-        self.fake_reorder_recv
     }
 
     #[func]
@@ -841,14 +716,7 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_reorder_recv = 0;
         });
-        self.fake_reorder_recv = value;
-    }
-
-    #[func]
-    fn get_fake_reorder_ms(&self) -> i64 {
-        self.fake_reorder_ms
     }
 
     #[func]
@@ -861,8 +729,6 @@ impl NetworkHandler {
             GnsConfig::Int32(i64_to_u32(value)),
         ).unwrap_or_else(|e| {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
-            self.fake_reorder_ms = 0;
         });
-        self.fake_reorder_ms = value;
     }
 }

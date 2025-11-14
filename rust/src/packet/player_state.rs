@@ -1,11 +1,12 @@
 use crate::packet::prelude::*;
 
+// TODO: wrap timestamp_us to save bytes
 define_packet! {
     name: PlayerStatePacket,
     variant: PlayerState,
     reliable: false,
     fields: {
-        id: {
+        player_id: {
             godot: i64,
             wire: u8,
             default: -1,
@@ -14,22 +15,23 @@ define_packet! {
             godot: i64,
             wire: u16,
         },
-        timestamp_ms: {
+        timestamp_us: {
             godot: i64,
             wire: u32,
         },
         position: {
             godot: Vector3,
         },
-        rotation: {
+        look_abs: {
             godot: Vector2,
-        },
-        is_crouching: {
-            godot: bool,
         },
         velocity: {
             godot: Vector3,
         },
+        movement_state: {
+            godot: i64,
+            wire: u8
+        }
     },
     codec: postcard
 }

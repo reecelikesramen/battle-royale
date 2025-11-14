@@ -1,61 +1,39 @@
 use crate::packet::prelude::*;
 
+// TODO: quantization of inputs
+// TODO: use connection id to identify player
+// TODO: wrap timestamp_us to save bytes
 define_packet! {
     name: PlayerInputPacket,
     variant: PlayerInput,
     reliable: false,
     fields: {
-        id: {
-            godot: i64,
-            wire: u8,
-            default: -1,
-        },
         sequence_id: {
             godot: i64,
             wire: u16,
         },
-        timestamp_ms: {
+        timestamp_us: {
             godot: i64,
             wire: u32,
         },
-        move_forward: {
+        move_forward_backward: {
             godot: f64,
-            wire: f32,
+            wire: i8,
         },
-        move_backward: {
+        move_left_right: {
             godot: f64,
-            wire: f32,
-        },
-        move_left: {
-            godot: f64,
-            wire: f32,
-        },
-        move_right: {
-            godot: f64,
-            wire: f32,
-        },
-        look_delta: {
-            godot: Vector2,
-        },
-        jump_pressed: {
-            godot: bool,
-        },
-        crouch_pressed: {
-            godot: bool,
-        },
-        crouch_released: {
-            godot: bool,
+            wire: i8,
         },
         look_abs: {
             godot: Vector2,
         },
-        velocity: {
-            godot: Vector3,
-        },
-        crouch_held: {
+        jump: {
             godot: bool,
         },
-        was_on_floor: {
+        crouch: {
+            godot: bool,
+        },
+        sprint: {
             godot: bool,
         },
     },

@@ -1,10 +1,30 @@
-[gd_scene load_steps=10 format=3 uid="uid://cjo1ojc5g1lp4"]
+[gd_scene load_steps=12 format=3 uid="uid://cjo1ojc5g1lp4"]
 
 [ext_resource type="PackedScene" uid="uid://88a0imp81kyn" path="res://water/WaterPlane.tscn" id="1_ji47x"]
 [ext_resource type="Terrain3DMaterial" uid="uid://bmakpmpll0fv5" path="res://new_map_v2/map_material.res" id="2_tbeux"]
-[ext_resource type="Terrain3DAssets" uid="uid://dal3jhw6241qg" path="res://demo/data/assets.tres" id="3_8tace"]
 [ext_resource type="Environment" uid="uid://b8030pxcma3ij" path="res://environment/WE_test.tres" id="4_8tace"]
 [ext_resource type="Script" uid="uid://172t455bnixi" path="res://controllers/scripts/low_level_player_spawner.gd" id="5_ndrii"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tbeux"]
+transparency = 4
+cull_mode = 2
+vertex_color_use_as_albedo = true
+backlight_enabled = true
+backlight = Color(0.5, 0.5, 0.5, 1)
+distance_fade_mode = 1
+distance_fade_min_distance = 128.0
+distance_fade_max_distance = 96.0
+
+[sub_resource type="Terrain3DMeshAsset" id="Terrain3DMeshAsset_8tace"]
+generated_type = 1
+height_offset = 0.5
+material_override = SubResource("StandardMaterial3D_tbeux")
+last_lod = 0
+last_shadow_lod = 0
+lod0_range = 128.0
+
+[sub_resource type="Terrain3DAssets" id="Terrain3DAssets_ndrii"]
+mesh_list = Array[Terrain3DMeshAsset]([SubResource("Terrain3DMeshAsset_8tace")])
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_8tace"]
 
@@ -24,8 +44,9 @@ transform = Transform3D(4000, 0, 0, 0, 1, 0, 0, 0, 4000, 55.985363, 14.181557, -
 [node name="Terrain3D" type="Terrain3D" parent="."]
 data_directory = "res://new_map_v2/terrain_data"
 material = ExtResource("2_tbeux")
-assets = ExtResource("3_8tace")
+assets = SubResource("Terrain3DAssets_ndrii")
 collision_mode = 3
+show_checkered = true
 top_level = true
 metadata/_edit_lock_ = true
 
@@ -39,7 +60,7 @@ transform = Transform3D(0.37028158, 0.062475905, -0.9268163, 0.92143416, -0.1511
 script = ExtResource("5_ndrii")
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(0.99744076, 0.020425986, -0.06851761, 0, 0.9583226, 0.28568837, 0.07149744, -0.28495723, 0.95587003, 26.35603, 63.462936, 18.379356)
+transform = Transform3D(0.9974408, 0.020425988, -0.06851762, 0, 0.9583226, 0.28568837, 0.07149745, -0.28495723, 0.95587003, -4.8983803, 25.865162, -67.52723)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.4251964, 20.953222, -76.5012)

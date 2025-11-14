@@ -1,6 +1,4 @@
-class_name State
-
-extends Node
+class_name State extends Node
 
 signal transition(new_state_name: StringName)
 
@@ -12,9 +10,13 @@ func exit() -> void:
 	pass
 
 
-func update(delta: float) -> void:
+func update(_delta: float) -> void:
 	pass
 
 
-func physics_update(delta: float) -> void:
+func physics_update(_delta: float) -> void:
+	pass
+
+
+func input(_event: InputEvent) -> void:
 	pass

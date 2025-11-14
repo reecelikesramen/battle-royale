@@ -82,3 +82,15 @@ impl ToGodot<i64> for u32 {
         i64::from(*self)
     }
 }
+
+impl ToWire<i8> for f64 {
+    fn to_wire(&self) -> i8 {
+        (*self as i8).clamp(-1, 1)
+    }
+}
+
+impl ToGodot<f64> for i8 {
+    fn to_godot(&self) -> f64 {
+        f64::from(*self)
+    }
+}

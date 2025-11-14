@@ -1,11 +1,21 @@
-extends State
-
-@export var player: FPSController
-@export var animation_player: AnimationPlayer
+extends MovementState
 
 func enter():
-	animation_player.pause()
+	if ctx == Enums.IntegrationContext.VISUAL:
+		animation_player.pause()
 
+
+# TODO: on floor for game state as well
 func physics_update(_delta: float):
-	if !is_zero_approx(player.velocity.length_squared()) and player.is_on_floor():
+	player.update_movement(ctx)
+	player.update_velocity(ctx)
+
+	var velocity := player.velocity if ctx == Enums.IntegrationContext.VISUAL else player.game_velocity
+	if !velocity.is_zero_approx() and player.on_floor(ctx):
 		transition.emit("WalkingMovementState")
+	
+	if player.current_frame_input.crouch:
+		transition.emit("CrouchingMovementState")
+	
+	if player.current_frame_input.jump and player.on_floor(ctx):
+		transition.emit("JumpingMovementState")

@@ -1,7 +1,7 @@
-[gd_scene load_steps=19 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=23 format=3 uid="uid://cno0j53ottrgj"]
 
-[ext_resource type="Script" uid="uid://dxexvk5ydnrdq" path="res://controllers/scripts/fps_controller.gd" id="1_ca8e7"]
-[ext_resource type="Material" path="res://materials/player.tres" id="1_gf80s"]
+[ext_resource type="Script" uid="uid://bmbvova1tm3y8" path="res://controllers/scripts/fps_controller.gd" id="1_ca8e7"]
+[ext_resource type="Material" uid="uid://b4gwd5h7ixvct" path="res://materials/player.tres" id="1_gf80s"]
 [ext_resource type="Script" uid="uid://fjkc6funlbbj" path="res://controllers/scripts/shape_cast_signal.gd" id="3_xc2pf"]
 [ext_resource type="Script" uid="uid://2j0ubpg0qevr" path="res://controllers/scripts/gui.gd" id="4_co0pi"]
 [ext_resource type="Theme" uid="uid://b28fy0uaom4ds" path="res://ui/themes/debug.tres" id="4_t6fw5"]
@@ -10,6 +10,9 @@
 [ext_resource type="Script" uid="uid://c70m5pqrvihff" path="res://controllers/scripts/idle_movement_state.gd" id="8_bneyr"]
 [ext_resource type="Script" uid="uid://c1csw7q0gomdp" path="res://controllers/scripts/state_machine.gd" id="8_jdr2h"]
 [ext_resource type="Script" uid="uid://6qifdlt057ir" path="res://controllers/scripts/walking_movement_state.gd" id="9_bneyr"]
+[ext_resource type="Script" uid="uid://npgarjqdwdf6" path="res://controllers/scripts/sprinting_movement_state.gd" id="11_rk4xh"]
+[ext_resource type="Script" uid="uid://bb1ogkg56vx5s" path="res://controllers/scripts/crouching_movement_state.gd" id="12_uovkr"]
+[ext_resource type="Script" uid="uid://d0igha5eqiup3" path="res://controllers/scripts/jumping_movement_state.gd" id="13_l8yvu"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_74qjk"]
 resource_local_to_scene = true
@@ -156,6 +159,77 @@ tracks/6/keys = {
 "points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
 "times": PackedFloat32Array(0)
 }
+tracks/7/type = "bezier"
+tracks/7/imported = false
+tracks/7/enabled = true
+tracks/7/path = NodePath("CameraController/Camera3D:position:x")
+tracks/7/interp = 1
+tracks/7/loop_wrap = true
+tracks/7/keys = {
+"handle_modes": PackedInt32Array(0),
+"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
+"times": PackedFloat32Array(0)
+}
+tracks/8/type = "bezier"
+tracks/8/imported = false
+tracks/8/enabled = true
+tracks/8/path = NodePath("CameraController/Camera3D:position:y")
+tracks/8/interp = 1
+tracks/8/loop_wrap = true
+tracks/8/keys = {
+"handle_modes": PackedInt32Array(0),
+"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
+"times": PackedFloat32Array(0)
+}
+tracks/9/type = "bezier"
+tracks/9/imported = false
+tracks/9/enabled = true
+tracks/9/path = NodePath("CameraController/Camera3D:position:z")
+tracks/9/interp = 1
+tracks/9/loop_wrap = true
+tracks/9/keys = {
+"handle_modes": PackedInt32Array(0),
+"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
+"times": PackedFloat32Array(0)
+}
+
+[sub_resource type="Animation" id="Animation_rk4xh"]
+resource_name = "Sprinting"
+length = 1.2
+loop_mode = 1
+tracks/0/type = "bezier"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("CameraController/Camera3D:position:x")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"handle_modes": PackedInt32Array(2, 2, 2, 2, 2, 0),
+"points": PackedFloat32Array(0, -0.24999705, -0.0003833605, 0.16666667, 0.00025557668, 0.065, -0.050000004, -0.0075688055, 0.03333333, 0.00504587, 0.07568805, -0.099999994, 0.010833293, 0.0820642, -0.008890255, -0.065, -0.050000004, 0.015068807, 0.03333333, -0.010045869, -0.075, -0.0920881, -0.011006969, 0.06666672, 0.007968441, 0, -0.028262239, -0.011402661, 0, 0),
+"times": PackedFloat32Array(0, 0.3, 0.5, 0.8, 1, 1.2)
+}
+tracks/1/type = "bezier"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("CameraController/Camera3D:position:y")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"handle_modes": PackedInt32Array(2, 2, 2, 2, 2, 2),
+"points": PackedFloat32Array(0, -0.24999978, -4.8367594e-05, 0.1, 1.9347055e-05, 0.066, -0.10000001, -3.671646e-05, 0.14082322, 5.1705294e-05, -0.036, -0.08347858, 0.004914776, 0.100000024, -0.005887471, 0.066, -0.100008845, 2.203183e-05, 0.16666663, -3.671646e-05, -0.036, -0.06666666, 0.0043915585, 0.09942785, -0.006549648, 0, -0.06666672, -0.0002969308, 0, 0),
+"times": PackedFloat32Array(0, 0.3, 0.5, 0.8, 1, 1.2)
+}
+tracks/2/type = "bezier"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("CameraController/Camera3D:position:z")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"handle_modes": PackedInt32Array(2),
+"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
+"times": PackedFloat32Array(0)
+}
 
 [sub_resource type="Animation" id="Animation_jdr2h"]
 resource_name = "Walking"
@@ -199,6 +273,7 @@ tracks/2/keys = {
 _data = {
 &"Crouch": SubResource("Animation_ca8e7"),
 &"RESET": SubResource("Animation_xc2pf"),
+&"Sprinting": SubResource("Animation_rk4xh"),
 &"Walking": SubResource("Animation_jdr2h")
 }
 
@@ -207,7 +282,6 @@ _data = {
 [node name="FPSController" type="CharacterBody3D"]
 slide_on_ceiling = false
 script = ExtResource("1_ca8e7")
-TOGGLE_CROUCH = false
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
@@ -230,12 +304,30 @@ skeleton = NodePath("../../..")
 [node name="ReflectionProbe" type="ReflectionProbe" parent="CameraController/Camera3D"]
 update_mode = 1
 
+[node name="DeltaPos" type="ColorRect" parent="CameraController/Camera3D"]
+offset_left = 336.0
+offset_right = 376.0
+offset_bottom = 40.0
+
+[node name="DeltaVel" type="ColorRect" parent="CameraController/Camera3D"]
+offset_left = 336.0
+offset_top = 48.0
+offset_right = 376.0
+offset_bottom = 88.0
+
+[node name="InputBuffer" type="Label" parent="CameraController/Camera3D"]
+offset_left = 336.0
+offset_top = 96.0
+offset_right = 376.0
+offset_bottom = 119.0
+
 [node name="AnimationPlayer" type="AnimationPlayer" parent="."]
 libraries = {
 &"": SubResource("AnimationLibrary_xc2pf")
 }
 
 [node name="CrouchShapeCast3D" type="ShapeCast3D" parent="."]
+unique_name_in_owner = true
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 shape = SubResource("SphereShape3D_ca8e7")
 target_position = Vector3(0, 0.5, 0)
@@ -324,21 +416,36 @@ layout_mode = 2
 script = ExtResource("8_jdr2h")
 CURRENT_STATE = NodePath("IdleMovementState")
 DEBUG_NAME = "Movement State"
+SHOW_IN_DEBUG = null
 
-[node name="IdleMovementState" type="Node" parent="MovementStateMachine" node_paths=PackedStringArray("player", "animation_player")]
+[node name="IdleMovementState" type="Node" parent="MovementStateMachine"]
 script = ExtResource("8_bneyr")
-player = NodePath("../..")
-animation_player = NodePath("../../AnimationPlayer")
 metadata/_custom_type_script = "uid://8ywkt0fgrttk"
 
-[node name="WalkingMovementState" type="Node" parent="MovementStateMachine" node_paths=PackedStringArray("player", "animation_player")]
+[node name="WalkingMovementState" type="Node" parent="MovementStateMachine"]
 script = ExtResource("9_bneyr")
-player = NodePath("../..")
-animation_player = NodePath("../../AnimationPlayer")
+SPEED = 2.0
+ACCELERATION = 0.075
 metadata/_custom_type_script = "uid://8ywkt0fgrttk"
+
+[node name="SprintingMovementState" type="Node" parent="MovementStateMachine"]
+script = ExtResource("11_rk4xh")
+SPEED = 5.0
+metadata/_custom_type_script = "uid://8ywkt0fgrttk"
+
+[node name="CrouchingMovementState" type="Node" parent="MovementStateMachine"]
+script = ExtResource("12_uovkr")
+SPEED = 1.5
+ACCELERATION = 0.1
+metadata/_custom_type_script = "uid://q8ak1eaayjdy"
+
+[node name="JumpingMovementState" type="Node" parent="MovementStateMachine"]
+script = ExtResource("13_l8yvu")
+SPEED = 4.0
+ACCELERATION = 0.015
+metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
 [connection signal="animation_started" from="AnimationPlayer" to="." method="_on_animation_player_animation_started"]
-[connection signal="collision_state_changed" from="CrouchShapeCast3D" to="." method="_on_shape_cast_3d_collision_state_changed"]
 [connection signal="text_submitted" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ChatEdit" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_chat_edit_text_submitted"]
 [connection signal="toggled" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/RepeatActionsButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_repeat_actions_button_toggled"]
 [connection signal="pressed" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ExitToMenuButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_exit_to_menu_button_pressed"]

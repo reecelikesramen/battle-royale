@@ -1,16 +1,16 @@
 extends MovementState
 
-@export var SPEED := 5.0
+@export var SPEED := 7.0
 @export var ACCELERATION := 0.1
 @export var DECELERATION := 0.25
-@export var TOP_ANIM_SPEED := 2.2
+@export var TOP_ANIM_SPEED: float = 1.6
 
 var _speed_squared := SPEED * SPEED
 
 func enter():
 	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
 	if ctx == Enums.IntegrationContext.VISUAL:
-		animation_player.play("Walking", -1, 1.0)
+		animation_player.play("Sprinting", 0.5, 1.0)
 
 
 func exit():
@@ -26,13 +26,13 @@ func physics_update(delta: float):
 	
 	if ctx == Enums.IntegrationContext.VISUAL:
 		set_animation_speed(player.velocity.length_squared())
-	
+
 	var velocity := player.velocity if ctx == Enums.IntegrationContext.VISUAL else player.game_velocity
 	if velocity.is_zero_approx():
 		transition.emit("IdleMovementState")
 
-	if player.current_frame_input.sprint:
-		transition.emit("SprintingMovementState")
+	if !player.current_frame_input.sprint:
+		transition.emit("WalkingMovementState")
 	
 	if player.current_frame_input.crouch:
 		transition.emit("CrouchingMovementState")

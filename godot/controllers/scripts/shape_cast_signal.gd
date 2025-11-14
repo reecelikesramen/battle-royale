@@ -10,8 +10,8 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	# Ensure we update the cast
-	force_shapecast_update()
+	# force_shapecast_update()
 	var is_colliding_now = is_colliding()
 	if is_colliding_now != _was_colliding:
 		_was_colliding = is_colliding_now
-		emit_signal("collision_state_changed", is_colliding_now)
+		collision_state_changed.emit(is_colliding_now)

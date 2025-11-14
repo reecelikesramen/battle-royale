@@ -23,3 +23,12 @@ server authoritative changes before test:
 - [ ] client does pose estimates for self
 - [ ] client does pose estimates for others
 - [ ] client state buffering and interpolation for other players
+
+# server input refactoring
+
+- gravity applies to every charater, server/client, authority or not
+- movement:
+    - on server: apply movement from input packet
+    - on client:
+        - authority (self): apply movement from input and reconcile with server
+        - not authority (others): buffer, lerp, and apply movement from servers
