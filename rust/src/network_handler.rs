@@ -149,6 +149,10 @@ impl NetworkHandler {
 
         self.server = GnsSocket::new(self.gns_global.clone())
             .listen(ip_address, port.try_into().unwrap())
+            .map_err(|e| {
+                godot_print!("ERROR: Failed to start server: {:#?}", e);
+                panic!("Failed to start server");
+            })
             .ok();
 
         self.is_connected = true;
