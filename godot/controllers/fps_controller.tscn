@@ -415,7 +415,6 @@ layout_mode = 2
 script = ExtResource("8_jdr2h")
 CURRENT_STATE = NodePath("IdleMovementState")
 DEBUG_NAME = "Movement State"
-SHOW_IN_DEBUG = null
 
 [node name="IdleMovementState" type="Node" parent="MovementStateMachine"]
 script = ExtResource("8_bneyr")

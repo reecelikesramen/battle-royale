@@ -22,6 +22,15 @@ func enter():
 		animation_player.play("Crouch", -1, CROUCH_SPEED)
 
 
+func exit():
+	if is_remote_player:
+		animation_player.speed_scale = 1.0
+		print("exiting crouch state for remote player %s" % player.name)
+		animation_player.play("Crouch", -1, -UNCROUCH_SPEED, true)
+		await animation_player.animation_finished
+		print("crouch state exited successfully")
+		
+
 func physics_update(delta: float):
 	player.update_gravity(delta, ctx)
 	player.update_movement(ctx)
@@ -42,9 +51,7 @@ func physics_update(delta: float):
 		animation_player.play("Crouch", -1, -UNCROUCH_SPEED, true)
 		if !animation_player.is_playing():
 			return
-		await animation_player.animation_finished
-	else:
-		# TODO: make this right
-		await get_tree().create_timer(1.0 / UNCROUCH_SPEED).timeout
+
+	await animation_player.animation_finished
 
 	transition.emit("IdleMovementState")

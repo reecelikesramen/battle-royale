@@ -5,7 +5,6 @@ func enter():
 		animation_player.pause()
 
 
-# TODO: on floor for game state as well
 func physics_update(_delta: float):
 	player.update_movement(ctx)
 	player.update_velocity(ctx)

@@ -160,7 +160,7 @@ func _client_authority_physics_step(delta: float) -> void:
 	_client_authority_reconcile_visual_state(delta)
 
 
-func _client_remote_physics_step(_delta: float) -> void:
+func _client_remote_physics_step(delta: float) -> void:
 	var now_us := Time.get_ticks_usec()
 	var interpolation_pair := _player_state_buffer.get_interpolation_pair(now_us);
 	if !interpolation_pair.is_valid:
@@ -185,7 +185,7 @@ func _client_remote_physics_step(_delta: float) -> void:
 		velocity = blended_vel
 		update_camera(blended_look_abs)
 		$MovementStateMachine.set_state_by_id(from.movement_state if alpha < 0.5 else to.movement_state)
-	
+
 
 func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
 	var delta := 1.0 / Engine.get_physics_ticks_per_second() as float

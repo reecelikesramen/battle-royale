@@ -4,3 +4,4 @@
 
 [node name="NetworkHandler" type="NetworkHandler"]
 script = ExtResource("1_yduhh")
+load_testing_off = true

@@ -108,7 +108,8 @@ impl SequenceRingBuffer {
                 let delta_us = arrival_timestamp_us - prev_arrival_timestamp_us;
                 if delta_us > 0 {
                     self.buffer_delay_us = delta_us.clamp(MIN_DELAY_US, MAX_DELAY_US);
-                } else {
+                } else if arrival_timestamp_us != -1 || prev_arrival_timestamp_us != -1 {
+                    // not -1 and not -1 supresses insert from unacked inputs since its not needed for this
                     godot_warn!("Timestamp is older than previous entry: {} < {}", arrival_timestamp_us, prev_arrival_timestamp_us);
                 }
             }

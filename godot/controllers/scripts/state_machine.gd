@@ -8,7 +8,12 @@ var state_to_id: Dictionary[StringName, int] = {}
 var id_to_state: Dictionary[int, StringName] = {}
 
 var _show_in_debug: bool:
-	get: return SHOW_IN_DEBUG and !LowLevelNetworkHandler.is_server
+	get:
+		if !SHOW_IN_DEBUG: return false
+		if LowLevelNetworkHandler.is_server: return false
+		var player := owner as FPSController
+		if player == null: return false
+		return player.is_authority
 
 func _ready() -> void:
 	for child in get_children():
@@ -58,6 +63,6 @@ func _on_child_transition(new_state_name: StringName) -> void:
 		return
 	elif new_state == CURRENT_STATE: return
 	
-	CURRENT_STATE.exit()
-	new_state.enter()
+	await CURRENT_STATE.exit()
+	await new_state.enter()
 	CURRENT_STATE = new_state
