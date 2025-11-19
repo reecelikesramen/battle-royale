@@ -5,42 +5,45 @@ extends MovementState
 @export var DECELERATION := 0.25
 @export var TOP_ANIM_SPEED: float = 1.6
 
-var _speed_squared := SPEED * SPEED
+var TOP_SPEED_SQ: float:
+	get: return SPEED * SPEED
 
-func enter():
+func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
-	if ctx == Enums.IntegrationContext.VISUAL:
-		animation_player.play("Sprinting", 0.5, 1.0)
 
 
-func exit():
-	if ctx == Enums.IntegrationContext.VISUAL:
-		animation_player.speed_scale = 1.0
+func visual_enter() -> void:
+	animation_player.play("Sprinting", 0.5, 1.0)
 
 
-# TODO: on floor for game state as well
-func physics_update(delta: float):
-	player.update_gravity(delta, ctx)
-	player.update_movement(ctx)
-	player.update_velocity(ctx)
-	
-	if ctx == Enums.IntegrationContext.VISUAL:
-		set_animation_speed(player.velocity.length_squared())
+func logic_physics(delta: float) -> void:
+	player.update_gravity(delta, Enums.IntegrationContext.GAME)
+	player.update_movement(Enums.IntegrationContext.GAME)
+	player.update_velocity(Enums.IntegrationContext.GAME)
 
-	var velocity := player.velocity if ctx == Enums.IntegrationContext.VISUAL else player.game_velocity
-	if velocity.is_zero_approx():
+
+func logic_transitions() -> void:
+	if player.game_velocity.is_zero_approx():
 		transition.emit("IdleMovementState")
 
 	if !player.current_frame_input.sprint:
 		transition.emit("WalkingMovementState")
-	
+
 	if player.current_frame_input.crouch:
 		transition.emit("CrouchingMovementState")
-		
-	if player.current_frame_input.jump and player.on_floor(ctx):
+
+	if player.current_frame_input.jump and player.on_floor(Enums.IntegrationContext.GAME):
 		transition.emit("JumpingMovementState")
 
 
-func set_animation_speed(speed: float):
-	var alpha = remap(speed, 0.0, _speed_squared, 0.0, 1.0)
+func visual_physics(delta: float) -> void:
+	if !is_remote_player:
+		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
+		player.update_movement(Enums.IntegrationContext.VISUAL)
+		player.update_velocity(Enums.IntegrationContext.VISUAL)
+	_set_animation_speed(player.velocity.length_squared())
+
+
+func _set_animation_speed(speed_sq: float) -> void:
+	var alpha = remap(speed_sq, 0.0, TOP_SPEED_SQ, 0.0, 1.0)
 	animation_player.speed_scale = lerp(0.0, TOP_ANIM_SPEED, alpha)

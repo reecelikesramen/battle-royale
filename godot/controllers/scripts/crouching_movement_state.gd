@@ -10,48 +10,46 @@ extends MovementState
 @onready var CROUCH_SHAPECAST := %CrouchShapeCast3D
 
 var _prev_crouch_input: bool = true
-var _do_uncrouch := false
+var _wants_uncrouch := false
 
-
-func enter():
+func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
 	_prev_crouch_input = true
-	_do_uncrouch = false
-	if ctx == Enums.IntegrationContext.VISUAL:
-		animation_player.speed_scale = 1.0
-		animation_player.play("Crouch", -1, CROUCH_SPEED)
+	_wants_uncrouch = false
 
 
-func exit():
-	if is_remote_player:
-		animation_player.speed_scale = 1.0
-		print("exiting crouch state for remote player %s" % player.name)
-		animation_player.play("Crouch", -1, -UNCROUCH_SPEED, true)
-		await animation_player.animation_finished
-		print("crouch state exited successfully")
-		
+func visual_enter() -> void:
+	animation_player.speed_scale = 1.0
+	animation_player.play("Crouch", -1, CROUCH_SPEED)
 
-func physics_update(delta: float):
-	player.update_gravity(delta, ctx)
-	player.update_movement(ctx)
-	player.update_velocity(ctx)
 
-	if TOGGLE_CROUCH and player.current_frame_input.crouch and !_prev_crouch_input:
-		_do_uncrouch = !_do_uncrouch
-	elif !TOGGLE_CROUCH:
-		_do_uncrouch = !player.current_frame_input.crouch
-
-	_prev_crouch_input = player.current_frame_input.crouch
-	
-	# TODO: crouch shapecast for game state as well
-	if !_do_uncrouch or CROUCH_SHAPECAST.is_colliding():
-		return
-	
-	if ctx == Enums.IntegrationContext.VISUAL:
-		animation_player.play("Crouch", -1, -UNCROUCH_SPEED, true)
-		if !animation_player.is_playing():
-			return
-
+func visual_exit() -> void:
+	animation_player.speed_scale = 1.0
+	animation_player.play("Crouch", -1, -UNCROUCH_SPEED, true)
 	await animation_player.animation_finished
 
+
+func logic_physics(delta: float) -> void:
+	player.update_gravity(delta, Enums.IntegrationContext.GAME)
+	player.update_movement(Enums.IntegrationContext.GAME)
+	player.update_velocity(Enums.IntegrationContext.GAME)
+
+
+func logic_transitions() -> void:
+	if TOGGLE_CROUCH and player.current_frame_input.crouch and !_prev_crouch_input:
+		_wants_uncrouch = !_wants_uncrouch
+	elif !TOGGLE_CROUCH:
+		_wants_uncrouch = !player.current_frame_input.crouch
+	_prev_crouch_input = player.current_frame_input.crouch
+
+	if !_wants_uncrouch or CROUCH_SHAPECAST.is_colliding():
+		return
+	
 	transition.emit("IdleMovementState")
+
+
+func visual_physics(delta: float) -> void:
+	if !is_remote_player:
+		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
+		player.update_movement(Enums.IntegrationContext.VISUAL)
+		player.update_velocity(Enums.IntegrationContext.VISUAL)

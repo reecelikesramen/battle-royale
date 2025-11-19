@@ -21,6 +21,7 @@ LowLevelNetworkHandler="*res://low_level_network_handler.tscn"
 ClientNetworkGlobals="*res://controllers/scripts/client_network_globals.gd"
 ServerNetworkGlobals="*res://controllers/scripts/server_network_globals.gd"
 Enums="*res://enums.gd"
+Logging="*res://scripts/autoload/logger.gd"
 
 [debug]
 

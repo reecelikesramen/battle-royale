@@ -5,25 +5,38 @@ extends MovementState
 @export var DECELERATION := 0.025
 @export var JUMP_VELOCITY := 4.5
 
-func enter():
+var _enter_time := -1
+
+func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
-	if ctx == Enums.IntegrationContext.VISUAL:
+	player.game_velocity.y += JUMP_VELOCITY
+	_enter_time = Time.get_ticks_usec()
+
+
+func visual_enter() -> void:
+	if !is_remote_player:
 		player.velocity.y += JUMP_VELOCITY
-		animation_player.pause()
-	else:
-		player.game_velocity.y += JUMP_VELOCITY
+	animation_player.pause()
 
 
-func exit():
-	if ctx == Enums.IntegrationContext.VISUAL:
-		animation_player.speed_scale = 1.0
+func visual_exit() -> void:
+	animation_player.speed_scale = 1.0
 
 
-# TODO: on floor for game state as well
-func physics_update(delta: float):
-	player.update_gravity(delta, ctx)
-	player.update_movement(ctx)
-	player.update_velocity(ctx)
-	
-	if player.on_floor(ctx):
+func logic_physics(delta: float) -> void:
+	player.update_gravity(delta, Enums.IntegrationContext.GAME)
+	player.update_movement(Enums.IntegrationContext.GAME)
+	player.update_velocity(Enums.IntegrationContext.GAME)
+
+
+func logic_transitions() -> void:
+	var enough_time := Time.get_ticks_usec() - _enter_time > 100_000
+	if enough_time and player.on_floor(Enums.IntegrationContext.GAME):
 		transition.emit("IdleMovementState")
+	
+
+func visual_physics(delta: float) -> void:
+	if !is_remote_player:
+		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
+		player.update_movement(Enums.IntegrationContext.VISUAL)
+		player.update_velocity(Enums.IntegrationContext.VISUAL)

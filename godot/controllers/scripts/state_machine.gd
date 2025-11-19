@@ -3,9 +3,14 @@ class_name StateMachine extends Node
 @export var CURRENT_STATE: State
 @export var DEBUG_NAME: String
 @export var SHOW_IN_DEBUG: bool = true
+
 var states: Dictionary[StringName, State] = {}
 var state_to_id: Dictionary[StringName, int] = {}
 var id_to_state: Dictionary[int, StringName] = {}
+
+var _logic_state: State
+var _visual_state: State
+var _pending_transition: StringName = &""
 
 var _show_in_debug: bool:
 	get:
@@ -21,48 +26,76 @@ func _ready() -> void:
 			states[child.name] = child
 			state_to_id[child.name] = child.get_index()
 			id_to_state[child.get_index()] = child.name
-			child.transition.connect(_on_child_transition)
+			child.transition.connect(_on_logic_transition)
 		else:
 			push_warning("State Machine '%s' contains an incompatible child node '%s', type '%s'" % [name, child.name, type_string(typeof(child))])
 	
+	_logic_state = CURRENT_STATE
+	_visual_state = CURRENT_STATE
 	await owner.ready
 	await CURRENT_STATE.ready
-	CURRENT_STATE.enter()
+	await _logic_state.logic_enter()
+	await _visual_state.visual_enter()
 
 
-func _process(delta: float) -> void:
-	CURRENT_STATE.update(delta)
-	if _show_in_debug:
-		ClientNetworkGlobals.debug.set_debug_property(DEBUG_NAME, CURRENT_STATE.name)
+func run_logic(delta: float) -> void:
+	await _logic_state.logic_physics(delta)
+	while true:
+		await _logic_state.logic_transitions()
+		if _pending_transition == &"":
+			break
+		await _switch_logic(_pending_transition)
+		_pending_transition = &""
 
 
-func physics_process(delta: float) -> void:
-	CURRENT_STATE.physics_update(delta)
-
-
-func set_state(new_state_name: StringName) -> void:
-	_on_child_transition(new_state_name)
-
-
-func set_state_by_id(new_state_id: int) -> void:
-	_on_child_transition(id_to_state[new_state_id])
-
-
-func get_state() -> StringName:
-	return CURRENT_STATE.name
-
-
-func get_state_id() -> int:
-	return state_to_id[CURRENT_STATE.name]
-
-
-func _on_child_transition(new_state_name: StringName) -> void:
-	var new_state = states.get(new_state_name)
-	if new_state == null:
-		push_warning("State Machine '%s' transitioned to nonexistant state '%s'" % [name, new_state_name])
+func sync_visual() -> void:
+	if _visual_state == _logic_state:
 		return
-	elif new_state == CURRENT_STATE: return
-	
-	await CURRENT_STATE.exit()
-	await new_state.enter()
-	CURRENT_STATE = new_state
+	await _visual_state.visual_exit()
+	_visual_state = _logic_state
+	await _visual_state.visual_enter()
+
+
+func run_visual(delta: float) -> void:
+	await _visual_state.visual_physics(delta)
+
+
+func get_logic_state_id() -> int:
+	return state_to_id[_logic_state.name]
+
+
+func set_logic_state_by_id(new_state_id: int) -> void:
+	var target := states[id_to_state[new_state_id]]
+	if target == null or target == _logic_state:
+		return
+	await _logic_state.logic_exit()
+	_logic_state = target
+	await _logic_state.logic_enter()
+
+
+func set_visual_state_by_id(new_state_id: int) -> void:
+	var target := states[id_to_state[new_state_id]]
+	if target == null or target == _visual_state:
+		return
+	await _visual_state.visual_exit()
+	_visual_state = target
+	await _visual_state.visual_enter()
+
+
+func _on_logic_transition(new_state_name: StringName) -> void:
+	_pending_transition = new_state_name
+
+
+func _switch_logic(new_state_name: StringName) -> void:
+	var target := states[new_state_name]
+	if target == null or target == _logic_state:
+		return
+	await _logic_state.logic_exit()
+	_logic_state = target
+	await _logic_state.logic_enter()
+
+
+func _process(_delta: float) -> void:
+	# CURRENT_STATE.update(delta)
+	if _show_in_debug:
+		ClientNetworkGlobals.debug.set_debug_property(DEBUG_NAME, _logic_state.name)

@@ -30,6 +30,7 @@ var is_authority: bool:
 	get: return !LowLevelNetworkHandler.is_server && _owner_id == ClientNetworkGlobals.id
 
 var current_frame_input: PlayerInputPacket = null
+
 var context: Enums.IntegrationContext = Enums.IntegrationContext.VISUAL
 
 var _owner_id: int
@@ -72,23 +73,10 @@ func _exit_tree() -> void:
 	ClientNetworkGlobals.handle_player_state.disconnect(client_handle_player_state)
 
 
-var _temp_timer := Timer.new()
 func _ready():
 	print("Player #%d spawned, named %s!" % [_owner_id, name])
 
-	global_position = Vector3(0, 21.079, -76.501)
-	game_position = global_position
-	
-	add_child(_temp_timer)
-	_temp_timer.wait_time = 4.0
-	_temp_timer.one_shot = false
-	_temp_timer.timeout.connect(func():
-		print("[%s] %s Visual Pos: %s Game Pos %s" % ["Server" if LowLevelNetworkHandler.is_server else "Client Authority" if is_authority else "Client Remote", name, global_position, game_position])	
-	)
-	_temp_timer.start()
-
 	if is_authority:
-		Logging.enabled = true
 		add_to_group("local_player")
 		camera.make_current()
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -127,37 +115,21 @@ func _server_physics_step(delta: float) -> void:
 		assert(frame.delta > 0.0, "Delta is not positive")
 		current_frame_input = frame.packet as PlayerInputPacket
 		update_camera(current_frame_input.look_abs)
-		context = Enums.IntegrationContext.GAME
-		game_transform.basis = Basis.from_euler(Vector3(0, current_frame_input.look_abs.y, 0))
-		await $MovementStateMachine.run_logic(frame.delta)
-		context = Enums.IntegrationContext.VISUAL
-		$MovementStateMachine.sync_visual()
-		$MovementStateMachine.run_visual(frame.delta)
-		global_position = game_position
-		velocity = game_velocity
+		$MovementStateMachine.physics_process(frame.delta)
 
 	# if server broadcast player state
 	var player_state := PlayerStatePacket.new()
 	player_state.player_id = _owner_id
 	player_state.last_input_sequence_id = frames[-1].packet.sequence_id
 	player_state.timestamp_us = Time.get_ticks_usec()
-	player_state.position = game_position
+	player_state.position = global_position
 	player_state.look_abs = current_frame_input.look_abs
-	player_state.velocity = game_velocity
-	player_state.movement_state = $MovementStateMachine.get_logic_state_id()
+	player_state.velocity = velocity
+	player_state.movement_state = $MovementStateMachine.get_state_id()
 	LowLevelNetworkHandler.broadcast_packet(player_state.to_payload())
 
 
 func _client_authority_physics_step(delta: float) -> void:
-	#print("Is on floor: %s" % _game_is_on_floor)
-	#Logging.log("--- AUTH TICK start ---")
-	#Logging.log("pre: seq=%d game_pos=%s vis_pos=%s logic_state=%s" % [
-		#_input_sequence.current() if _input_sequence != null else -1,
-		#game_position,
-		#global_position,
-		#$MovementStateMachine.get_logic_state_id()
-	#])
-
 	# camera movement integration
 	_look_abs.x += _y_mouse_input * delta
 	_look_abs.x = clamp(_look_abs.x, TILT_LOWER_LIMIT, TILT_UPPER_LIMIT)
@@ -179,23 +151,16 @@ func _client_authority_physics_step(delta: float) -> void:
 	# run prediction on authoritative copy
 	context = Enums.IntegrationContext.GAME
 	game_transform.basis = Basis.from_euler(Vector3(0, player_input.look_abs.y, 0))
-	await $MovementStateMachine.run_logic(delta)
+	$MovementStateMachine.physics_process(delta)
 
 	context = Enums.IntegrationContext.VISUAL
 	update_camera(player_input.look_abs)
-	await $MovementStateMachine.sync_visual()
-	await $MovementStateMachine.run_visual(delta)
+	$MovementStateMachine.physics_process(delta)
 
 	_client_authority_reconcile_visual_state(delta)
 
-	#Logging.log("post: game_pos=%s vis_pos=%s logic_state=%s" % [
-		#game_position,
-		#global_position,
-		#$MovementStateMachine.get_logic_state_id()
-	#])
 
-
-func _client_remote_physics_step(delta: float) -> void:
+func _client_remote_physics_step(_delta: float) -> void:
 	var now_us := Time.get_ticks_usec()
 	var interpolation_pair := _player_state_buffer.get_interpolation_pair(now_us);
 	if !interpolation_pair.is_valid:
@@ -206,8 +171,7 @@ func _client_remote_physics_step(delta: float) -> void:
 		global_position = packet.position
 		velocity = packet.velocity
 		update_camera(packet.look_abs)
-		$MovementStateMachine.set_visual_state_by_id(packet.movement_state)
-		await $MovementStateMachine.run_visual(delta)
+		$MovementStateMachine.set_state_by_id(packet.movement_state)
 	else:
 		var from: PlayerStatePacket = interpolation_pair.from as PlayerStatePacket
 		var to: PlayerStatePacket = interpolation_pair.to as PlayerStatePacket
@@ -220,9 +184,8 @@ func _client_remote_physics_step(delta: float) -> void:
 		global_position = blended_pos
 		velocity = blended_vel
 		update_camera(blended_look_abs)
-		$MovementStateMachine.set_visual_state_by_id(from.movement_state if alpha < 0.5 else to.movement_state)
-		await $MovementStateMachine.run_visual(delta)
-
+		$MovementStateMachine.set_state_by_id(from.movement_state if alpha < 0.5 else to.movement_state)
+	
 
 func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
 	var delta := 1.0 / Engine.get_physics_ticks_per_second() as float
@@ -233,43 +196,15 @@ func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
 	game_movement_state_id = game_state.movement_state
 
 	context = Enums.IntegrationContext.GAME
-	$MovementStateMachine.set_logic_state_by_id(game_state.movement_state)
-
-	#Logging.log("--- RECONCILE start ---")
-	#Logging.log("RECON pre: game_pos=%s vis_pos=%s game_vel=%s vis_vel=%s state=%d game_seq=%d unacked_size=%d unacked_oldest=%d unacked_newest=%d" % [
-		#game_position,
-		#global_position,
-		#game_velocity,
-		#velocity,
-		#$MovementStateMachine.get_logic_state_id(),
-		#game_sequence_id,
-		#_unacked_inputs.size(),
-		#_unacked_inputs.oldest_sequence_id(),
-		#_unacked_inputs.newest_sequence_id(),
-	#])
+	$MovementStateMachine.set_state_by_id(game_state.movement_state)
 
 	for input: PlayerInputPacket in _unacked_inputs.get_starting_at(game_sequence_id + 1):
 		current_frame_input = input
 		game_transform.basis = Basis.from_euler(Vector3(0, input.look_abs.y, 0))
-		await $MovementStateMachine.run_logic(delta)
+		$MovementStateMachine.physics_process(delta)
 	
-	context = Enums.IntegrationContext.VISUAL
-	#await $MovementStateMachine.sync_visual()
-	#await $MovementStateMachine.run_visual(delta)
-
-	#Logging.log("RECON post: game_pos=%s vis_pos=%s game_vel=%s vis_vel=%s state=%d game_seq=%d unacked_size=%d unacked_oldest=%d unacked_newest=%d" % [
-		#game_position,
-		#global_position,
-		#game_velocity,
-		#velocity,
-		#$MovementStateMachine.get_logic_state_id(),
-		#game_sequence_id,
-		#_unacked_inputs.size(),
-		#_unacked_inputs.oldest_sequence_id(),
-		#_unacked_inputs.newest_sequence_id(),
-	#])
-
 	_client_authority_reconcile_visual_state(delta)
+	context = Enums.IntegrationContext.VISUAL
 
 
 func _client_authority_reconcile_visual_state(delta: float) -> void:
@@ -277,16 +212,6 @@ func _client_authority_reconcile_visual_state(delta: float) -> void:
 	var horizontal_err := Vector2(delta_pos.x, delta_pos.z)
 	var horizontal_err_mag := horizontal_err.length()
 	var vertical_err := absf(delta_pos.y)
-
-	#Logging.log("RECON ERR: horiz=%f vert=%f game_pos=%s vis_pos=%s game_vel=%s vis_vel=%s state=%d" % [
-		#horizontal_err_mag,
-		#vertical_err,
-		#game_position,
-		#global_position,
-		#game_velocity,
-		#velocity,
-		#$MovementStateMachine.get_logic_state_id(),
-	#])
 
 	var color_pos := Color()
 	color_pos.r = delta_pos.x
@@ -438,7 +363,6 @@ func update_velocity(ctx: Enums.IntegrationContext) -> void:
 		_game_is_on_floor = false
 		var delta := 1.0 / Engine.get_physics_ticks_per_second() as float
 		var remaining_motion := game_velocity * delta
-		var initial_velocity := game_velocity
 		for i in MAX_SLIDES:
 			if remaining_motion.is_zero_approx():
 				break
@@ -447,15 +371,14 @@ func update_velocity(ctx: Enums.IntegrationContext) -> void:
 			var params := PhysicsTestMotionParameters3D.new()
 			params.motion = remaining_motion
 			params.from = game_transform
-			params.collide_separation_ray = true
 			
 			var collided := PhysicsServer3D.body_test_motion(_body_rid, params, _game_physics_result)
 			game_transform.origin += _game_physics_result.get_travel()
 
 			if !collided:
+				_game_is_on_floor = false
 				break
 
-			game_transform.origin += _game_physics_result.get_travel()
 			game_velocity = game_velocity.slide(_game_physics_result.get_collision_normal(0))
 			remaining_motion = _game_physics_result.get_remainder()
 			for j in range(_game_physics_result.get_collision_count()):
