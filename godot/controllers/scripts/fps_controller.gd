@@ -165,7 +165,7 @@ func _server_physics_step(delta: float) -> void:
 		update_camera(input.input_packet.look_abs)
 		context = Enums.IntegrationContext.GAME
 		game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
-		await $MovementStateMachine.run_logic(frame.delta)
+		$MovementStateMachine.run_logic(frame.delta)
 		context = Enums.IntegrationContext.VISUAL
 		$MovementStateMachine.sync_visual()
 		$MovementStateMachine.run_visual(frame.delta)
@@ -219,12 +219,12 @@ func _client_authority_physics_step(delta: float) -> void:
 	# run prediction on authoritative copy
 	context = Enums.IntegrationContext.GAME
 	game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
-	await $MovementStateMachine.run_logic(delta)
+	$MovementStateMachine.run_logic(delta)
 
 	context = Enums.IntegrationContext.VISUAL
 	update_camera(input.input_packet.look_abs)
-	await $MovementStateMachine.sync_visual()
-	await $MovementStateMachine.run_visual(delta)
+	$MovementStateMachine.sync_visual()
+	$MovementStateMachine.run_visual(delta)
 
 	_client_authority_reconcile_visual_state(delta)
 
@@ -247,7 +247,7 @@ func _client_remote_physics_step(delta: float) -> void:
 		velocity = packet.velocity
 		update_camera(packet.look_abs)
 		$MovementStateMachine.set_visual_state_by_id(packet.movement_state)
-		await $MovementStateMachine.run_visual(delta)
+		$MovementStateMachine.run_visual(delta)
 	else:
 		var from: PlayerStatePacket = interpolation_pair.from as PlayerStatePacket
 		var to: PlayerStatePacket = interpolation_pair.to as PlayerStatePacket
@@ -261,7 +261,7 @@ func _client_remote_physics_step(delta: float) -> void:
 		velocity = blended_vel
 		update_camera(blended_look_abs)
 		$MovementStateMachine.set_visual_state_by_id(from.movement_state if alpha < 0.5 else to.movement_state)
-		await $MovementStateMachine.run_visual(delta)
+		$MovementStateMachine.run_visual(delta)
 
 
 func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
@@ -295,12 +295,12 @@ func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
 		input.input_packet = inputs[i]
 		# _current_frame_input = repeat_input
 		game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
-		await $MovementStateMachine.run_logic(delta)
+		$MovementStateMachine.run_logic(delta)
 	_test_is_replaying = false
 	
 	context = Enums.IntegrationContext.VISUAL
-	#await $MovementStateMachine.sync_visual()
-	#await $MovementStateMachine.run_visual(delta)
+	#$MovementStateMachine.sync_visual()
+	#$MovementStateMachine.run_visual(delta)
 
 	#Logging.log("RECON post: game_pos=%s vis_pos=%s game_vel=%s vis_vel=%s state=%d game_seq=%d unacked_size=%d unacked_oldest=%d unacked_newest=%d" % [
 		#game_position,

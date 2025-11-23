@@ -34,18 +34,18 @@ func _ready() -> void:
 	_visual_state = CURRENT_STATE
 	await owner.ready
 	await CURRENT_STATE.ready
-	await _logic_state.logic_enter()
-	await _visual_state.visual_enter()
+	_logic_state.logic_enter()
+	_visual_state.visual_enter()
 
 
 # TODO: known bug where visual/game desync for single frame transitions
 func run_logic(delta: float) -> void:
-	await _logic_state.logic_physics(delta)
+	_logic_state.logic_physics(delta)
 	while true:
-		await _logic_state.logic_transitions()
+		_logic_state.logic_transitions()
 		if _pending_transition == &"":
 			break
-		await _switch_logic(_pending_transition)
+		_switch_logic(_pending_transition)
 		_pending_transition = &""
 
 
@@ -53,13 +53,13 @@ func run_logic(delta: float) -> void:
 func sync_visual() -> void:
 	if _visual_state == _logic_state:
 		return
-	await _visual_state.visual_exit()
+	_visual_state.visual_exit()
 	_visual_state = _logic_state
-	await _visual_state.visual_enter()
+	_visual_state.visual_enter()
 
 
 func run_visual(delta: float) -> void:
-	await _visual_state.visual_physics(delta)
+	_visual_state.visual_physics(delta)
 
 
 func get_logic_state_id() -> int:
@@ -70,18 +70,18 @@ func set_logic_state_by_id(new_state_id: int) -> void:
 	var target := states[id_to_state[new_state_id]]
 	if target == null or target == _logic_state:
 		return
-	await _logic_state.logic_exit()
+	_logic_state.logic_exit()
 	_logic_state = target
-	await _logic_state.logic_enter()
+	_logic_state.logic_enter()
 
 
 func set_visual_state_by_id(new_state_id: int) -> void:
 	var target := states[id_to_state[new_state_id]]
 	if target == null or target == _visual_state:
 		return
-	await _visual_state.visual_exit()
+	_visual_state.visual_exit()
 	_visual_state = target
-	await _visual_state.visual_enter()
+	_visual_state.visual_enter()
 
 
 func _on_logic_transition(new_state_name: StringName) -> void:
@@ -92,9 +92,9 @@ func _switch_logic(new_state_name: StringName) -> void:
 	var target := states[new_state_name]
 	if target == null or target == _logic_state:
 		return
-	await _logic_state.logic_exit()
+	_logic_state.logic_exit()
 	_logic_state = target
-	await _logic_state.logic_enter()
+	_logic_state.logic_enter()
 
 
 func _process(_delta: float) -> void:
