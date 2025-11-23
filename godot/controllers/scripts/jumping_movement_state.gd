@@ -14,7 +14,7 @@ func logic_enter() -> void:
 
 
 func visual_enter() -> void:
-	if !is_remote_player:
+	if !is_remote_player and player.input.is_jump_just_pressed():
 		player.velocity.y += JUMP_VELOCITY
 	animation_player.pause()
 

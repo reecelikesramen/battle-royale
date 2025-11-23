@@ -413,33 +413,33 @@ impl NetworkHandler {
         });
 
         let now = Instant::now();
-        let elapsed = now - self.last_update;
-        if elapsed.as_secs() > 10 {
-            self.last_update = now;
-            for (client, nick) in self.connected_clients.clone().into_iter() {
-                let info = server.get_connection_info(client).unwrap_or_else(|| {
-                    self.queue_debug(format!("ERROR: Failed to get connection info for {nick}"));
-                    panic!()
-                });
-                let (status, _) = server
-                    .get_connection_real_time_status(client, 0)
-                    .unwrap_or_else(|_| {
-                        self.queue_debug(format!(
-                            "ERROR: Failed to get real time status for {nick}"
-                        ));
-                        panic!()
-                    });
+        // let elapsed = now - self.last_update;
+        // if elapsed.as_secs() > 10 {
+        //     self.last_update = now;
+        //     for (client, nick) in self.connected_clients.clone().into_iter() {
+        //         let info = server.get_connection_info(client).unwrap_or_else(|| {
+        //             self.queue_debug(format!("ERROR: Failed to get connection info for {nick}"));
+        //             panic!()
+        //         });
+        //         let (status, _) = server
+        //             .get_connection_real_time_status(client, 0)
+        //             .unwrap_or_else(|_| {
+        //                 self.queue_debug(format!(
+        //                     "ERROR: Failed to get real time status for {nick}"
+        //                 ));
+        //                 panic!()
+        //             });
 
-                self.queue_debug(format!(
-                  "== Client {:#?}\n\tIP: {:#?}\n\tPing: {:#?}\n\tOut/sec: {:#?}\n\tIn/sec: {:#?}",
-                    nick,
-                    info.remote_address(),
-                    status.ping(),
-                    status.out_bytes_per_sec(),
-                    status.in_bytes_per_sec(),
-                ));
-            }
-        }
+        //         self.queue_debug(format!(
+        //           "== Client {:#?}\n\tIP: {:#?}\n\tPing: {:#?}\n\tOut/sec: {:#?}\n\tIn/sec: {:#?}",
+        //             nick,
+        //             info.remote_address(),
+        //             status.ping(),
+        //             status.out_bytes_per_sec(),
+        //             status.in_bytes_per_sec(),
+        //         ));
+        //     }
+        // }
 
         // Poll internal callbacks
         self.gns_global.poll_callbacks();

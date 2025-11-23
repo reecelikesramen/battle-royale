@@ -16,10 +16,10 @@ func logic_transitions() -> void:
 	if !is_zero_approx(player.game_velocity.x) or !is_zero_approx(player.game_velocity.z):
 		transition.emit("WalkingMovementState")
 	
-	if player.current_frame_input.crouch:
+	if player.input.is_crouching():
 		transition.emit("CrouchingMovementState")
 
-	if player.current_frame_input.jump and player.on_floor(Enums.IntegrationContext.GAME):
+	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
 		transition.emit("JumpingMovementState")
 
 

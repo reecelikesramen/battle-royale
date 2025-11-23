@@ -7,14 +7,13 @@ extends MovementState
 @export_range(1, 6, 0.1) var CROUCH_SPEED := 4.0
 @export_range(1, 6, 0.1) var UNCROUCH_SPEED := 6.0
 
-@onready var CROUCH_SHAPECAST := %CrouchShapeCast3D
+var _crouch_shapecast: ShapeCast3D:
+	get: return player.crouch_shapecast
 
-var _prev_crouch_input: bool = true
 var _wants_uncrouch := false
 
 func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
-	_prev_crouch_input = true
 	_wants_uncrouch = false
 
 
@@ -36,13 +35,12 @@ func logic_physics(delta: float) -> void:
 
 
 func logic_transitions() -> void:
-	if TOGGLE_CROUCH and player.current_frame_input.crouch and !_prev_crouch_input:
+	if TOGGLE_CROUCH and player.input.is_crouch_just_pressed():
 		_wants_uncrouch = !_wants_uncrouch
 	elif !TOGGLE_CROUCH:
-		_wants_uncrouch = !player.current_frame_input.crouch
-	_prev_crouch_input = player.current_frame_input.crouch
+		_wants_uncrouch = !player.input.is_crouching()
 
-	if !_wants_uncrouch or CROUCH_SHAPECAST.is_colliding():
+	if !_wants_uncrouch or _crouch_shapecast.is_colliding():
 		return
 	
 	transition.emit("IdleMovementState")

@@ -1,7 +1,6 @@
-[gd_scene load_steps=22 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=25 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://bmbvova1tm3y8" path="res://controllers/scripts/fps_controller.gd" id="1_ca8e7"]
-[ext_resource type="Material" uid="uid://b4gwd5h7ixvct" path="res://materials/player.tres" id="1_gf80s"]
 [ext_resource type="Script" uid="uid://fjkc6funlbbj" path="res://controllers/scripts/shape_cast_signal.gd" id="3_xc2pf"]
 [ext_resource type="Script" uid="uid://2j0ubpg0qevr" path="res://controllers/scripts/gui.gd" id="4_co0pi"]
 [ext_resource type="Theme" uid="uid://b28fy0uaom4ds" path="res://ui/themes/debug.tres" id="4_t6fw5"]
@@ -16,9 +15,31 @@
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_74qjk"]
 resource_local_to_scene = true
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rk4xh"]
+albedo_color = Color(0.847059, 0.0862745, 0, 1)
+roughness = 0.32
+emission = Color(0.188235, 0.254902, 1, 1)
+emission_energy_multiplier = 0.0
+
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_gf80s"]
 resource_local_to_scene = true
-material = ExtResource("1_gf80s")
+material = SubResource("StandardMaterial3D_rk4xh")
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_uovkr"]
+resource_local_to_scene = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_uovkr"]
+transparency = 1
+albedo_color = Color(0.23137255, 0.21960784, 0.9411765, 0.3529412)
+roughness = 0.32
+emission = Color(0.188235, 0.254902, 1, 1)
+emission_energy_multiplier = 0.0
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_l8yvu"]
+resource_local_to_scene = true
+material = SubResource("StandardMaterial3D_uovkr")
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_ca8e7"]
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_gshig"]
 top_radius = 0.02
@@ -29,7 +50,7 @@ resource_name = "Crouch"
 tracks/0/type = "value"
 tracks/0/imported = false
 tracks/0/enabled = true
-tracks/0/path = NodePath("CollisionShape3D:shape:height")
+tracks/0/path = NodePath("VisualCollider:shape:height")
 tracks/0/interp = 2
 tracks/0/loop_wrap = true
 tracks/0/keys = {
@@ -41,7 +62,7 @@ tracks/0/keys = {
 tracks/1/type = "value"
 tracks/1/imported = false
 tracks/1/enabled = true
-tracks/1/path = NodePath("CollisionShape3D:position")
+tracks/1/path = NodePath("VisualCollider:position")
 tracks/1/interp = 2
 tracks/1/loop_wrap = true
 tracks/1/keys = {
@@ -65,10 +86,46 @@ tracks/2/keys = {
 tracks/3/type = "value"
 tracks/3/imported = false
 tracks/3/enabled = true
-tracks/3/path = NodePath("CollisionShape3D/PlaceholderMesh:mesh:height")
+tracks/3/path = NodePath("VisualCollider/PlaceholderMesh:mesh:height")
 tracks/3/interp = 2
 tracks/3/loop_wrap = true
 tracks/3/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [2.0, 1.5]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("GameCharacterBody3D/GameCollider:shape:height")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [2.0, 1.5]
+}
+tracks/5/type = "value"
+tracks/5/imported = false
+tracks/5/enabled = true
+tracks/5/path = NodePath("GameCharacterBody3D/GameCollider:position")
+tracks/5/interp = 1
+tracks/5/loop_wrap = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 1, 0), Vector3(0, 0.75, 0)]
+}
+tracks/6/type = "value"
+tracks/6/imported = false
+tracks/6/enabled = true
+tracks/6/path = NodePath("GameCharacterBody3D/GameCollider/PlaceholderMesh:mesh:height")
+tracks/6/interp = 1
+tracks/6/loop_wrap = true
+tracks/6/keys = {
 "times": PackedFloat32Array(0, 1),
 "transitions": PackedFloat32Array(1, 1),
 "update": 0,
@@ -80,7 +137,7 @@ length = 0.001
 tracks/0/type = "value"
 tracks/0/imported = false
 tracks/0/enabled = true
-tracks/0/path = NodePath("CollisionShape3D:shape:height")
+tracks/0/path = NodePath("VisualCollider:shape:height")
 tracks/0/interp = 1
 tracks/0/loop_wrap = true
 tracks/0/keys = {
@@ -92,7 +149,7 @@ tracks/0/keys = {
 tracks/1/type = "value"
 tracks/1/imported = false
 tracks/1/enabled = true
-tracks/1/path = NodePath("CollisionShape3D:position")
+tracks/1/path = NodePath("VisualCollider:position")
 tracks/1/interp = 1
 tracks/1/loop_wrap = true
 tracks/1/keys = {
@@ -116,7 +173,7 @@ tracks/2/keys = {
 tracks/3/type = "value"
 tracks/3/imported = false
 tracks/3/enabled = true
-tracks/3/path = NodePath("CollisionShape3D/PlaceholderMesh:mesh:height")
+tracks/3/path = NodePath("VisualCollider/PlaceholderMesh:mesh:height")
 tracks/3/interp = 1
 tracks/3/loop_wrap = true
 tracks/3/keys = {
@@ -190,6 +247,42 @@ tracks/9/keys = {
 "handle_modes": PackedInt32Array(0),
 "points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
 "times": PackedFloat32Array(0)
+}
+tracks/10/type = "value"
+tracks/10/imported = false
+tracks/10/enabled = true
+tracks/10/path = NodePath("GameCharacterBody3D/GameCollider:shape:height")
+tracks/10/interp = 1
+tracks/10/loop_wrap = true
+tracks/10/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [2.0]
+}
+tracks/11/type = "value"
+tracks/11/imported = false
+tracks/11/enabled = true
+tracks/11/path = NodePath("GameCharacterBody3D/GameCollider:position")
+tracks/11/interp = 1
+tracks/11/loop_wrap = true
+tracks/11/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector3(0, 1, 0)]
+}
+tracks/12/type = "value"
+tracks/12/imported = false
+tracks/12/enabled = true
+tracks/12/path = NodePath("GameCharacterBody3D/GameCollider/PlaceholderMesh:mesh:height")
+tracks/12/interp = 1
+tracks/12/loop_wrap = true
+tracks/12/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [2.0]
 }
 
 [sub_resource type="Animation" id="Animation_rk4xh"]
@@ -276,18 +369,34 @@ _data = {
 &"Walking": SubResource("Animation_jdr2h")
 }
 
-[sub_resource type="SphereShape3D" id="SphereShape3D_ca8e7"]
-
 [node name="FPSController" type="CharacterBody3D"]
 slide_on_ceiling = false
 script = ExtResource("1_ca8e7")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+[node name="VisualCollider" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 shape = SubResource("CapsuleShape3D_74qjk")
 
-[node name="PlaceholderMesh" type="MeshInstance3D" parent="CollisionShape3D"]
+[node name="PlaceholderMesh" type="MeshInstance3D" parent="VisualCollider"]
 mesh = SubResource("CapsuleMesh_gf80s")
+
+[node name="GameCharacterBody3D" type="CharacterBody3D" parent="."]
+top_level = true
+
+[node name="GameCollider" type="CollisionShape3D" parent="GameCharacterBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+shape = SubResource("CapsuleShape3D_uovkr")
+
+[node name="PlaceholderMesh" type="MeshInstance3D" parent="GameCharacterBody3D/GameCollider"]
+mesh = SubResource("CapsuleMesh_l8yvu")
+
+[node name="CrouchShapeCast3D" type="ShapeCast3D" parent="GameCharacterBody3D"]
+unique_name_in_owner = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+shape = SubResource("SphereShape3D_ca8e7")
+target_position = Vector3(0, 0.5, 0)
+debug_shape_custom_color = Color(0, 0.8586215, 0, 1)
+script = ExtResource("3_xc2pf")
 
 [node name="CameraController" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
@@ -319,18 +428,13 @@ offset_left = 384.0
 offset_right = 594.0
 offset_bottom = 201.0
 
+[node name="ThirdPersonCamera3D" type="Camera3D" parent="CameraController"]
+transform = Transform3D(1, 0, 0, 0, 0.9261671, 0.3771135, 0, -0.3771135, 0.9261671, 0, 1.4404721, 2.607768)
+
 [node name="AnimationPlayer" type="AnimationPlayer" parent="."]
 libraries = {
 &"": SubResource("AnimationLibrary_xc2pf")
 }
-
-[node name="CrouchShapeCast3D" type="ShapeCast3D" parent="."]
-unique_name_in_owner = true
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-shape = SubResource("SphereShape3D_ca8e7")
-target_position = Vector3(0, 0.5, 0)
-debug_shape_custom_color = Color(0, 0.8586215, 0, 1)
-script = ExtResource("3_xc2pf")
 
 [node name="GUI" type="Control" parent="."]
 unique_name_in_owner = true

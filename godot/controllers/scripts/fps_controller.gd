@@ -1,6 +1,27 @@
-class_name FPSController
+class_name FPSController extends CharacterBody3D
 
-extends CharacterBody3D
+class PlayerInput:
+	var input_packet: PlayerInputPacket = null
+	var prev_input_packet: PlayerInputPacket = null
+
+	func is_sprinting() -> bool:
+		return input_packet.sprint
+
+	func is_sprint_just_pressed() -> bool:
+		return input_packet.sprint and not prev_input_packet.sprint
+
+	func is_crouching() -> bool:
+		return input_packet.crouch
+
+	func is_crouch_just_pressed() -> bool:
+		return input_packet.crouch and not prev_input_packet.crouch
+
+	func is_jumping() -> bool:
+		return input_packet.jump
+	
+	func is_jump_just_pressed() -> bool:
+		return input_packet.jump and not prev_input_packet.jump
+
 
 @export var TILT_LOWER_LIMIT: float = deg_to_rad(-90.0)
 @export var TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
@@ -18,20 +39,21 @@ extends CharacterBody3D
 @export var VELOCITY_CORRECTION_RATE := 12.0
 @export var VELOCITY_CORRECTION_DEADBAND := 0.2
 
-# inputs_to_keep = ceil((max_expected_rtt_sec * input_rate_hz) * 2)
-# const MAX_UNACKED_INPUTS: int = 128
-# average_rtt_s + 3 * rtt_jitter_s + safety_margin
-# const INPUT_EXPIRED_US: int = 200_000
-
 @onready var camera: Camera3D = $CameraController/Camera3D
+@onready var tp_camera: Camera3D = $CameraController/ThirdPersonCamera3D
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
+@onready var game_body: CharacterBody3D = $GameCharacterBody3D
+@onready var crouch_shapecast: ShapeCast3D = %CrouchShapeCast3D
 
 var is_authority: bool:
 	get: return !LowLevelNetworkHandler.is_server && _owner_id == ClientNetworkGlobals.id
 
-var current_frame_input: PlayerInputPacket = null
-var context: Enums.IntegrationContext = Enums.IntegrationContext.VISUAL
+var context := Enums.IntegrationContext.VISUAL
+var input := PlayerInput.new()
 
+var _test_is_replaying := false
+
+# var _current_frame_input: PlayerInputPacket = null
 var _owner_id: int
 
 # movement parameters
@@ -54,7 +76,6 @@ var game_position: Vector3:
 var game_velocity: Vector3 = Vector3()
 var game_movement_state_id: int = 0
 var game_sequence_id: int = 65535
-var _game_is_on_floor: bool = false
 
 # networking data structures
 var _server_input_queue := JitterBuffer.new()
@@ -72,21 +93,18 @@ func _exit_tree() -> void:
 	ClientNetworkGlobals.handle_player_state.disconnect(client_handle_player_state)
 
 
-var _temp_timer := Timer.new()
 func _ready():
 	print("Player #%d spawned, named %s!" % [_owner_id, name])
 
+	add_collision_exception_with(game_body)
+	game_body.add_collision_exception_with(self)
+	crouch_shapecast.add_exception(self)
+	
+
 	global_position = Vector3(0, 21.079, -76.501)
 	game_position = global_position
+	game_body.global_position = game_position
 	
-	add_child(_temp_timer)
-	_temp_timer.wait_time = 4.0
-	_temp_timer.one_shot = false
-	_temp_timer.timeout.connect(func():
-		print("[%s] %s Visual Pos: %s Game Pos %s" % ["Server" if LowLevelNetworkHandler.is_server else "Client Authority" if is_authority else "Client Remote", name, global_position, game_position])	
-	)
-	_temp_timer.start()
-
 	if is_authority:
 		Logging.enabled = true
 		add_to_group("local_player")
@@ -95,6 +113,9 @@ func _ready():
 	else:
 		call_deferred("remove_child", %GUI)
 		camera.call_deferred("remove_child", $CameraController/Camera3D/ReflectionProbe)
+
+	if !is_authority and !LowLevelNetworkHandler.is_server:
+		call_deferred("remove_child", $GameCharacterBody3D)
 
 
 func _unhandled_input(event):
@@ -106,6 +127,17 @@ func _unhandled_input(event):
 		_y_mouse_input += -event.relative.y * MOUSE_SENSITIVITY
 
 
+func _input(event: InputEvent) -> void:
+	if !is_authority:
+		return
+	
+	if event.is_action_pressed("ToggleCamera"):
+		if camera.current:
+			tp_camera.make_current()
+		else:
+			camera.make_current() 
+
+
 func _physics_process(delta: float) -> void:
 	if is_authority:
 		_client_authority_physics_step(delta)
@@ -115,6 +147,7 @@ func _physics_process(delta: float) -> void:
 		_client_remote_physics_step(delta)
 
 
+var _prev_server_input: PlayerInputPacket = null
 func _server_physics_step(delta: float) -> void:
 	var frames := _server_input_queue.consume()
 	
@@ -125,10 +158,13 @@ func _server_physics_step(delta: float) -> void:
 	for frame in frames:
 		assert(frame.packet is PlayerInputPacket, "Packet is not a PlayerInputPacket")
 		assert(frame.delta > 0.0, "Delta is not positive")
-		current_frame_input = frame.packet as PlayerInputPacket
-		update_camera(current_frame_input.look_abs)
+		# _current_frame_input = frame.packet as PlayerInputPacket
+		input.prev_input_packet = _prev_server_input
+		_prev_server_input = frame.packet
+		input.input_packet = frame.packet
+		update_camera(input.input_packet.look_abs)
 		context = Enums.IntegrationContext.GAME
-		game_transform.basis = Basis.from_euler(Vector3(0, current_frame_input.look_abs.y, 0))
+		game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
 		await $MovementStateMachine.run_logic(frame.delta)
 		context = Enums.IntegrationContext.VISUAL
 		$MovementStateMachine.sync_visual()
@@ -142,12 +178,13 @@ func _server_physics_step(delta: float) -> void:
 	player_state.last_input_sequence_id = frames[-1].packet.sequence_id
 	player_state.timestamp_us = Time.get_ticks_usec()
 	player_state.position = game_position
-	player_state.look_abs = current_frame_input.look_abs
+	player_state.look_abs = input.input_packet.look_abs
 	player_state.velocity = game_velocity
 	player_state.movement_state = $MovementStateMachine.get_logic_state_id()
 	LowLevelNetworkHandler.broadcast_packet(player_state.to_payload())
 
 
+var _prev_client_input: PlayerInputPacket = null
 func _client_authority_physics_step(delta: float) -> void:
 	#print("Is on floor: %s" % _game_is_on_floor)
 	#Logging.log("--- AUTH TICK start ---")
@@ -174,15 +211,18 @@ func _client_authority_physics_step(delta: float) -> void:
 	player_input.sprint = Input.is_action_pressed("sprint")
 	_unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)
 	LowLevelNetworkHandler.send_packet(player_input.to_payload())
-	current_frame_input = player_input
+	# _current_frame_input = player_input
+	input.prev_input_packet = _prev_client_input
+	_prev_client_input = player_input
+	input.input_packet = player_input
 
 	# run prediction on authoritative copy
 	context = Enums.IntegrationContext.GAME
-	game_transform.basis = Basis.from_euler(Vector3(0, player_input.look_abs.y, 0))
+	game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
 	await $MovementStateMachine.run_logic(delta)
 
 	context = Enums.IntegrationContext.VISUAL
-	update_camera(player_input.look_abs)
+	update_camera(input.input_packet.look_abs)
 	await $MovementStateMachine.sync_visual()
 	await $MovementStateMachine.run_visual(delta)
 
@@ -247,11 +287,16 @@ func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
 		#_unacked_inputs.oldest_sequence_id(),
 		#_unacked_inputs.newest_sequence_id(),
 	#])
-
-	for input: PlayerInputPacket in _unacked_inputs.get_starting_at(game_sequence_id + 1):
-		current_frame_input = input
-		game_transform.basis = Basis.from_euler(Vector3(0, input.look_abs.y, 0))
+	
+	_test_is_replaying = true
+	var inputs := _unacked_inputs.get_starting_at(game_sequence_id)
+	for i in range(1, inputs.size()):
+		input.prev_input_packet = inputs[i - 1]
+		input.input_packet = inputs[i]
+		# _current_frame_input = repeat_input
+		game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
 		await $MovementStateMachine.run_logic(delta)
+	_test_is_replaying = false
 	
 	context = Enums.IntegrationContext.VISUAL
 	#await $MovementStateMachine.sync_visual()
@@ -375,7 +420,7 @@ func on_floor(ctx: Enums.IntegrationContext) -> bool:
 	if ctx == Enums.IntegrationContext.VISUAL:
 		return is_on_floor()
 	else:
-		return _game_is_on_floor
+		return game_body.is_on_floor()
 
 
 # persistent local vars for performance
@@ -387,6 +432,8 @@ func update_camera(look_abs: Vector2) -> void:
 	
 	camera.transform.basis = Basis.from_euler(_camera_rotation)
 	camera.rotation.z = 0
+	tp_camera.transform.basis = Basis.from_euler(_camera_rotation)
+	tp_camera.rotation.z = 0
 	
 	global_transform.basis = Basis.from_euler(_player_rotation)
 
@@ -404,8 +451,8 @@ func update_gravity(delta: float, ctx: Enums.IntegrationContext) -> void:
 
 var _input_dir := Vector2.ZERO
 func update_movement(ctx: Enums.IntegrationContext) -> void:
-	_input_dir.x = current_frame_input.move_left_right
-	_input_dir.y = current_frame_input.move_forward_backward
+	_input_dir.x = input.input_packet.move_left_right
+	_input_dir.y = input.input_packet.move_forward_backward
 	
 	var _basis := transform.basis if ctx == Enums.IntegrationContext.VISUAL else game_transform.basis
 	var direction = (_basis * Vector3(_input_dir.x, 0, _input_dir.y)).normalized()
@@ -429,39 +476,19 @@ func update_movement(ctx: Enums.IntegrationContext) -> void:
 
 const MAX_SLIDES := 4 # Engine.max_physics_steps_per_frame
 
-@onready var _body_rid := get_rid()
-var _game_physics_result := PhysicsTestMotionResult3D.new()
+# @onready var _body_rid := get_rid()
+# var _game_physics_result := PhysicsTestMotionResult3D.new()
 func update_velocity(ctx: Enums.IntegrationContext) -> void:
 	if ctx == Enums.IntegrationContext.VISUAL:
 		move_and_slide()
 	else:
-		_game_is_on_floor = false
-		var delta := 1.0 / Engine.get_physics_ticks_per_second() as float
-		var remaining_motion := game_velocity * delta
-		var initial_velocity := game_velocity
-		for i in MAX_SLIDES:
-			if remaining_motion.is_zero_approx():
-				break
+		game_body.velocity = game_velocity
+		game_body.global_transform = game_transform
 
-			# TODO: move delta out of this function
-			var params := PhysicsTestMotionParameters3D.new()
-			params.motion = remaining_motion
-			params.from = game_transform
-			params.collide_separation_ray = true
-			
-			var collided := PhysicsServer3D.body_test_motion(_body_rid, params, _game_physics_result)
-			game_transform.origin += _game_physics_result.get_travel()
+		game_body.move_and_slide()
 
-			if !collided:
-				break
-
-			game_transform.origin += _game_physics_result.get_travel()
-			game_velocity = game_velocity.slide(_game_physics_result.get_collision_normal(0))
-			remaining_motion = _game_physics_result.get_remainder()
-			for j in range(_game_physics_result.get_collision_count()):
-				if _game_physics_result.get_collision_normal(j).dot(up_direction) >= cos(floor_max_angle):
-					_game_is_on_floor = true
-					break
+		game_velocity = game_body.velocity
+		game_transform = game_body.global_transform
 
 
 func server_handle_player_input(peer_id: int, input_packet: PlayerInputPacket) -> void:

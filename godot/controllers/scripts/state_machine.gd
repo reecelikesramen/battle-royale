@@ -38,6 +38,7 @@ func _ready() -> void:
 	await _visual_state.visual_enter()
 
 
+# TODO: known bug where visual/game desync for single frame transitions
 func run_logic(delta: float) -> void:
 	await _logic_state.logic_physics(delta)
 	while true:
@@ -48,6 +49,7 @@ func run_logic(delta: float) -> void:
 		_pending_transition = &""
 
 
+# TODO: known bug where visual/game desync for single frame transitions
 func sync_visual() -> void:
 	if _visual_state == _logic_state:
 		return
