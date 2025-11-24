@@ -17,6 +17,7 @@ const RESET_ANIM := &"RESET"
 var _wants_to_uncrouch := false
 var _progress := 0.0
 var _crouch_anim_length := 0.0
+var _last_toggle_time := 0
 
 var _crouch_shapecast: ShapeCast3D:
 	get: return player.crouch_shapecast
@@ -44,7 +45,7 @@ func logic_physics(delta: float) -> void:
 	player.update_movement(Enums.IntegrationContext.GAME)
 	player.update_velocity(Enums.IntegrationContext.GAME)
 	
-	if _wants_to_uncrouch:
+	if _wants_to_uncrouch and not _crouch_shapecast.is_colliding():
 		_progress -= delta * UNCROUCH_SPEED
 	else:
 		_progress += delta * CROUCH_SPEED
@@ -53,7 +54,8 @@ func logic_physics(delta: float) -> void:
 
 func logic_transitions() -> void:
 	if TOGGLE_CROUCH:
-		if player.input.is_crouch_just_pressed():
+		if player.input.is_crouch_just_pressed() and _toggle_debounce_us() > 50_000:
+			_last_toggle_time = Time.get_ticks_usec()
 			_wants_to_uncrouch = !_wants_to_uncrouch
 	else:
 		_wants_to_uncrouch = !player.input.is_crouching()
@@ -88,3 +90,7 @@ func visual_exit() -> void:
 	else:
 		animation_player.stop()
 	animation_player.speed_scale = 1.0
+
+
+func _toggle_debounce_us() -> int:
+	return Time.get_ticks_usec() - _last_toggle_time
