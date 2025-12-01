@@ -13,6 +13,7 @@ config_version=5
 config/name="Battle Royale"
 run/main_scene="uid://cnyy535rmpioo"
 config/features=PackedStringArray("4.5", "Forward Plus")
+config/icon="uid://cwno5sullptma"
 
 [autoload]
 

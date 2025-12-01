@@ -535,7 +535,7 @@ layout_mode = 2
 
 [node name="MovementStateMachine" type="Node" parent="." node_paths=PackedStringArray("CURRENT_STATE")]
 script = ExtResource("5_a1kld")
-CURRENT_STATE = NodePath("IdleMovementState")
+CURRENT_STATE = NodePath("WalkMovementState")
 DEBUG_NAME = "Movement State"
 
 [node name="IdleMovementState" type="Node" parent="MovementStateMachine"]

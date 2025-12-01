@@ -33,7 +33,6 @@ func _ready() -> void:
 	_logic_state = CURRENT_STATE
 	_visual_state = CURRENT_STATE
 	await owner.ready
-	await CURRENT_STATE.ready
 	_logic_state.logic_enter()
 	_visual_state.visual_enter()
 
