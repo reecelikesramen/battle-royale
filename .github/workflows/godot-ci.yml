@@ -251,7 +251,7 @@ jobs:
 
       - name: Debug rust/target directory structure
         run: |
-          apt-get update && apt-get install -y tree
+          apt-get update && apt-get install -y tree file
           echo "=== addons/rust directory tree ==="
           tree godot/addons/rust/bin/ || find godot/addons/rust/bin/ -type f -o -type d | sort
       
