@@ -127,7 +127,15 @@ jobs:
         with:
           lfs: true
 
-      - name: Download Rust library
+      # Host library (Linux) - for Godot to load extension
+      - name: Download Rust library (host)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-linux
+          path: rust/target/release/
+
+      # Target library (Windows) - for export bundling
+      - name: Download Rust library (target)
         uses: actions/download-artifact@v4
         with:
           name: rust-windows
@@ -164,7 +172,15 @@ jobs:
         with:
           lfs: true
 
-      - name: Download Rust library
+      # Host library (Linux) - for Godot to load extension
+      - name: Download Rust library (host)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-linux
+          path: rust/target/release/
+
+      # Target library (macOS) - for export bundling
+      - name: Download Rust library (target)
         uses: actions/download-artifact@v4
         with:
           name: rust-macos
