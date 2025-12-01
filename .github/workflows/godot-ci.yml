@@ -247,13 +247,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rust-linux
-          path: rust/target/release/
+          path: godot/addons/rust/bin/
 
       - name: Debug rust/target directory structure
         run: |
           apt-get update && apt-get install -y tree
-          echo "=== rust/target directory tree ==="
-          tree rust/target || find rust/target -type f -o -type d | sort
+          echo "=== addons/rust directory tree ==="
+          tree godot/addons/rust/bin/ || find godot/addons/rust/bin/ -type f -o -type d | sort
 
       - name: Setup
         run: |
