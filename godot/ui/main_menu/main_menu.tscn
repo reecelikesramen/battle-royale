@@ -1,0 +1,77 @@
+[gd_scene load_steps=4 format=3 uid="uid://cnyy535rmpioo"]
+
+[ext_resource type="Theme" uid="uid://rai2e421dmte" path="res://ui/themes/main-menu.tres" id="1_7vrkn"]
+[ext_resource type="Script" uid="uid://duc4w5l74gup" path="res://ui/main_menu/main_menu.gd" id="2_fu7sn"]
+
+[sub_resource type="FontVariation" id="FontVariation_7vrkn"]
+variation_embolden = 0.5
+
+[node name="CenterContainer" type="CenterContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2_fu7sn")
+
+[node name="PanelContainer" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+theme = ExtResource("1_7vrkn")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelContainer"]
+layout_mode = 2
+
+[node name="DisconnectedLabel" type="Label" parent="PanelContainer/VBoxContainer"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0, 0, 1)
+theme_override_fonts/font = SubResource("FontVariation_7vrkn")
+theme_override_font_sizes/font_size = 10
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Header" type="Label" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "Reece's Game"
+horizontal_alignment = 1
+
+[node name="UsernameEdit" type="LineEdit" parent="PanelContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Username"
+
+[node name="IPAddressEdit" type="LineEdit" parent="PanelContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "IP Address <localhost>"
+
+[node name="PortEdit" type="LineEdit" parent="PanelContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Port <45876>"
+
+[node name="ConnectButton" type="Button" parent="PanelContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+text = "Connect"
+
+[node name="FullScreenButton" type="Button" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+toggle_mode = true
+text = "Toggle Fullscreen
+"
+
+[node name="QuitButton" type="Button" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+text = "Quit"
+
+[connection signal="text_changed" from="PanelContainer/VBoxContainer/UsernameEdit" to="." method="_on_username_edit_text_changed"]
+[connection signal="text_changed" from="PanelContainer/VBoxContainer/IPAddressEdit" to="." method="_on_ip_address_text_changed"]
+[connection signal="text_changed" from="PanelContainer/VBoxContainer/PortEdit" to="." method="_on_port_text_changed"]
+[connection signal="pressed" from="PanelContainer/VBoxContainer/ConnectButton" to="." method="_on_connect_button_pressed"]
+[connection signal="toggled" from="PanelContainer/VBoxContainer/FullScreenButton" to="." method="_on_full_screen_button_toggled"]
+[connection signal="pressed" from="PanelContainer/VBoxContainer/QuitButton" to="." method="_on_quit_button_pressed"]

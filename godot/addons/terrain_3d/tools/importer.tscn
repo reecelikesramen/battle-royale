@@ -1,8 +1,8 @@
 [gd_scene load_steps=4 format=3 uid="uid://blaieaqp413k7"]
 
 [ext_resource type="Script" uid="uid://cib2rig7vup10" path="res://addons/terrain_3d/tools/importer.gd" id="1_60b8f"]
-[ext_resource type="Terrain3DMaterial" uid="uid://b7cmhhwne5qc5" path="res://materials/map.res" id="1_kcdxh"]
-[ext_resource type="Terrain3DAssets" uid="uid://yjtak4rqo2kq" path="res://materials/map_assets.res" id="2_34j6c"]
+[ext_resource type="Terrain3DMaterial" uid="uid://b7cmhhwne5qc5" path="res://assets/material/map.res" id="1_kcdxh"]
+[ext_resource type="Terrain3DAssets" uid="uid://yjtak4rqo2kq" path="res://assets/material/map_assets.res" id="2_34j6c"]
 
 [node name="Importer" type="Terrain3D"]
 data_directory = "res://test"

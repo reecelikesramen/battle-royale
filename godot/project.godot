@@ -13,15 +13,14 @@ config_version=5
 config/name="Battle Royale"
 run/main_scene="uid://cnyy535rmpioo"
 config/features=PackedStringArray("4.5", "Forward Plus")
-config/icon="res://icon.svg"
 
 [autoload]
 
-LowLevelNetworkHandler="*res://low_level_network_handler.tscn"
-ClientNetworkGlobals="*res://controllers/scripts/client_network_globals.gd"
-ServerNetworkGlobals="*res://controllers/scripts/server_network_globals.gd"
-Enums="*res://enums.gd"
-Logging="*res://scripts/autoload/logger.gd"
+NetworkTransport="*res://autoload/network/network_transport.tscn"
+NetworkClient="*res://autoload/network/network_client.gd"
+NetworkServer="*res://autoload/network/network_server.gd"
+Enums="*res://autoload/enums.gd"
+Constants="*res://autoload/constants.gd"
 
 [debug]
 

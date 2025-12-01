@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cjj5pu3lldhjc"]
+
+[ext_resource type="Script" uid="uid://cljo0h54ukqrs" path="res://autoload/network/network_transport.gd" id="1_yduhh"]
+
+[node name="NetworkTransport" type="NetworkDriver"]
+script = ExtResource("1_yduhh")
