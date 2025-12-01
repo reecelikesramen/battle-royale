@@ -95,6 +95,7 @@ jobs:
         working-directory: rust
         env:
           CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr/local' || '' }}
+          GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\vcpkg-buildtrees' || '' }}
         run: cargo build --release --target ${{ matrix.target }}
 
       # Copy to expected path (rust/target/release/) for gdextension compatibility
