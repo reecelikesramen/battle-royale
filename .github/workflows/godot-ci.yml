@@ -159,6 +159,14 @@ jobs:
           name: rust-windows
           path: rust/target/release/
 
+      - name: Debug rust/target directory structure
+        run: |
+          if command -v tree &> /dev/null; then
+            tree rust/target
+          else
+            find rust/target -type f -o -type d | sort
+          fi
+
       - name: Setup
         run: |
           mkdir -v -p ~/.local/share/godot/export_templates/
