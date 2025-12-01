@@ -249,23 +249,14 @@ jobs:
           name: rust-linux
           path: godot/addons/rust/bin/
 
-      - name: Debug rust/target directory structure
+      - name: 🔑 Set Execute Permissions for GDExtension
         run: |
-          apt-get update && apt-get install -y tree file
-          echo "=== addons/rust directory tree ==="
-          tree godot/addons/rust/bin/ || find godot/addons/rust/bin/ -type f -o -type d | sort
-      
-      - name: Verify Binary Integrity and Fix Permissions
-        run: |
-          # 1. Check if the file is a proper binary (LFS check)
-          echo "--- File Type Check ---"
-          file godot/addons/rust/bin/librust.so
-          du -h godot/addons/rust/bin/librust.so
-      
-          # 2. Check and fix permissions
-          echo "--- Permission Check & Fix ---"
-          ls -l godot/addons/rust/bin/librust.so
+          # The file is confirmed to exist and be a valid ELF binary.
+          # We must ensure it is executable for dynamic loading on Linux.
           chmod +x godot/addons/rust/bin/librust.so
+          echo "New permissions:"
+          ls -l godot/addons/rust/bin/librust.so # Verify the change
+        # The use of 'root' in the container image makes this change stick
 
       - name: Setup
         run: |
