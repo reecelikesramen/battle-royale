@@ -38,6 +38,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Ensure cache path exists for validation
+      - name: Prepare cache directory
+        run: mkdir -p rust/target/release
+
       # Check if we have a cached build for this exact source
       - name: Cache built library
         id: cache-lib
@@ -60,7 +64,6 @@ jobs:
         with:
           workspaces: rust -> target
           shared-key: ${{ matrix.target }}
-          key: ${{ hashFiles('rust/Cargo.toml') }}
           cache-all-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/improve-ci' || startsWith(github.ref, 'refs/tags/') }}
 
