@@ -270,6 +270,7 @@ jobs:
           mkdir -v -p build/linux
           EXPORT_DIR="$(readlink -f build)"
           cd $PROJECT_PATH
+          godot --headless --verbose --editor --quit-after 10
           godot --headless --verbose --export-release "Linux/X11" "$EXPORT_DIR/linux/$EXPORT_NAME.x86_64"
 
       - uses: actions/upload-artifact@v4
