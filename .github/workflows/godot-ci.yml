@@ -1,0 +1,231 @@
+name: "Build & Export"
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: 4.5
+  EXPORT_NAME: battle-royale
+  PROJECT_PATH: godot
+
+jobs:
+  # ============ RUST BUILDS (native runners) ============
+  build-rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact-name: rust-macos
+            library-name: librust.dylib
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact-name: rust-linux
+            library-name: librust.so
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact-name: rust-windows
+            library-name: rust.dll
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          shared-key: ${{ matrix.target }}
+          key: ${{ hashFiles('rust/Cargo.toml') }}
+          cache-all-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Linux deps
+      - name: Cache protobuf (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/protobuf-install
+          key: linux-protobuf-21.12-v3
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang pkg-config libssl-dev libabsl-dev cmake build-essential
+          if [ -f ~/protobuf-install/bin/protoc ]; then
+            sudo cp -r ~/protobuf-install/* /usr/local/
+          else
+            cd /tmp
+            wget -q https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protobuf-all-21.12.tar.gz
+            tar -xzf protobuf-all-21.12.tar.gz && cd protobuf-21.12
+            mkdir build && cd build
+            cmake ../cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX=~/protobuf-install -Dprotobuf_ABSL_PROVIDER=package
+            make -j$(nproc) && make install
+            sudo cp -r ~/protobuf-install/* /usr/local/
+          fi
+          sudo ldconfig
+
+      # macOS deps
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install openssl protobuf@21 pkg-config
+          brew unlink protobuf@21 && brew link --force protobuf@21
+
+      # Windows
+      - name: Enable long paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global core.longpaths true
+
+      # Build
+      - name: Build Rust release
+        working-directory: rust
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+          CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr/local' || '' }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # Copy to expected path (rust/target/release/) for gdextension compatibility
+      - name: Copy library to release dir
+        shell: bash
+        run: |
+          mkdir -p rust/target/release
+          cp rust/target/${{ matrix.target }}/release/${{ matrix.library-name }} rust/target/release/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: rust/target/release/${{ matrix.library-name }}
+          retention-days: 7
+
+  # ============ GODOT EXPORTS (only on tags) ============
+  export-windows:
+    name: Windows Export
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-rust
+    runs-on: ubuntu-24.04
+    container:
+      image: barichello/godot-ci:4.5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Download Rust library
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-windows
+          path: rust/target/release/
+
+      - name: Setup
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mkdir -v -p ~/.config/
+          mv /root/.config/godot ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Windows Build
+        run: |
+          mkdir -v -p build/windows
+          EXPORT_DIR="$(readlink -f build)"
+          cd $PROJECT_PATH
+          godot --headless --verbose --export-release "Windows Desktop" "$EXPORT_DIR/windows/$EXPORT_NAME.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: build/windows
+
+  export-mac:
+    name: Mac Export
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-rust
+    runs-on: ubuntu-24.04
+    container:
+      image: barichello/godot-ci:4.5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Download Rust library
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-macos
+          path: rust/target/release/
+
+      - name: Setup
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mkdir -v -p ~/.config/
+          mv /root/.config/godot ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Mac Build
+        run: |
+          mkdir -v -p build/mac
+          EXPORT_DIR="$(readlink -f build)"
+          cd $PROJECT_PATH
+          godot --headless --verbose --export-release "macOS" "$EXPORT_DIR/mac/$EXPORT_NAME.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: build/mac
+
+  export-linux:
+    name: Linux Export
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-rust
+    runs-on: ubuntu-24.04
+    container:
+      image: barichello/godot-ci:4.5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Download Rust library
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-linux
+          path: rust/target/release/
+
+      - name: Setup
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mkdir -v -p ~/.config/
+          mv /root/.config/godot ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Linux Build
+        run: |
+          mkdir -v -p build/linux
+          EXPORT_DIR="$(readlink -f build)"
+          cd $PROJECT_PATH
+          godot --headless --verbose --export-release "Linux/X11" "$EXPORT_DIR/linux/$EXPORT_NAME.x86_64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: build/linux
