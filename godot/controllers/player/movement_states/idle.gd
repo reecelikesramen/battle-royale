@@ -1,6 +1,7 @@
 extends MovementState
 
 func visual_enter() -> void:
+	animation_player.play(&"RESET")
 	#animation_player.play("Idle")
 	animation_player.pause()
 
@@ -21,6 +22,9 @@ func logic_transitions() -> void:
 
 	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
 		transition.emit("JumpMovementState")
+
+	if player.input.is_prone():
+		transition.emit("ProneMovementState")
 
 
 func visual_physics(delta: float) -> void:

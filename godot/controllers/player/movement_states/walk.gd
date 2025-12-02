@@ -13,7 +13,7 @@ func logic_enter() -> void:
 
 
 func visual_enter() -> void:
-	animation_player.play("Walking", -1, 1.0)
+	animation_player.play(&"Walk", -1, 1.0)
 
 
 func logic_physics(delta: float) -> void:

@@ -1,15 +1,15 @@
-[gd_scene load_steps=25 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=26 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://bmbvova1tm3y8" path="res://controllers/player/player.gd" id="1_icig3"]
-[ext_resource type="Script" uid="uid://2j0ubpg0qevr" path="res://ui/debug/gui.gd" id="2_u54hw"]
-[ext_resource type="Theme" uid="uid://b28fy0uaom4ds" path="res://ui/themes/debug.tres" id="3_fh6gg"]
-[ext_resource type="Script" uid="uid://sv4ikmsp6nik" path="res://ui/debug/debug.gd" id="4_bn7gw"]
+[ext_resource type="PackedScene" uid="uid://dqvg7w4c8u3oa" path="res://assets/mesh/fps_hands/fps_hands_rigged_by_evolvegames.glb" id="2_g7yr6"]
+[ext_resource type="PackedScene" uid="uid://trgd65vjwowf" path="res://ui/debug/debug.tscn" id="2_jja72"]
 [ext_resource type="Script" uid="uid://c1csw7q0gomdp" path="res://core/state_machine/state_machine.gd" id="5_a1kld"]
 [ext_resource type="Script" uid="uid://c70m5pqrvihff" path="res://controllers/player/movement_states/idle.gd" id="6_6e1eu"]
 [ext_resource type="Script" uid="uid://6qifdlt057ir" path="res://controllers/player/movement_states/walk.gd" id="7_afx4e"]
 [ext_resource type="Script" uid="uid://npgarjqdwdf6" path="res://controllers/player/movement_states/sprint.gd" id="8_40vpa"]
 [ext_resource type="Script" uid="uid://bb1ogkg56vx5s" path="res://controllers/player/movement_states/crouch.gd" id="9_qdb0h"]
 [ext_resource type="Script" uid="uid://d0igha5eqiup3" path="res://controllers/player/movement_states/jump.gd" id="10_fy606"]
+[ext_resource type="Script" uid="uid://b62btg7hc68a1" path="res://controllers/player/movement_states/prone.gd" id="10_icig3"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_74qjk"]
 resource_local_to_scene = true
@@ -117,8 +117,8 @@ tracks/3/keys = {
 tracks/4/type = "value"
 tracks/4/imported = false
 tracks/4/enabled = true
-tracks/4/path = NodePath("GameCharacterBody3D/GameCollider:shape:height")
-tracks/4/interp = 1
+tracks/4/path = NodePath("GameController/GameCollider:shape:height")
+tracks/4/interp = 2
 tracks/4/loop_wrap = true
 tracks/4/keys = {
 "times": PackedFloat32Array(0, 1),
@@ -129,8 +129,8 @@ tracks/4/keys = {
 tracks/5/type = "value"
 tracks/5/imported = false
 tracks/5/enabled = true
-tracks/5/path = NodePath("GameCharacterBody3D/GameCollider:position")
-tracks/5/interp = 1
+tracks/5/path = NodePath("GameController/GameCollider:position")
+tracks/5/interp = 2
 tracks/5/loop_wrap = true
 tracks/5/keys = {
 "times": PackedFloat32Array(0, 1),
@@ -141,14 +141,125 @@ tracks/5/keys = {
 tracks/6/type = "value"
 tracks/6/imported = false
 tracks/6/enabled = true
-tracks/6/path = NodePath("GameCharacterBody3D/GameCollider/PlaceholderMesh:mesh:height")
-tracks/6/interp = 1
+tracks/6/path = NodePath("GameController/GameCollider/PlaceholderMesh:mesh:height")
+tracks/6/interp = 2
 tracks/6/loop_wrap = true
 tracks/6/keys = {
 "times": PackedFloat32Array(0, 1),
 "transitions": PackedFloat32Array(1, 1),
 "update": 0,
 "values": [2.0, 1.5]
+}
+
+[sub_resource type="Animation" id="Animation_icig3"]
+resource_name = "Prone"
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("VisualCollider:position")
+tracks/0/interp = 2
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.3, 0.6, 1),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector3(0, 1, 0), Vector3(0, 0.6152456, -0.06356239), Vector3(0, 0.6634788, -0.2506071), Vector3(0, 0.5, -0.5)]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("VisualCollider:rotation")
+tracks/1/interp = 2
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 0.3, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Vector3(0, 0, 0), Vector3(-0.5235988, 0, 0), Vector3(-1.5707964, 0, 0)]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("VisualCollider:shape:height")
+tracks/2/interp = 2
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0, 0.3, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [2.0, 1.25, 2.0]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("VisualCollider/PlaceholderMesh:mesh:height")
+tracks/3/interp = 2
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0, 0.3, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [2.0, 1.25, 2.0]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("GameController/GameCollider:shape:height")
+tracks/4/interp = 2
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 0.3, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [2.0, 1.25, 2.0]
+}
+tracks/5/type = "value"
+tracks/5/imported = false
+tracks/5/enabled = true
+tracks/5/path = NodePath("GameController/GameCollider:position")
+tracks/5/interp = 2
+tracks/5/loop_wrap = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0, 0.3, 0.6, 1),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector3(0, 1, 0), Vector3(0, 0.615, -0.064), Vector3(0, 0.663, -0.251), Vector3(0, 0.5, -0.5)]
+}
+tracks/6/type = "value"
+tracks/6/imported = false
+tracks/6/enabled = true
+tracks/6/path = NodePath("GameController/GameCollider:rotation")
+tracks/6/interp = 2
+tracks/6/loop_wrap = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0, 0.3, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Vector3(0, 0, 0), Vector3(-0.5235988, 0, 0), Vector3(-1.5707964, 0, 0)]
+}
+tracks/7/type = "value"
+tracks/7/imported = false
+tracks/7/enabled = true
+tracks/7/path = NodePath("GameController/GameCollider/PlaceholderMesh:mesh:height")
+tracks/7/interp = 2
+tracks/7/loop_wrap = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0, 0.3, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [2.0, 1.25, 2.0]
+}
+tracks/8/type = "value"
+tracks/8/imported = false
+tracks/8/enabled = true
+tracks/8/path = NodePath("CameraController:position")
+tracks/8/interp = 2
+tracks/8/loop_wrap = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0, 0.3, 0.6, 1),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector3(0, 1.5, 0), Vector3(0, 0.7362343, -0.12633699), Vector3(0, 0.8051455, -0.5078097), Vector3(0, 0.6845509, -1.0164399)]
 }
 
 [sub_resource type="Animation" id="Animation_xc2pf"]
@@ -270,7 +381,7 @@ tracks/9/keys = {
 tracks/10/type = "value"
 tracks/10/imported = false
 tracks/10/enabled = true
-tracks/10/path = NodePath("GameCharacterBody3D/GameCollider:shape:height")
+tracks/10/path = NodePath("GameController/GameCollider:shape:height")
 tracks/10/interp = 1
 tracks/10/loop_wrap = true
 tracks/10/keys = {
@@ -282,7 +393,7 @@ tracks/10/keys = {
 tracks/11/type = "value"
 tracks/11/imported = false
 tracks/11/enabled = true
-tracks/11/path = NodePath("GameCharacterBody3D/GameCollider:position")
+tracks/11/path = NodePath("GameController/GameCollider:position")
 tracks/11/interp = 1
 tracks/11/loop_wrap = true
 tracks/11/keys = {
@@ -294,7 +405,7 @@ tracks/11/keys = {
 tracks/12/type = "value"
 tracks/12/imported = false
 tracks/12/enabled = true
-tracks/12/path = NodePath("GameCharacterBody3D/GameCollider/PlaceholderMesh:mesh:height")
+tracks/12/path = NodePath("GameController/GameCollider/PlaceholderMesh:mesh:height")
 tracks/12/interp = 1
 tracks/12/loop_wrap = true
 tracks/12/keys = {
@@ -303,9 +414,33 @@ tracks/12/keys = {
 "update": 0,
 "values": [2.0]
 }
+tracks/13/type = "value"
+tracks/13/imported = false
+tracks/13/enabled = true
+tracks/13/path = NodePath("VisualCollider:rotation")
+tracks/13/interp = 1
+tracks/13/loop_wrap = true
+tracks/13/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector3(0, 0, 0)]
+}
+tracks/14/type = "value"
+tracks/14/imported = false
+tracks/14/enabled = true
+tracks/14/path = NodePath("GameController/GameCollider:rotation")
+tracks/14/interp = 1
+tracks/14/loop_wrap = true
+tracks/14/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector3(0, 0, 0)]
+}
 
 [sub_resource type="Animation" id="Animation_rk4xh"]
-resource_name = "Sprinting"
+resource_name = "Sprint"
 length = 1.2
 loop_mode = 1
 tracks/0/type = "bezier"
@@ -343,7 +478,7 @@ tracks/2/keys = {
 }
 
 [sub_resource type="Animation" id="Animation_jdr2h"]
-resource_name = "Walking"
+resource_name = "Walk"
 length = 2.0
 loop_mode = 1
 tracks/0/type = "bezier"
@@ -383,12 +518,13 @@ tracks/2/keys = {
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_xc2pf"]
 _data = {
 &"Crouch": SubResource("Animation_ca8e7"),
+&"Prone": SubResource("Animation_icig3"),
 &"RESET": SubResource("Animation_xc2pf"),
-&"Sprinting": SubResource("Animation_rk4xh"),
-&"Walking": SubResource("Animation_jdr2h")
+&"Sprint": SubResource("Animation_rk4xh"),
+&"Walk": SubResource("Animation_jdr2h")
 }
 
-[node name="FPSController" type="CharacterBody3D"]
+[node name="PlayerController" type="CharacterBody3D"]
 slide_on_ceiling = false
 script = ExtResource("1_icig3")
 
@@ -399,17 +535,17 @@ shape = SubResource("CapsuleShape3D_74qjk")
 [node name="PlaceholderMesh" type="MeshInstance3D" parent="VisualCollider"]
 mesh = SubResource("CapsuleMesh_gf80s")
 
-[node name="GameCharacterBody3D" type="CharacterBody3D" parent="."]
+[node name="GameController" type="CharacterBody3D" parent="."]
 top_level = true
 
-[node name="GameCollider" type="CollisionShape3D" parent="GameCharacterBody3D"]
+[node name="GameCollider" type="CollisionShape3D" parent="GameController"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 shape = SubResource("CapsuleShape3D_uovkr")
 
-[node name="PlaceholderMesh" type="MeshInstance3D" parent="GameCharacterBody3D/GameCollider"]
+[node name="PlaceholderMesh" type="MeshInstance3D" parent="GameController/GameCollider"]
 mesh = SubResource("CapsuleMesh_l8yvu")
 
-[node name="CrouchShapeCast3D" type="ShapeCast3D" parent="GameCharacterBody3D"]
+[node name="CrouchShapeCast3D" type="ShapeCast3D" parent="GameController"]
 unique_name_in_owner = true
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 shape = SubResource("SphereShape3D_ca8e7")
@@ -422,6 +558,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 
 [node name="Camera3D" type="Camera3D" parent="CameraController"]
 unique_name_in_owner = true
+fov = 80.0
 
 [node name="LineOfSightMesh" type="MeshInstance3D" parent="CameraController/Camera3D"]
 transform = Transform3D(1, 0, 0, 0, -4.3711385e-08, 0.99999994, 0, -0.99999994, -4.3711385e-08, 0, 0, -1)
@@ -431,21 +568,8 @@ skeleton = NodePath("../../..")
 [node name="ReflectionProbe" type="ReflectionProbe" parent="CameraController/Camera3D"]
 update_mode = 1
 
-[node name="DeltaPos" type="ColorRect" parent="CameraController/Camera3D"]
-offset_left = 336.0
-offset_right = 376.0
-offset_bottom = 40.0
-
-[node name="DeltaVel" type="ColorRect" parent="CameraController/Camera3D"]
-offset_left = 336.0
-offset_top = 48.0
-offset_right = 376.0
-offset_bottom = 88.0
-
-[node name="InputBuffer" type="Label" parent="CameraController/Camera3D"]
-offset_left = 384.0
-offset_right = 594.0
-offset_bottom = 201.0
+[node name="Sketchfab_Scene" parent="CameraController/Camera3D" instance=ExtResource("2_g7yr6")]
+transform = Transform3D(-1.5, 2.1191783e-08, -1.294105e-07, -5.372567e-08, 1.2510309, 0.8275997, 1.1962324e-07, 0.8275997, -1.2510309, 0, -0.5634872, -0.36864218)
 
 [node name="ThirdPersonCamera3D" type="Camera3D" parent="CameraController"]
 transform = Transform3D(1, 0, 0, 0, 0.9261671, 0.3771135, 0, -0.3771135, 0.9261671, 0, 1.4404721, 2.607768)
@@ -456,82 +580,8 @@ libraries = {
 &"": SubResource("AnimationLibrary_xc2pf")
 }
 
-[node name="GUI" type="Control" parent="."]
+[node name="GUI" parent="." instance=ExtResource("2_jja72")]
 unique_name_in_owner = true
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 1
-script = ExtResource("2_u54hw")
-
-[node name="VBoxContainer" type="VBoxContainer" parent="GUI"]
-layout_mode = 0
-offset_left = 2.0
-offset_top = 2.0
-offset_right = 298.0
-offset_bottom = 123.0
-
-[node name="MarginContainer" type="MarginContainer" parent="GUI/VBoxContainer"]
-layout_mode = 2
-theme_override_constants/margin_right = 200
-
-[node name="DebugPanel" type="PanelContainer" parent="GUI/VBoxContainer/MarginContainer"]
-custom_minimum_size = Vector2(300, 0)
-layout_mode = 2
-theme = ExtResource("3_fh6gg")
-script = ExtResource("4_bn7gw")
-
-[node name="MarginContainer" type="MarginContainer" parent="GUI/VBoxContainer/MarginContainer/DebugPanel"]
-layout_mode = 2
-
-[node name="VBoxContainer" type="VBoxContainer" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer"]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="ChatEdit" type="LineEdit" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
-unique_name_in_owner = true
-layout_mode = 2
-placeholder_text = "Press enter to send chat"
-
-[node name="RepeatActionsButton" type="Button" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
-unique_name_in_owner = true
-layout_mode = 2
-toggle_mode = true
-text = "Repeat Actions
-"
-
-[node name="ExitToMenuButton" type="Button" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Exit to Menu"
-
-[node name="QuitButton" type="Button" parent="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Quit"
-
-[node name="PanelContainer" type="PanelContainer" parent="GUI/VBoxContainer"]
-custom_minimum_size = Vector2(500, 0)
-layout_mode = 2
-
-[node name="ChatMessagePrototype" type="Label" parent="GUI/VBoxContainer/PanelContainer"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-text = "test
-"
-
-[node name="ScrollContainer" type="ScrollContainer" parent="GUI/VBoxContainer/PanelContainer"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(500, 31)
-layout_mode = 2
-
-[node name="ChatVBox" type="VBoxContainer" parent="GUI/VBoxContainer/PanelContainer/ScrollContainer"]
-unique_name_in_owner = true
-layout_mode = 2
 
 [node name="MovementStateMachine" type="Node" parent="." node_paths=PackedStringArray("CURRENT_STATE")]
 script = ExtResource("5_a1kld")
@@ -557,6 +607,7 @@ metadata/_custom_type_script = "uid://8ywkt0fgrttk"
 script = ExtResource("9_qdb0h")
 SPEED = 1.5
 ACCELERATION = 0.1
+TOGGLE_CROUCH = true
 metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
 [node name="JumpMovementState" type="Node" parent="MovementStateMachine"]
@@ -565,8 +616,7 @@ SPEED = 4.0
 ACCELERATION = 0.015
 metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
-[connection signal="animation_started" from="AnimationPlayer" to="." method="_on_animation_player_animation_started"]
-[connection signal="text_submitted" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ChatEdit" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_chat_edit_text_submitted"]
-[connection signal="toggled" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/RepeatActionsButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_repeat_actions_button_toggled"]
-[connection signal="pressed" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ExitToMenuButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_exit_to_menu_button_pressed"]
-[connection signal="pressed" from="GUI/VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/QuitButton" to="GUI/VBoxContainer/MarginContainer/DebugPanel" method="_on_quit_button_pressed"]
+[node name="ProneMovementState" type="Node" parent="MovementStateMachine"]
+script = ExtResource("10_icig3")
+
+[connection signal="reconcile_network_debug" from="." to="GUI" method="_on_fps_controller_reconcile_network_debug"]

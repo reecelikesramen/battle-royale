@@ -2,21 +2,21 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://wqjgwm88uby5"
-path.s3tc="res://.godot/imported/fps_hands_rigged_by_evolvegames_1.png-fae8cdc1ac6653b4b651df658b8f8977.s3tc.ctex"
-path.etc2="res://.godot/imported/fps_hands_rigged_by_evolvegames_1.png-fae8cdc1ac6653b4b651df658b8f8977.etc2.ctex"
+uid="uid://bwrcvbkbovavs"
+path.s3tc="res://.godot/imported/fps_hands_rigged_by_evolvegames_0.png-bed8cc399efafba22f2cd8f268b62cc5.s3tc.ctex"
+path.etc2="res://.godot/imported/fps_hands_rigged_by_evolvegames_0.png-bed8cc399efafba22f2cd8f268b62cc5.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "9453c2c37eb020b6a827831e263657a5"
+"md5": "aade60e4c820857731f56743fd0ea930"
 }
 
 [deps]
 
-source_file="res://assets/mesh/fps_hands_rigged_by_evolvegames_1.png"
-dest_files=["res://.godot/imported/fps_hands_rigged_by_evolvegames_1.png-fae8cdc1ac6653b4b651df658b8f8977.s3tc.ctex", "res://.godot/imported/fps_hands_rigged_by_evolvegames_1.png-fae8cdc1ac6653b4b651df658b8f8977.etc2.ctex"]
+source_file="res://assets/mesh/fps_hands/fps_hands_rigged_by_evolvegames_0.png"
+dest_files=["res://.godot/imported/fps_hands_rigged_by_evolvegames_0.png-bed8cc399efafba22f2cd8f268b62cc5.s3tc.ctex", "res://.godot/imported/fps_hands_rigged_by_evolvegames_0.png-bed8cc399efafba22f2cd8f268b62cc5.etc2.ctex"]
 
 [params]
 

@@ -1,0 +1,31 @@
+[gd_scene load_steps=4 format=3 uid="uid://b5pw6lng0sex2"]
+
+[ext_resource type="PackedScene" uid="uid://dqvg7w4c8u3oa" path="res://assets/mesh/fps_hands/fps_hands_rigged_by_evolvegames.glb" id="1_lhekn"]
+
+[sub_resource type="Animation" id="Animation_lhekn"]
+resource_name = "Idle"
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_heatl"]
+_data = {
+&"Idle": SubResource("Animation_lhekn")
+}
+
+[node name="Sketchfab_Scene" instance=ExtResource("1_lhekn")]
+
+[node name="bd6093df736e497689ed4fffcd50fbfb_fbx" parent="Sketchfab_model" index="0"]
+transform = Transform3D(0.01, 0, 0, 0, -4.3711387e-10, -0.01, 0, 0.01, -4.3711387e-10, 0, 0, 0)
+
+[node name="Skeleton3D" parent="Sketchfab_model/bd6093df736e497689ed4fffcd50fbfb_fbx/RootNode/Hadns/Object_4" index="0"]
+bones/33/scale = Vector3(1.0000001, 1.0000002, 1.0000001)
+bones/34/scale = Vector3(0.99999994, 0.9999999, 1.0000002)
+bones/35/scale = Vector3(1.0000001, 0.99999994, 1.0000001)
+bones/43/scale = Vector3(1, 0.99999976, 1)
+
+[node name="Camera3D" type="Camera3D" parent="Sketchfab_model/bd6093df736e497689ed4fffcd50fbfb_fbx/RootNode/Camera" index="1"]
+transform = Transform3D(-7.209016e-08, 0.44611973, -0.8949733, -1.205438e-07, 0.8949733, 0.44611973, 1, 1.400443e-07, -1.0741786e-08, 0, 0, 0)
+fov = 90.0
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="." index="1"]
+libraries = {
+&"": SubResource("AnimationLibrary_heatl")
+}

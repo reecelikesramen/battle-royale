@@ -14,7 +14,8 @@ func _ready() -> void:
 
 
 func spawn_player(id: int) -> void:
-	var player = PLAYER.instantiate()
+	NetworkClient.player = PLAYER.instantiate()
+	var player := NetworkClient.player
 	player._owner_id = id
 	if id == NetworkClient.id:
 		NetworkClient.player = player

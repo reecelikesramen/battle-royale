@@ -1,18 +1,17 @@
 extends MovementState
 
-@export var SPEED := 3.0
-@export var ACCELERATION := 0.15
-@export var DECELERATION := 0.3
-@export var TOGGLE_CROUCH := false
-@export_range(1, 6, 0.1) var CROUCH_SPEED := 4.0
-@export_range(1, 6, 0.1) var UNCROUCH_SPEED := 6.0
+@export var SPEED := 1.8
+@export var ACCELERATION := 0.3
+@export var DECELERATION := 0.5
+@export_range(0.5, 6, 0.1) var PRONE_SPEED := 1.5
+@export_range(0.5, 6, 0.1) var UNPRONE_SPEED := 0.8
 
-const CROUCH_ANIM := &"Crouch"
+const PRONE_ANIM := &"Prone"
 const RESET_ANIM := &"RESET"
 
-var _wants_to_uncrouch := false
+var _wants_to_unprone := false
 var _progress := 0.0
-var _crouch_anim_length := 0.0
+var _prone_anim_length := 0.0
 var _last_toggle_time := 0
 var _last_exit_time := 0
 
@@ -21,25 +20,26 @@ var _crouch_shapecast: ShapeCast3D:
 
 func _ready() -> void:
 	await owner.ready
-	var anim := animation_player.get_animation(CROUCH_ANIM)
+	var anim := animation_player.get_animation(PRONE_ANIM)
 	if anim:
-		_crouch_anim_length = anim.length
+		_prone_anim_length = anim.length
 
 
 func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
 	if Time.get_ticks_usec() - _last_exit_time > 50_000:
-		_wants_to_uncrouch = false
+		_wants_to_unprone = false
 		_progress = 0.0
 
 
 func logic_exit() -> void:
 	_last_exit_time = Time.get_ticks_usec()
+	pass
 
 
 func visual_enter() -> void:
 	if is_remote_player:
-		animation_player.play(CROUCH_ANIM, -1, CROUCH_SPEED)
+		animation_player.play(PRONE_ANIM, -1, PRONE_SPEED)
 
 
 func logic_physics(delta: float) -> void:
@@ -47,23 +47,22 @@ func logic_physics(delta: float) -> void:
 	player.update_movement(Enums.IntegrationContext.GAME)
 	player.update_velocity(Enums.IntegrationContext.GAME)
 	
-	if _wants_to_uncrouch and not _crouch_shapecast.is_colliding():
-		_progress -= delta * UNCROUCH_SPEED
+	if _wants_to_unprone and not _crouch_shapecast.is_colliding():
+		_progress -= delta * UNPRONE_SPEED
 	else:
-		_progress += delta * CROUCH_SPEED
+		_progress += delta * PRONE_SPEED
 	
-	_progress = clampf(_progress, 0.0, _crouch_anim_length)
+	_progress = clampf(_progress, 0.0, _prone_anim_length)
+	if player.is_authority: print("progress: ", _progress, " ", _wants_to_unprone)
 
 
 func logic_transitions() -> void:
-	if TOGGLE_CROUCH:
-		if player.input.is_crouch_just_pressed() and _toggle_debounce_us() > 50_000:
-			_last_toggle_time = Time.get_ticks_usec()
-			_wants_to_uncrouch = !_wants_to_uncrouch
-	else:
-		_wants_to_uncrouch = !player.input.is_crouching()
+	if player.input.is_prone_just_pressed() and _toggle_debounce_us() > 50_000:
+		_last_toggle_time = Time.get_ticks_usec()
+		_wants_to_unprone = !_wants_to_unprone
+		if player.is_authority: print("test")
 
-	if _wants_to_uncrouch and _progress <= 0.0:
+	if _wants_to_unprone and _progress <= 0.0:
 		# Block uncrouch if hitting ceiling
 		if _crouch_shapecast and _crouch_shapecast.is_colliding():
 			return
@@ -78,8 +77,8 @@ func visual_physics(delta: float) -> void:
 		player.update_velocity(Enums.IntegrationContext.VISUAL)
 		
 		# Sync animation to logic progress
-		if animation_player.current_animation != CROUCH_ANIM:
-			animation_player.play(CROUCH_ANIM)
+		if animation_player.current_animation != PRONE_ANIM:
+			animation_player.play(PRONE_ANIM)
 		animation_player.seek(_progress, true)
 
 

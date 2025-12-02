@@ -1,27 +1,6 @@
 class_name PlayerController extends CharacterBody3D
 
-class PlayerInput:
-	var input_packet: PlayerInputPacket = null
-	var prev_input_packet: PlayerInputPacket = null
-
-	func is_sprinting() -> bool:
-		return input_packet.sprint
-
-	func is_sprint_just_pressed() -> bool:
-		return input_packet.sprint and not prev_input_packet.sprint
-
-	func is_crouching() -> bool:
-		return input_packet.crouch
-
-	func is_crouch_just_pressed() -> bool:
-		return input_packet.crouch and not prev_input_packet.crouch
-
-	func is_jumping() -> bool:
-		return input_packet.jump
-	
-	func is_jump_just_pressed() -> bool:
-		return input_packet.jump and not prev_input_packet.jump
-
+signal reconcile_network_debug(delta_pos: Vector3, delta_vel: Vector3, unacked_inputs: SequenceRingBuffer)
 
 @export var TILT_LOWER_LIMIT: float = deg_to_rad(-90.0)
 @export var TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
@@ -42,7 +21,7 @@ class PlayerInput:
 @onready var camera: Camera3D = $CameraController/Camera3D
 @onready var tp_camera: Camera3D = $CameraController/ThirdPersonCamera3D
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
-@onready var game_body: CharacterBody3D = $GameCharacterBody3D
+@onready var game_body: CharacterBody3D = $GameController
 @onready var crouch_shapecast: ShapeCast3D = %CrouchShapeCast3D
 
 var is_authority: bool:
@@ -113,7 +92,7 @@ func _ready():
 		camera.call_deferred("remove_child", $CameraController/Camera3D/ReflectionProbe)
 
 	if !is_authority and !NetworkTransport.is_server:
-		call_deferred("remove_child", $GameCharacterBody3D)
+		call_deferred("remove_child", $GameController)
 
 
 func _unhandled_input(event):
@@ -129,7 +108,7 @@ func _input(event: InputEvent) -> void:
 	if !is_authority:
 		return
 	
-	if event.is_action_pressed("ToggleCamera"):
+	if event.is_action_pressed("toggle_camera"):
 		if camera.current:
 			tp_camera.make_current()
 		else:
@@ -198,6 +177,7 @@ func _client_authority_physics_step(delta: float) -> void:
 	player_input.jump = Input.is_action_pressed("jump")
 	player_input.crouch = Input.is_action_pressed("crouch")
 	player_input.sprint = Input.is_action_pressed("sprint")
+	player_input.prone = Input.is_action_pressed("prone")
 	_unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)
 	NetworkTransport.send_packet(player_input.to_payload())
 	# _current_frame_input = player_input
@@ -277,25 +257,13 @@ func _client_authority_reconcile_visual_state(delta: float) -> void:
 	var horizontal_err := Vector2(delta_pos.x, delta_pos.z)
 	var horizontal_err_mag := horizontal_err.length()
 	var vertical_err := absf(delta_pos.y)
-
-	var color_pos := Color()
-	color_pos.r = delta_pos.x
-	color_pos.g = delta_pos.z
-	color_pos.b = delta_pos.y
-	$CameraController/Camera3D/DeltaPos.color = color_pos
-
+	
 	var delta_vel := game_velocity - velocity
 	var horizontal_vel_err := Vector2(delta_vel.x, delta_vel.z)
 	var horizontal_vel_err_mag := horizontal_vel_err.length()
-
-	var color_vel := Color()
-	color_vel.r = delta_vel.x
-	color_vel.g = delta_vel.z
-	color_vel.b = delta_vel.y
-	$CameraController/Camera3D/DeltaVel.color = color_vel
-
-	$CameraController/Camera3D/InputBuffer.text = "Inputs Size: %d\nInputs Oldest: %d\nInputs Newest: %d\nInputs Buffer Delay: %d" % [_unacked_inputs.size(), _unacked_inputs.oldest_sequence_id(), _unacked_inputs.newest_sequence_id(), _unacked_inputs.buffer_delay_us()]
-
+	
+	reconcile_network_debug.emit(delta_pos, delta_vel, _unacked_inputs)
+	
 	# TODO: maybe even give snap to game state a lerp so its not instant
 	# Snap or lerp to horizontal game position
 	if horizontal_err_mag > SNAP_THRESHOLD_HORIZONTAL:

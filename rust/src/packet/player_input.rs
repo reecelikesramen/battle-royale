@@ -36,6 +36,9 @@ define_packet! {
         sprint: {
             godot: bool,
         },
+        prone: {
+            godot: bool,
+        },
     },
     codec: postcard
 }
