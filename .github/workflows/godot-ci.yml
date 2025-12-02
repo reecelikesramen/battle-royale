@@ -252,6 +252,7 @@ jobs:
       - name: Setup
         run: |
           # copy the library to the debug directory so editor does not fail
+          mkdir -v -p rust/target/debug
           cp godot/addons/rust/bin/librust.so rust/target/debug/librust.so
           mkdir -v -p ~/.local/share/godot/export_templates/
           mkdir -v -p ~/.config/
