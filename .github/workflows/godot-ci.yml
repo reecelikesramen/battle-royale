@@ -278,3 +278,31 @@ jobs:
         with:
           name: linux
           path: build/linux
+
+  create-release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [export-windows, export-mac, export-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip Builds
+        run: |
+          cd artifacts
+          zip -r ../windows.zip windows
+          zip -r ../linux.zip linux
+          # Mac is already a zip, just copy it
+          cp mac/*.zip ../mac.zip || (cd mac && zip -r ../../mac.zip .)
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            windows.zip
+            linux.zip
+            mac.zip
