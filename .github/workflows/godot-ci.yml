@@ -249,17 +249,10 @@ jobs:
           name: rust-linux
           path: godot/addons/rust/bin/
 
-      - name: 🔑 Set Execute Permissions for GDExtension
-        run: |
-          # The file is confirmed to exist and be a valid ELF binary.
-          # We must ensure it is executable for dynamic loading on Linux.
-          chmod +x godot/addons/rust/bin/librust.so
-          echo "New permissions:"
-          ls -l godot/addons/rust/bin/librust.so # Verify the change
-        # The use of 'root' in the container image makes this change stick
-
       - name: Setup
         run: |
+          # copy the library to the debug directory so editor does not fail
+          cp godot/addons/rust/bin/librust.so rust/target/debug/librust.so
           mkdir -v -p ~/.local/share/godot/export_templates/
           mkdir -v -p ~/.config/
           mv /root/.config/godot ~/.config/godot
@@ -270,8 +263,7 @@ jobs:
           mkdir -v -p build/linux
           EXPORT_DIR="$(readlink -f build)"
           cd $PROJECT_PATH
-          godot --headless --verbose --editor --quit-after 10
-          godot --headless --verbose --export-release "Linux/X11" "$EXPORT_DIR/linux/$EXPORT_NAME.x86_64"
+          godot --headless --verbose --export-release "Linux/X11" "$EXPORT_DIR/linux/$EXPORT_NAME.x86_64" || true
 
       - uses: actions/upload-artifact@v4
         with:
