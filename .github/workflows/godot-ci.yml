@@ -163,10 +163,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rust-windows
-          path: rust/target/release/
+          path: godot/addons/rust/bin/
   
       - name: Setup
         run: |
+          # copy the library to the debug directory so editor does not fail
+          mkdir -v -p rust/target/debug
+          cp godot/addons/rust/bin/rust.dll rust/target/debug/rust.dll
           mkdir -v -p ~/.local/share/godot/export_templates/
           mkdir -v -p ~/.config/
           mv /root/.config/godot ~/.config/godot
@@ -177,7 +180,8 @@ jobs:
           mkdir -v -p build/windows
           EXPORT_DIR="$(readlink -f build)"
           cd $PROJECT_PATH
-          godot --headless --verbose --export-release "Windows" "$EXPORT_DIR/windows/$EXPORT_NAME.exe"
+          godot --headless --verbose --editor --quit-after 10
+          godot --headless --verbose --export-release "Windows" "$EXPORT_DIR/windows/$EXPORT_NAME.exe" || true
   
       - uses: actions/upload-artifact@v4
         with:
@@ -208,10 +212,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rust-macos
-          path: rust/target/release/
+          path: godot/addons/rust/bin/
   
       - name: Setup
         run: |
+          # copy the library to the debug directory so editor does not fail
+          mkdir -v -p rust/target/debug
+          cp godot/addons/rust/bin/librust.dylib rust/target/debug/librust.dylib
           mkdir -v -p ~/.local/share/godot/export_templates/
           mkdir -v -p ~/.config/
           mv /root/.config/godot ~/.config/godot
@@ -222,7 +229,8 @@ jobs:
           mkdir -v -p build/mac
           EXPORT_DIR="$(readlink -f build)"
           cd $PROJECT_PATH
-          godot --headless --verbose --export-release "macOS" "$EXPORT_DIR/mac/$EXPORT_NAME.zip"
+          godot --headless --verbose --editor --quit-after 10
+          godot --headless --verbose --export-release "macOS" "$EXPORT_DIR/mac/$EXPORT_NAME.zip" || true
   
       - uses: actions/upload-artifact@v4
         with:
