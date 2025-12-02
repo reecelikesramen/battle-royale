@@ -23,19 +23,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Temporarily disabled - only running Linux build
-          # - os: macos-latest
-          #   target: aarch64-apple-darwin
-          #   artifact-name: rust-macos
-          #   library-name: librust.dylib
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact-name: rust-macos
+            library-name: librust.dylib
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact-name: rust-linux
             library-name: librust.so
-          # - os: windows-latest
-          #   target: x86_64-pc-windows-msvc
-          #   artifact-name: rust-windows
-          #   library-name: rust.dll
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact-name: rust-windows
+            library-name: rust.dll
 
     runs-on: ${{ matrix.os }}
 
@@ -140,96 +139,95 @@ jobs:
           retention-days: 7
 
   # ============ GODOT EXPORTS (only on tags) ============
-  # Temporarily disabled - only running Linux export
-  # export-windows:
-  #   name: Windows Export
-  #   if: startsWith(github.ref, 'refs/tags/v')
-  #   needs: build-rust
-  #   runs-on: ubuntu-24.04
-  #   container:
-  #     image: barichello/godot-ci:4.5
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         lfs: true
-  #
-  #     # Host library (Linux) - for Godot to load extension
-  #     - name: Download Rust library (host)
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: rust-linux
-  #         path: rust/target/release/
-  #
-  #     # Target library (Windows) - for export bundling
-  #     - name: Download Rust library (target)
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: rust-windows
-  #         path: rust/target/release/
-  #
-  #     - name: Setup
-  #       run: |
-  #         mkdir -v -p ~/.local/share/godot/export_templates/
-  #         mkdir -v -p ~/.config/
-  #         mv /root/.config/godot ~/.config/godot
-  #         mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
-  #
-  #     - name: Windows Build
-  #       run: |
-  #         mkdir -v -p build/windows
-  #         EXPORT_DIR="$(readlink -f build)"
-  #         cd $PROJECT_PATH
-  #         godot --headless --verbose --export-release "Windows Desktop" "$EXPORT_DIR/windows/$EXPORT_NAME.exe"
-  #
-  #     - uses: actions/upload-artifact@v4
-  #       with:
-  #         name: windows
-  #         path: build/windows
-  #
-  # export-mac:
-  #   name: Mac Export
-  #   if: startsWith(github.ref, 'refs/tags/v')
-  #   needs: build-rust
-  #   runs-on: ubuntu-24.04
-  #   container:
-  #     image: barichello/godot-ci:4.5
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         lfs: true
-  #
-  #     # Host library (Linux) - for Godot to load extension
-  #     - name: Download Rust library (host)
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: rust-linux
-  #         path: rust/target/release/
-  #
-  #     # Target library (macOS) - for export bundling
-  #     - name: Download Rust library (target)
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: rust-macos
-  #         path: rust/target/release/
-  #
-  #     - name: Setup
-  #       run: |
-  #         mkdir -v -p ~/.local/share/godot/export_templates/
-  #         mkdir -v -p ~/.config/
-  #         mv /root/.config/godot ~/.config/godot
-  #         mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
-  #
-  #     - name: Mac Build
-  #       run: |
-  #         mkdir -v -p build/mac
-  #         EXPORT_DIR="$(readlink -f build)"
-  #         cd $PROJECT_PATH
-  #         godot --headless --verbose --export-release "macOS" "$EXPORT_DIR/mac/$EXPORT_NAME.zip"
-  #
-  #     - uses: actions/upload-artifact@v4
-  #       with:
-  #         name: mac
-  #         path: build/mac
+  export-windows:
+    name: Windows Export
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-rust
+    runs-on: ubuntu-24.04
+    container:
+      image: barichello/godot-ci:4.5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+  
+      # Host library (Linux) - for Godot to load extension
+      - name: Download Rust library (host)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-linux
+          path: rust/target/release/
+  
+      # Target library (Windows) - for export bundling
+      - name: Download Rust library (target)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-windows
+          path: rust/target/release/
+  
+      - name: Setup
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mkdir -v -p ~/.config/
+          mv /root/.config/godot ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+  
+      - name: Windows Build
+        run: |
+          mkdir -v -p build/windows
+          EXPORT_DIR="$(readlink -f build)"
+          cd $PROJECT_PATH
+          godot --headless --verbose --export-release "Windows" "$EXPORT_DIR/windows/$EXPORT_NAME.exe"
+  
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: build/windows
+  
+  export-mac:
+    name: Mac Export
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-rust
+    runs-on: ubuntu-24.04
+    container:
+      image: barichello/godot-ci:4.5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+  
+      # Host library (Linux) - for Godot to load extension
+      - name: Download Rust library (host)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-linux
+          path: rust/target/release/
+  
+      # Target library (macOS) - for export bundling
+      - name: Download Rust library (target)
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-macos
+          path: rust/target/release/
+  
+      - name: Setup
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mkdir -v -p ~/.config/
+          mv /root/.config/godot ~/.config/godot
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+  
+      - name: Mac Build
+        run: |
+          mkdir -v -p build/mac
+          EXPORT_DIR="$(readlink -f build)"
+          cd $PROJECT_PATH
+          godot --headless --verbose --export-release "macOS" "$EXPORT_DIR/mac/$EXPORT_NAME.zip"
+  
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: build/mac
 
   export-linux:
     name: Linux Export
@@ -264,7 +262,7 @@ jobs:
           mkdir -v -p build/linux
           EXPORT_DIR="$(readlink -f build)"
           cd $PROJECT_PATH
-          godot --headless --verbose --export-release "Linux/X11" "$EXPORT_DIR/linux/$EXPORT_NAME.x86_64" || true
+          godot --headless --verbose --export-release "Linux" "$EXPORT_DIR/linux/$EXPORT_NAME.x86_64" || true
 
       - uses: actions/upload-artifact@v4
         with:
