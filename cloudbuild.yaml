@@ -1,0 +1,211 @@
+# Google Cloud Build configuration for Godot exports
+# Triggered by GitHub Actions after Rust builds complete
+#
+# Required substitutions (passed from GitHub Actions):
+#   _TAG_NAME      - Version tag (e.g., v1.0.0)
+#   _BUCKET        - GCS bucket name
+#   _EXPORT_NAME   - Export filename base (e.g., battle-royale)
+#   _PROJECT_NAME  - Godot project name (e.g., "Battle Royale")
+#   _PROJECT_PATH  - Path to Godot project (e.g., godot)
+#   _GODOT_VERSION - Godot version (e.g., 4.5)
+
+steps:
+  # ============ RESTORE .godot CACHE ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'restore-cache'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p ${_PROJECT_PATH}/.godot
+        gsutil -m cp -r gs://${_BUCKET}/cache/.godot/* ${_PROJECT_PATH}/.godot/ 2>/dev/null \
+          && echo "Cache restored" \
+          || echo "No cache found, will create fresh"
+
+  # ============ DOWNLOAD RUST LIBRARIES ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-rust'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p ${_PROJECT_PATH}/addons/rust/bin
+        mkdir -p rust/target/release
+        mkdir -p rust/target/debug
+        
+        # Download all platform libraries
+        gsutil -m cp gs://${_BUCKET}/rust-libs/${_TAG_NAME}/* ${_PROJECT_PATH}/addons/rust/bin/
+        
+        # Copy Linux lib to expected paths for editor
+        cp ${_PROJECT_PATH}/addons/rust/bin/librust.so rust/target/release/librust.so
+        cp ${_PROJECT_PATH}/addons/rust/bin/librust.so rust/target/debug/librust.so
+        
+        ls -la ${_PROJECT_PATH}/addons/rust/bin/
+
+  # ============ DOWNLOAD PREVIOUS BASE PCKs (for patches) ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-previous-pcks'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p previous-pcks
+        # Find previous release (list releases, get second newest if exists)
+        RELEASES=$(gsutil ls gs://${_BUCKET}/releases/ 2>/dev/null | grep -v "^gs://${_BUCKET}/releases/$" | sort -V)
+        PREV_RELEASE=$(echo "$RELEASES" | grep -v "${_TAG_NAME}" | tail -1)
+        
+        if [ -n "$PREV_RELEASE" ]; then
+          echo "Previous release: $PREV_RELEASE"
+          gsutil -m cp ${PREV_RELEASE}*-base.pck previous-pcks/ 2>/dev/null \
+            && echo "Previous PCKs downloaded" \
+            || echo "No previous base PCKs found"
+        else
+          echo "No previous release found, skipping patch generation"
+        fi
+        ls -la previous-pcks/ || true
+
+  # ============ RUN GODOT EDITOR (import assets) ============
+  - name: 'barichello/godot-ci:${_GODOT_VERSION}'
+    id: 'godot-import'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        cd ${_PROJECT_PATH}
+        godot --headless --editor --quit-after 30 || true
+        echo "Asset import complete"
+
+  # ============ EXPORT WINDOWS ============
+  - name: 'barichello/godot-ci:${_GODOT_VERSION}'
+    id: 'export-windows'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p build/windows
+        cd ${_PROJECT_PATH}
+        godot --headless --export-release "Windows" ../build/windows/${_EXPORT_NAME}.exe || true
+        
+        # Copy base PCK
+        if [ -f "../build/windows/${_EXPORT_NAME}.pck" ]; then
+          cp "../build/windows/${_EXPORT_NAME}.pck" "../build/windows/windows-base.pck"
+        fi
+        
+        # Generate patch if previous exists
+        if [ -f "../previous-pcks/windows-base.pck" ]; then
+          godot --headless --export-patch "Windows" "../build/windows/${_TAG_NAME}.pck" \
+            --patches "$(readlink -f ../previous-pcks/windows-base.pck)" || true
+        fi
+        
+        ls -la ../build/windows/
+
+  # ============ EXPORT LINUX ============
+  - name: 'barichello/godot-ci:${_GODOT_VERSION}'
+    id: 'export-linux'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p build/linux
+        cd ${_PROJECT_PATH}
+        godot --headless --export-release "Linux" ../build/linux/${_EXPORT_NAME}.x86_64 || true
+        
+        # Copy base PCK
+        if [ -f "../build/linux/${_EXPORT_NAME}.pck" ]; then
+          cp "../build/linux/${_EXPORT_NAME}.pck" "../build/linux/linux-base.pck"
+        fi
+        
+        # Generate patch if previous exists
+        if [ -f "../previous-pcks/linux-base.pck" ]; then
+          godot --headless --export-patch "Linux" "../build/linux/${_TAG_NAME}.pck" \
+            --patches "$(readlink -f ../previous-pcks/linux-base.pck)" || true
+        fi
+        
+        ls -la ../build/linux/
+
+  # ============ EXPORT MACOS ============
+  - name: 'barichello/godot-ci:${_GODOT_VERSION}'
+    id: 'export-mac'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p build/mac
+        cd ${_PROJECT_PATH}
+        godot --headless --export-release "macOS" ../build/mac/${_EXPORT_NAME}.zip || true
+        
+        # Extract to get PCK
+        cd ../build/mac
+        unzip -q ${_EXPORT_NAME}.zip || true
+        
+        # Copy base PCK (from app bundle)
+        if [ -f "${_PROJECT_NAME}.app/Contents/Resources/${_PROJECT_NAME}.pck" ]; then
+          cp "${_PROJECT_NAME}.app/Contents/Resources/${_PROJECT_NAME}.pck" "mac-base.pck"
+        fi
+        
+        # Generate patch if previous exists
+        if [ -f "../../previous-pcks/mac-base.pck" ]; then
+          cd ../../${_PROJECT_PATH}
+          godot --headless --export-patch "macOS" "../build/mac/${_TAG_NAME}.pck" \
+            --patches "$(readlink -f ../previous-pcks/mac-base.pck)" || true
+        fi
+        
+        # Clean up extracted app (save space)
+        rm -rf "${_PROJECT_NAME}.app" || true
+        
+        ls -la ../build/mac/ || ls -la ../../build/mac/
+
+  # ============ ZIP BUILDS ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'zip-builds'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p release
+        
+        # Windows
+        (cd build && zip -r ../release/windows.zip windows)
+        mv build/windows/windows-base.pck release/ 2>/dev/null || true
+        mv build/windows/${_TAG_NAME}.pck release/windows-${_TAG_NAME}.pck 2>/dev/null || true
+        
+        # Linux
+        (cd build && zip -r ../release/linux.zip linux)
+        mv build/linux/linux-base.pck release/ 2>/dev/null || true
+        mv build/linux/${_TAG_NAME}.pck release/linux-${_TAG_NAME}.pck 2>/dev/null || true
+        
+        # Mac (already zipped)
+        mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
+        mv build/mac/mac-base.pck release/ 2>/dev/null || true
+        mv build/mac/${_TAG_NAME}.pck release/mac-${_TAG_NAME}.pck 2>/dev/null || true
+        
+        ls -la release/
+
+  # ============ UPLOAD RELEASE ARTIFACTS ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'upload-release'
+    args:
+      - '-m'
+      - 'cp'
+      - '-r'
+      - 'release/*'
+      - 'gs://${_BUCKET}/releases/${_TAG_NAME}/'
+
+  # ============ SAVE .godot CACHE ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'save-cache'
+    args:
+      - '-m'
+      - 'rsync'
+      - '-r'
+      - '-d'
+      - '${_PROJECT_PATH}/.godot'
+      - 'gs://${_BUCKET}/cache/.godot'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 100
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1800s'  # 30 minutes max
+

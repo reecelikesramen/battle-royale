@@ -1,0 +1,308 @@
+name: "Build & Export (Google Cloud)"
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g., v1.0.0)'
+        required: true
+        type: string
+  # Keep cache warm
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+
+env:
+  # ============ PROJECT CONFIG ============
+  GODOT_VERSION: "4.5"
+  EXPORT_NAME: battle-royale
+  PROJECT_NAME: Battle Royale
+  PROJECT_PATH: godot
+
+  # ============ GOOGLE CLOUD CONFIG ============
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  GCS_BUCKET: ${{ vars.GCS_BUCKET }}
+
+jobs:
+  # ============ RUST BUILDS (native runners) ============
+  build-rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact-name: rust-macos
+            library-name: librust.dylib
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact-name: rust-linux
+            library-name: librust.so
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact-name: rust-windows
+            library-name: rust.dll
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      # Ensure cache path exists for validation
+      - name: Prepare cache directory
+        run: mkdir -p rust/target/release
+
+      # Check if we have a cached build for this exact source
+      - name: Cache built library
+        id: cache-lib
+        uses: actions/cache@v4
+        with:
+          path: rust/target/release/${{ matrix.library-name }}
+          key: rust-lib-${{ matrix.target }}-${{ hashFiles('rust/src/**', 'rust/Cargo.toml', 'rust/Cargo.lock') }}
+
+      # ===== All steps below only run on cache miss =====
+
+      - name: Setup Rust
+        if: steps.cache-lib.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust deps
+        if: steps.cache-lib.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          shared-key: ${{ matrix.target }}
+          cache-all-crates: true
+
+      # Linux deps
+      - name: Cache protobuf (Linux)
+        if: runner.os == 'Linux' && steps.cache-lib.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/protobuf-install
+          key: linux-protobuf-21.12-v3
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux' && steps.cache-lib.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang pkg-config libssl-dev libabsl-dev cmake build-essential
+          if [ -f ~/protobuf-install/bin/protoc ]; then
+            sudo cp -r ~/protobuf-install/* /usr/local/
+          else
+            cd /tmp
+            wget -q https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protobuf-all-21.12.tar.gz
+            tar -xzf protobuf-all-21.12.tar.gz && cd protobuf-21.12
+            mkdir build && cd build
+            cmake ../cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX=~/protobuf-install -Dprotobuf_ABSL_PROVIDER=package
+            make -j$(nproc) && make install
+            sudo cp -r ~/protobuf-install/* /usr/local/
+          fi
+          sudo ldconfig
+
+      # macOS deps
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS' && steps.cache-lib.outputs.cache-hit != 'true'
+        run: |
+          brew install openssl protobuf@21 pkg-config
+          brew unlink protobuf@21 && brew link --force protobuf@21
+
+      # Windows
+      - name: Enable long paths (Windows)
+        if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: git config --global core.longpaths true
+
+      # Build
+      - name: Build Rust release
+        if: steps.cache-lib.outputs.cache-hit != 'true'
+        working-directory: rust
+        env:
+          CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr/local' || '' }}
+          GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\vcpkg-buildtrees' || '' }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # Copy to expected path for gdextension compatibility
+      - name: Copy library to release dir
+        if: steps.cache-lib.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p rust/target/release
+          cp rust/target/${{ matrix.target }}/release/${{ matrix.library-name }} rust/target/release/
+
+      # Upload as GitHub artifact (for next job)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: rust/target/release/${{ matrix.library-name }}
+          retention-days: 1
+
+  # ============ UPLOAD TO GCS & TRIGGER CLOUD BUILD (only on tags) ============
+  trigger-cloud-build:
+    name: Trigger Google Cloud Build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: build-rust
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      build_id: ${{ steps.trigger.outputs.build_id }}
+      tag_name: ${{ steps.tag.outputs.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Download all Rust artifacts
+      - name: Download Rust libraries
+        uses: actions/download-artifact@v4
+        with:
+          path: rust-libs
+
+      - name: Determine tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Rust libraries to GCS
+        run: |
+          TAG_NAME="${{ steps.tag.outputs.name }}"
+          gsutil -m cp rust-libs/rust-linux/librust.so "gs://$GCS_BUCKET/rust-libs/$TAG_NAME/librust.so"
+          gsutil -m cp rust-libs/rust-macos/librust.dylib "gs://$GCS_BUCKET/rust-libs/$TAG_NAME/librust.dylib"
+          gsutil -m cp rust-libs/rust-windows/rust.dll "gs://$GCS_BUCKET/rust-libs/$TAG_NAME/rust.dll"
+
+      - name: Trigger Cloud Build
+        id: trigger
+        run: |
+          TAG_NAME="${{ steps.tag.outputs.name }}"
+          
+          BUILD_ID=$(gcloud builds submit \
+            --config=cloudbuild.yaml \
+            --substitutions="\
+              _TAG_NAME=$TAG_NAME,\
+              _BUCKET=$GCS_BUCKET,\
+              _EXPORT_NAME=$EXPORT_NAME,\
+              _PROJECT_NAME=$PROJECT_NAME,\
+              _PROJECT_PATH=$PROJECT_PATH,\
+              _GODOT_VERSION=$GODOT_VERSION" \
+            --format='value(id)' \
+            --async)
+          
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "Triggered Cloud Build: $BUILD_ID"
+          echo "View at: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=$GCP_PROJECT_ID"
+
+  # ============ WAIT FOR CLOUD BUILD & CREATE RELEASE ============
+  wait-and-release:
+    name: Wait for Build & Create Release
+    needs: trigger-cloud-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Wait for Cloud Build to complete
+        run: |
+          BUILD_ID="${{ needs.trigger-cloud-build.outputs.build_id }}"
+          echo "Waiting for build $BUILD_ID..."
+          
+          while true; do
+            STATUS=$(gcloud builds describe "$BUILD_ID" --format='value(status)')
+            echo "Build status: $STATUS"
+            
+            case "$STATUS" in
+              SUCCESS)
+                echo "Build completed successfully!"
+                break
+                ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED)
+                echo "Build failed with status: $STATUS"
+                exit 1
+                ;;
+              *)
+                echo "Build still running..."
+                sleep 30
+                ;;
+            esac
+          done
+
+      - name: Generate release body with download links
+        id: release_body
+        run: |
+          TAG_NAME="${{ needs.trigger-cloud-build.outputs.tag_name }}"
+          BASE_URL="https://storage.googleapis.com/$GCS_BUCKET/releases/$TAG_NAME"
+          
+          # List files in the release
+          FILES=$(gsutil ls "gs://$GCS_BUCKET/releases/$TAG_NAME/" | xargs -n1 basename)
+          
+          # Build markdown body
+          BODY="## Downloads
+
+          | Platform | Full Build | Base PCK | Patch |
+          |----------|------------|----------|-------|"
+          
+          # Windows
+          WIN_FULL=""; WIN_BASE=""; WIN_PATCH=""
+          echo "$FILES" | grep -q "windows.zip" && WIN_FULL="[Download]($BASE_URL/windows.zip)"
+          echo "$FILES" | grep -q "windows-base.pck" && WIN_BASE="[Download]($BASE_URL/windows-base.pck)"
+          echo "$FILES" | grep -q "windows-$TAG_NAME.pck" && WIN_PATCH="[Download]($BASE_URL/windows-$TAG_NAME.pck)"
+          BODY="$BODY
+          | Windows | $WIN_FULL | $WIN_BASE | $WIN_PATCH |"
+          
+          # Linux
+          LIN_FULL=""; LIN_BASE=""; LIN_PATCH=""
+          echo "$FILES" | grep -q "linux.zip" && LIN_FULL="[Download]($BASE_URL/linux.zip)"
+          echo "$FILES" | grep -q "linux-base.pck" && LIN_BASE="[Download]($BASE_URL/linux-base.pck)"
+          echo "$FILES" | grep -q "linux-$TAG_NAME.pck" && LIN_PATCH="[Download]($BASE_URL/linux-$TAG_NAME.pck)"
+          BODY="$BODY
+          | Linux | $LIN_FULL | $LIN_BASE | $LIN_PATCH |"
+          
+          # Mac
+          MAC_FULL=""; MAC_BASE=""; MAC_PATCH=""
+          echo "$FILES" | grep -q "mac.zip" && MAC_FULL="[Download]($BASE_URL/mac.zip)"
+          echo "$FILES" | grep -q "mac-base.pck" && MAC_BASE="[Download]($BASE_URL/mac-base.pck)"
+          echo "$FILES" | grep -q "mac-$TAG_NAME.pck" && MAC_PATCH="[Download]($BASE_URL/mac-$TAG_NAME.pck)"
+          BODY="$BODY
+          | macOS | $MAC_FULL | $MAC_BASE | $MAC_PATCH |"
+          
+          # Output using heredoc
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.trigger-cloud-build.outputs.tag_name }}
+          body: ${{ steps.release_body.outputs.body }}
+
