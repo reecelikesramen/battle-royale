@@ -15,11 +15,52 @@ var _downloading_manifest := true
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
+	process_patches_and_updates()
+
+
+# Patch-safe initialization. All init code that can be patched should go here.
+# This runs after all patches (existing + auto-updated) are loaded and applied.
+func initialize() -> void:
+	# Transition to main menu
+	get_tree().call_deferred(&"change_scene_to_file", Constants.MAIN_MENU_SCENE_PATH)
+
+
+# Handles patching and auto-update flow. Separated from initialize() so patches can modify init logic.
+func process_patches_and_updates() -> void:
+	# Final state: all patches loaded, proceed to initialization
 	if Engine.has_meta(&"patches_loaded"):
-		print("Patches loaded, changing to main menu")
-		get_tree().call_deferred(&"change_scene_to_file", Constants.MAIN_MENU_SCENE_PATH)
+		print("All patches loaded, initializing...")
+		initialize()
 		return
 	
+	# Phase 2: Auto-update check (after Phase 1 reload)
+	if Engine.has_meta(&"patches_applied_phase1") and not Engine.has_meta(&"auto_update_complete"):
+		print("Phase 1 complete, starting auto-update...")
+		start_auto_update()
+		return
+	
+	# Phase 1: Apply existing patches first
+	if not Engine.has_meta(&"patches_applied_phase1"):
+		print("Phase 1: Applying existing patches...")
+		apply_existing_patches()
+		return
+
+func apply_existing_patches() -> void:
+	_r.compile(SEMVER_PATTERN)
+	_game_dir = DirAccess.open(OS.get_executable_path().get_base_dir())
+	if not _game_dir:
+		push_error("Failed to load game executable dir")
+		# Mark phase 1 complete anyway, continue to auto-update
+		Engine.set_meta(&"patches_applied_phase1", true)
+		get_tree().call_deferred(&"reload_current_scene")
+		return
+	
+	load_patches()
+	Engine.set_meta(&"patches_applied_phase1", true)
+	print("Phase 1 complete: Existing patches applied, reloading...")
+	get_tree().call_deferred(&"reload_current_scene")
+
+func start_auto_update() -> void:
 	_r.compile(SEMVER_PATTERN)
 	_os_prefix = get_os_prefix()
 	
@@ -27,16 +68,14 @@ func _ready() -> void:
 	var version_file = FileAccess.open("res://VERSION.txt", FileAccess.READ)
 	if version_file == null:
 		push_error("VERSION.txt file not found at res://VERSION.txt")
-		# Fall back to loading existing patches
-		load_existing_patches()
+		complete_patching_flow()
 		return
 	
 	_build_version = version_file.get_as_text().strip_edges()
 	version_file.close()
 	if _build_version.is_empty():
 		push_error("VERSION.txt file is empty")
-		# Fall back to loading existing patches
-		load_existing_patches()
+		complete_patching_flow()
 		return
 	
 	print("Build version: ", _build_version)
@@ -50,6 +89,12 @@ func _ready() -> void:
 	
 	# Check for updates
 	check_for_updates()
+
+func complete_patching_flow() -> void:
+	Engine.set_meta(&"auto_update_complete", true)
+	Engine.set_meta(&"patches_loaded", true)
+	print("Patching flow complete, reloading...")
+	get_tree().call_deferred(&"reload_current_scene")
 
 
 func get_os_prefix() -> String:
@@ -69,38 +114,37 @@ func check_for_updates() -> void:
 	var error = _http.request(url)
 	if error != OK:
 		push_error("Failed to request versions.json: " + str(error))
-		# Fall back to loading existing patches
-		load_existing_patches()
+		complete_patching_flow()
 
 func _on_http_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	if _downloading_manifest:
 		# Handle manifest download
 		if response_code != 200:
 			push_error("Failed to fetch versions.json: HTTP " + str(response_code))
-			load_existing_patches()
+			complete_patching_flow()
 			return
 		
 		var json = JSON.new()
 		var parse_error = json.parse(body.get_string_from_utf8())
 		if parse_error != OK:
 			push_error("Failed to parse versions.json: " + str(parse_error))
-			load_existing_patches()
+			complete_patching_flow()
 			return
 		
 		var data = json.data
 		if not data.has("versions") or not data.versions is Array:
 			push_error("Invalid versions.json format")
-			load_existing_patches()
+			complete_patching_flow()
 			return
 		
 		var available_versions: Array = data.versions
 		print("Available versions: ", available_versions)
 		
-		# Find local patches
+		# Find local patches (after Phase 1, patches are already loaded)
 		_game_dir = DirAccess.open(OS.get_executable_path().get_base_dir())
 		if not _game_dir:
 			push_error("Failed to open game directory")
-			load_existing_patches()
+			complete_patching_flow()
 			return
 		
 		var local_files = Array(_game_dir.get_files())
@@ -127,7 +171,7 @@ func _on_http_request_completed(_result: int, response_code: int, _headers: Pack
 		
 		if _pending_downloads.size() == 0:
 			print("No updates available")
-			load_existing_patches()
+			complete_patching_flow()
 			return
 		
 		print("Found ", _pending_downloads.size(), " updates to download: ", _pending_downloads)
@@ -163,8 +207,8 @@ func _on_http_request_completed(_result: int, response_code: int, _headers: Pack
 
 func download_next_patch() -> void:
 	if _download_index >= _pending_downloads.size():
-		print("All patches downloaded")
-		load_existing_patches()
+		print("All patches downloaded, applying new patches...")
+		apply_new_patches()
 		return
 	
 	var version = _pending_downloads[_download_index]
@@ -178,19 +222,19 @@ func download_next_patch() -> void:
 		_download_index += 1
 		download_next_patch()
 
-func load_existing_patches() -> void:
-	print("Loading existing patches...")
+func apply_new_patches() -> void:
+	# Apply newly downloaded patches
 	_game_dir = DirAccess.open(OS.get_executable_path().get_base_dir())
 	if not _game_dir:
-		push_error("Failed to load game executable dir and patch game")
-		Engine.set_meta(&"patches_loaded", true)
-		get_tree().call_deferred(&"reload_current_scene")
+		push_error("Failed to open game directory for applying new patches")
+		complete_patching_flow()
 		return
 	
+	# Load all patches (existing + new)
 	load_patches()
-	Engine.set_meta(&"patches_loaded", true)
-	print("Loaded patches, reloading...")
-	get_tree().call_deferred(&"reload_current_scene")
+	
+	# Complete patching flow and reload to apply patches
+	complete_patching_flow()
 
 func load_patches():
 	var files := Array(_game_dir.get_files())
