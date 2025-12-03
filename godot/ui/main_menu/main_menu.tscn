@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=3 uid="uid://cnyy535rmpioo"]
 
-[ext_resource type="Theme" uid="uid://rai2e421dmte" path="res://ui/themes/main-menu.tres" id="1_7vrkn"]
+[ext_resource type="Theme" uid="uid://rai2e421dmte" path="res://ui/themes/main_menu.tres" id="1_7vrkn"]
 [ext_resource type="Script" uid="uid://duc4w5l74gup" path="res://ui/main_menu/main_menu.gd" id="2_fu7sn"]
 
 [sub_resource type="FontVariation" id="FontVariation_7vrkn"]

@@ -12,9 +12,15 @@ var _download_index := 0
 var _build_version: String = ""
 var _os_prefix: String = ""
 var _downloading_manifest := true
+const META_PROGRESS_VALUE := &"init_progress_value"
+const META_PROGRESS_TEXT := &"init_progress_text"
+
+@onready var _status_label: Label = %Label
+@onready var _progress_bar: ProgressBar = %ProgressBar
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
+	restore_progress_ui()
 	process_patches_and_updates()
 
 
@@ -30,18 +36,22 @@ func process_patches_and_updates() -> void:
 	# Final state: all patches loaded, proceed to initialization
 	if Engine.has_meta(&"patches_loaded"):
 		print("All patches loaded, initializing...")
+		update_progress(100.0, "Launching game...")
+		clear_progress_meta()
 		initialize()
 		return
 	
 	# Phase 2: Auto-update check (after Phase 1 reload)
 	if Engine.has_meta(&"patches_applied_phase1") and not Engine.has_meta(&"auto_update_complete"):
 		print("Phase 1 complete, starting auto-update...")
+		update_progress(45.0, "Checking for updates...")
 		start_auto_update()
 		return
 	
 	# Phase 1: Apply existing patches first
 	if not Engine.has_meta(&"patches_applied_phase1"):
 		print("Phase 1: Applying existing patches...")
+		update_progress(15.0, "Applying local patches...")
 		apply_existing_patches()
 		return
 
@@ -57,6 +67,7 @@ func apply_existing_patches() -> void:
 	
 	load_patches()
 	Engine.set_meta(&"patches_applied_phase1", true)
+	update_progress(35.0, "Local patches applied. Restarting...")
 	print("Phase 1 complete: Existing patches applied, reloading...")
 	get_tree().call_deferred(&"reload_current_scene")
 
@@ -93,6 +104,7 @@ func start_auto_update() -> void:
 func complete_patching_flow() -> void:
 	Engine.set_meta(&"auto_update_complete", true)
 	Engine.set_meta(&"patches_loaded", true)
+	update_progress(95.0, "Finalizing...")
 	print("Patching flow complete, reloading...")
 	get_tree().call_deferred(&"reload_current_scene")
 
@@ -114,6 +126,7 @@ func check_for_updates() -> void:
 	var error = _http.request(url)
 	if error != OK:
 		push_error("Failed to request versions.json: " + str(error))
+		update_progress(100.0, "No updates (offline). Launching...")
 		complete_patching_flow()
 
 func _on_http_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
@@ -171,6 +184,7 @@ func _on_http_request_completed(_result: int, response_code: int, _headers: Pack
 		
 		if _pending_downloads.size() == 0:
 			print("No updates available")
+			update_progress(90.0, "No updates available. Launching...")
 			complete_patching_flow()
 			return
 		
@@ -215,6 +229,10 @@ func download_next_patch() -> void:
 	var filename = _os_prefix + "-" + version + ".pck"
 	var url = GCS_BASE_URL + "/releases/" + version + "/" + filename
 	print("Downloading patch ", _download_index + 1, "/", _pending_downloads.size(), ": ", filename)
+	var download_progress = 55.0
+	if _pending_downloads.size() > 0:
+		download_progress = 55.0 + (float(_download_index) / float(_pending_downloads.size())) * 35.0
+	update_progress(download_progress, "Downloading " + version + "...")
 	
 	var error = _http.request(url)
 	if error != OK:
@@ -232,9 +250,34 @@ func apply_new_patches() -> void:
 	
 	# Load all patches (existing + new)
 	load_patches()
+	update_progress(92.0, "Applying downloaded patches...")
 	
 	# Complete patching flow and reload to apply patches
 	complete_patching_flow()
+
+func restore_progress_ui() -> void:
+	var value := 0.0
+	var text := "Starting..."
+	if Engine.has_meta(META_PROGRESS_VALUE):
+		value = float(Engine.get_meta(META_PROGRESS_VALUE))
+	if Engine.has_meta(META_PROGRESS_TEXT):
+		text = str(Engine.get_meta(META_PROGRESS_TEXT))
+	update_progress(value, text, false)
+
+func clear_progress_meta() -> void:
+	if Engine.has_meta(META_PROGRESS_VALUE):
+		Engine.remove_meta(META_PROGRESS_VALUE)
+	if Engine.has_meta(META_PROGRESS_TEXT):
+		Engine.remove_meta(META_PROGRESS_TEXT)
+
+func update_progress(value: float, text: String, save_meta: bool = true) -> void:
+	if save_meta:
+		Engine.set_meta(META_PROGRESS_VALUE, value)
+		Engine.set_meta(META_PROGRESS_TEXT, text)
+	if is_instance_valid(_progress_bar):
+		_progress_bar.value = clamp(value, 0.0, 100.0)
+	if is_instance_valid(_status_label):
+		_status_label.text = text
 
 func load_patches():
 	var files := Array(_game_dir.get_files())

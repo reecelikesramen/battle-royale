@@ -1,0 +1,111 @@
+[gd_scene load_steps=4 format=3 uid="uid://trgd65vjwowf"]
+
+[ext_resource type="Script" uid="uid://2j0ubpg0qevr" path="res://ui/debug/gui.gd" id="1_ex4wv"]
+[ext_resource type="Theme" uid="uid://b28fy0uaom4ds" path="res://ui/themes/debug.tres" id="2_pfgjb"]
+[ext_resource type="Script" uid="uid://sv4ikmsp6nik" path="res://ui/debug/debug.gd" id="3_kh5r6"]
+
+[node name="GUI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("1_ex4wv")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 2.0
+offset_top = 2.0
+offset_right = 298.0
+offset_bottom = 123.0
+
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_right = 200
+
+[node name="DebugPanel" type="PanelContainer" parent="VBoxContainer/MarginContainer"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+theme = ExtResource("2_pfgjb")
+script = ExtResource("3_kh5r6")
+
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/MarginContainer/DebugPanel"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ChatEdit" type="LineEdit" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Press enter to send chat"
+
+[node name="RepeatActionsButton" type="Button" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+text = "Repeat Actions
+"
+
+[node name="ExitToMenuButton" type="Button" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Exit to Menu"
+
+[node name="QuitButton" type="Button" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Quit"
+
+[node name="PanelContainer" type="PanelContainer" parent="VBoxContainer"]
+custom_minimum_size = Vector2(500, 0)
+layout_mode = 2
+
+[node name="ChatMessagePrototype" type="Label" parent="VBoxContainer/PanelContainer"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "test
+"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="VBoxContainer/PanelContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(500, 31)
+layout_mode = 2
+
+[node name="ChatVBox" type="VBoxContainer" parent="VBoxContainer/PanelContainer/ScrollContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="NetworkDebug" type="Control" parent="."]
+visible = false
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="DeltaPos" type="ColorRect" parent="NetworkDebug"]
+layout_mode = 0
+offset_left = 465.0
+offset_right = 505.0
+offset_bottom = 40.0
+
+[node name="DeltaVel" type="ColorRect" parent="NetworkDebug"]
+layout_mode = 0
+offset_left = 465.0
+offset_top = 48.0
+offset_right = 505.0
+offset_bottom = 88.0
+
+[node name="InputBuffer" type="Label" parent="NetworkDebug"]
+layout_mode = 0
+offset_left = 513.0
+offset_right = 723.0
+offset_bottom = 201.0
+
+[connection signal="text_submitted" from="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ChatEdit" to="VBoxContainer/MarginContainer/DebugPanel" method="_on_chat_edit_text_submitted"]
+[connection signal="toggled" from="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/RepeatActionsButton" to="VBoxContainer/MarginContainer/DebugPanel" method="_on_repeat_actions_button_toggled"]
+[connection signal="pressed" from="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/ExitToMenuButton" to="VBoxContainer/MarginContainer/DebugPanel" method="_on_exit_to_menu_button_pressed"]
+[connection signal="pressed" from="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer/QuitButton" to="VBoxContainer/MarginContainer/DebugPanel" method="_on_quit_button_pressed"]
