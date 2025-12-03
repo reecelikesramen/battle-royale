@@ -96,16 +96,23 @@ KEY_FILE="github-sa-key-${PROJECT_ID}.json"
 gcloud iam service-accounts keys create $KEY_FILE \
   --iam-account=$SA_EMAIL
 
-# Grant Cloud Build service account storage access for its default bucket
+# Grant Compute Engine default service account permissions (Cloud Build runs as this SA)
 echo "Granting Cloud Build permissions..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
-CLOUDBUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 
+# Grant storage access for Cloud Build staging bucket
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:$CLOUDBUILD_SA" \
+  --member="serviceAccount:$COMPUTE_SA" \
   --role="roles/storage.objectAdmin" \
   --condition=None \
   --quiet
+
+# Allow GitHub Actions SA to impersonate Compute Engine SA (required to trigger builds)
+gcloud iam service-accounts add-iam-policy-binding $COMPUTE_SA \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/iam.serviceAccountUser" \
+  --project=$PROJECT_ID
 
 # ============ SUMMARY ============
 echo ""
