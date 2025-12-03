@@ -140,11 +140,57 @@ jobs:
           path: rust/target/release/${{ matrix.library-name }}
           retention-days: 7
 
+  # ============ FETCH PREVIOUS RELEASE (only on tags) ============
+  fetch-previous-release:
+    name: Fetch Previous Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      has_previous: ${{ steps.check.outputs.has_previous }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find previous release
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREV_TAG=$(gh release list --exclude-drafts --exclude-pre-releases -L 1 --json tagName -q '.[0].tagName' || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            echo "has_previous=false" >> $GITHUB_OUTPUT
+            echo "No previous release found"
+          else
+            echo "has_previous=true" >> $GITHUB_OUTPUT
+            echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+            echo "Previous release: $PREV_TAG"
+          fi
+
+      - name: Download previous base PCKs
+        if: steps.check.outputs.has_previous == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREV_TAG=$(gh release list --exclude-drafts --exclude-pre-releases -L 1 --json tagName -q '.[0].tagName')
+          mkdir -p previous-pcks
+          gh release download "$PREV_TAG" -p "*-base.pck" -D previous-pcks || echo "No base PCKs found in previous release"
+
+      - name: Upload previous PCKs
+        if: steps.check.outputs.has_previous == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: previous-base-pcks
+          path: previous-pcks/*.pck
+          retention-days: 7
+          if-no-files-found: ignore
+
   # ============ GODOT EXPORTS (only on tags) ============
   export-windows:
     name: Windows Export
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-rust
+    needs: [build-rust, fetch-previous-release]
     runs-on: ubuntu-24.04
     container:
       image: barichello/godot-ci:4.5
@@ -167,6 +213,15 @@ jobs:
           name: rust-windows
           path: godot/addons/rust/bin/
   
+      # Previous release base PCKs for patch generation (may not exist on first release)
+      - name: Download previous base PCKs
+        if: needs.fetch-previous-release.outputs.has_previous == 'true'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: previous-base-pcks
+          path: previous-pcks
+  
       - name: Setup
         run: |
           # copy the library to the debug directory so editor does not fail
@@ -185,6 +240,18 @@ jobs:
           godot --headless --verbose --editor --quit-after 10
           godot --headless --verbose --export-release "Windows" "$EXPORT_DIR/windows/$EXPORT_NAME.exe" || true
   
+      - name: Copy base PCK and generate patch
+        run: |
+          EXPORT_DIR="$(readlink -f build)"
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          # Copy generated PCK to base.pck
+          cp "$EXPORT_DIR/windows/$EXPORT_NAME.pck" "$EXPORT_DIR/windows/windows-base.pck"
+          # Generate patch if previous release exists
+          if [ -f "previous-pcks/windows-base.pck" ]; then
+            cd $PROJECT_PATH
+            godot --headless --verbose --export-patch "Windows" "$EXPORT_DIR/windows/$TAG_NAME.pck" --patches "$(readlink -f previous-pcks/windows-base.pck)" || true
+          fi
+  
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -193,7 +260,7 @@ jobs:
   export-mac:
     name: Mac Export
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-rust
+    needs: [build-rust, fetch-previous-release]
     runs-on: ubuntu-24.04
     container:
       image: barichello/godot-ci:4.5
@@ -216,6 +283,15 @@ jobs:
           name: rust-macos
           path: godot/addons/rust/bin/
   
+      # Previous release base PCKs for patch generation (may not exist on first release)
+      - name: Download previous base PCKs
+        if: needs.fetch-previous-release.outputs.has_previous == 'true'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: previous-base-pcks
+          path: previous-pcks
+  
       - name: Setup
         run: |
           # copy the library to the debug directory so editor does not fail
@@ -234,6 +310,24 @@ jobs:
           godot --headless --verbose --editor --quit-after 10
           godot --headless --verbose --export-release "macOS" "$EXPORT_DIR/mac/$EXPORT_NAME.zip" || true
   
+      - name: Copy base PCK and generate patch
+        run: |
+          EXPORT_DIR="$(readlink -f build)"
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          # Extract zip to access PCK
+          cd "$EXPORT_DIR/mac"
+          unzip -q "$EXPORT_NAME.zip" || true
+          # Copy generated PCK to base.pck (PCK is in app bundle)
+          if [ -f "$EXPORT_NAME.app/Contents/Resources/Battle Royale.pck" ]; then
+            cp "$EXPORT_NAME.app/Contents/Resources/Battle Royale.pck" "mac-base.pck"
+          fi
+          # Generate patch if previous release exists (previous-pcks is at workspace root)
+          PREV_PCK="$(readlink -f ../../previous-pcks/mac-base.pck 2>/dev/null || echo "")"
+          if [ -n "$PREV_PCK" ] && [ -f "$PREV_PCK" ]; then
+            cd $PROJECT_PATH
+            godot --headless --verbose --export-patch "macOS" "$EXPORT_DIR/mac/$TAG_NAME.pck" --patches "$PREV_PCK" || true
+          fi
+  
       - uses: actions/upload-artifact@v4
         with:
           name: mac
@@ -242,7 +336,7 @@ jobs:
   export-linux:
     name: Linux Export
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-rust
+    needs: [build-rust, fetch-previous-release]
     runs-on: ubuntu-24.04
     container:
       image: barichello/godot-ci:4.5
@@ -256,6 +350,15 @@ jobs:
         with:
           name: rust-linux
           path: godot/addons/rust/bin/
+
+      # Previous release base PCKs for patch generation (may not exist on first release)
+      - name: Download previous base PCKs
+        if: needs.fetch-previous-release.outputs.has_previous == 'true'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: previous-base-pcks
+          path: previous-pcks
 
       - name: Setup
         run: |
@@ -273,6 +376,18 @@ jobs:
           EXPORT_DIR="$(readlink -f build)"
           cd $PROJECT_PATH
           godot --headless --verbose --export-release "Linux" "$EXPORT_DIR/linux/$EXPORT_NAME.x86_64" || true
+
+      - name: Copy base PCK and generate patch
+        run: |
+          EXPORT_DIR="$(readlink -f build)"
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          # Copy generated PCK to base.pck
+          cp "$EXPORT_DIR/linux/$EXPORT_NAME.pck" "$EXPORT_DIR/linux/linux-base.pck"
+          # Generate patch if previous release exists
+          if [ -f "previous-pcks/linux-base.pck" ]; then
+            cd $PROJECT_PATH
+            godot --headless --verbose --export-patch "Linux" "$EXPORT_DIR/linux/$TAG_NAME.pck" --patches "$(readlink -f previous-pcks/linux-base.pck)" || true
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -299,10 +414,45 @@ jobs:
           # Mac is already a zip, just copy it
           cp mac/*.zip ../mac.zip || (cd mac && zip -r ../../mac.zip .)
 
+      - name: Collect PCK files and build file list
+        id: files
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          # Start with required zip files
+          FILES="windows.zip
+          linux.zip
+          mac.zip"
+          # Copy and add base PCKs if they exist
+          if cp artifacts/windows/windows-base.pck windows-base.pck 2>/dev/null; then
+            FILES="$FILES
+          windows-base.pck"
+          fi
+          if cp artifacts/linux/linux-base.pck linux-base.pck 2>/dev/null; then
+            FILES="$FILES
+          linux-base.pck"
+          fi
+          if cp artifacts/mac/mac-base.pck mac-base.pck 2>/dev/null; then
+            FILES="$FILES
+          mac-base.pck"
+          fi
+          # Copy and add patch PCKs if they exist
+          if cp artifacts/windows/$TAG_NAME.pck windows-$TAG_NAME.pck 2>/dev/null; then
+            FILES="$FILES
+          windows-$TAG_NAME.pck"
+          fi
+          if cp artifacts/linux/$TAG_NAME.pck linux-$TAG_NAME.pck 2>/dev/null; then
+            FILES="$FILES
+          linux-$TAG_NAME.pck"
+          fi
+          if cp artifacts/mac/$TAG_NAME.pck mac-$TAG_NAME.pck 2>/dev/null; then
+            FILES="$FILES
+          mac-$TAG_NAME.pck"
+          fi
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            windows.zip
-            linux.zip
-            mac.zip
+          files: ${{ steps.files.outputs.files }}
