@@ -407,50 +407,51 @@ jobs:
         with:
           path: artifacts
 
-      - name: Zip Builds
-        run: |
-          cd artifacts
-          zip -r ../windows.zip windows
-          zip -r ../linux.zip linux
-          # Mac is already a zip, just copy it
-          cp mac/*.zip ../mac.zip || (cd mac && zip -r ../../mac.zip .)
-
-      - name: Collect PCK files and build file list
+      - name: Prepare release files
         id: files
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          # Start with required zip files
-          FILES="windows.zip
-          linux.zip
-          mac.zip"
-          # Copy and add base PCKs if they exist
-          if cp artifacts/windows/windows-base.pck windows-base.pck 2>/dev/null; then
-            FILES="$FILES
-          windows-base.pck"
+          FILES=""
+          
+          # Process Windows: extract PCKs, zip build, delete original
+          if mv artifacts/windows/windows-base.pck windows-base.pck 2>/dev/null; then
+            FILES="$FILES windows-base.pck"
           fi
-          if cp artifacts/linux/linux-base.pck linux-base.pck 2>/dev/null; then
-            FILES="$FILES
-          linux-base.pck"
+          if mv artifacts/windows/$TAG_NAME.pck windows-$TAG_NAME.pck 2>/dev/null; then
+            FILES="$FILES windows-$TAG_NAME.pck"
           fi
-          if cp artifacts/mac/mac-base.pck mac-base.pck 2>/dev/null; then
-            FILES="$FILES
-          mac-base.pck"
+          (cd artifacts && zip -r ../windows.zip windows)
+          rm -rf artifacts/windows
+          FILES="$FILES windows.zip"
+          
+          # Process Linux: extract PCKs, zip build, delete original
+          if mv artifacts/linux/linux-base.pck linux-base.pck 2>/dev/null; then
+            FILES="$FILES linux-base.pck"
           fi
-          # Copy and add patch PCKs if they exist
-          if cp artifacts/windows/$TAG_NAME.pck windows-$TAG_NAME.pck 2>/dev/null; then
-            FILES="$FILES
-          windows-$TAG_NAME.pck"
+          if mv artifacts/linux/$TAG_NAME.pck linux-$TAG_NAME.pck 2>/dev/null; then
+            FILES="$FILES linux-$TAG_NAME.pck"
           fi
-          if cp artifacts/linux/$TAG_NAME.pck linux-$TAG_NAME.pck 2>/dev/null; then
-            FILES="$FILES
-          linux-$TAG_NAME.pck"
+          (cd artifacts && zip -r ../linux.zip linux)
+          rm -rf artifacts/linux
+          FILES="$FILES linux.zip"
+          
+          # Process Mac: extract PCKs, copy zip, delete original
+          if mv artifacts/mac/mac-base.pck mac-base.pck 2>/dev/null; then
+            FILES="$FILES mac-base.pck"
           fi
-          if cp artifacts/mac/$TAG_NAME.pck mac-$TAG_NAME.pck 2>/dev/null; then
-            FILES="$FILES
-          mac-$TAG_NAME.pck"
+          if mv artifacts/mac/$TAG_NAME.pck mac-$TAG_NAME.pck 2>/dev/null; then
+            FILES="$FILES mac-$TAG_NAME.pck"
           fi
+          cp artifacts/mac/*.zip mac.zip 2>/dev/null || (cd artifacts/mac && zip -r ../../mac.zip .)
+          rm -rf artifacts/mac
+          FILES="$FILES mac.zip"
+          
+          # Clean up any remaining artifacts
+          rm -rf artifacts
+          
+          # Output file list (one per line for the action)
           echo "files<<EOF" >> $GITHUB_OUTPUT
-          echo "$FILES" >> $GITHUB_OUTPUT
+          for f in $FILES; do echo "$f"; done >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Release
