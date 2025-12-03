@@ -200,13 +200,7 @@ jobs:
           
           BUILD_ID=$(gcloud builds submit \
             --config=cloudbuild.yaml \
-            --substitutions="\
-              _TAG_NAME=$TAG_NAME,\
-              _BUCKET=$GCS_BUCKET,\
-              _EXPORT_NAME=$EXPORT_NAME,\
-              _PROJECT_NAME=$PROJECT_NAME,\
-              _PROJECT_PATH=$PROJECT_PATH,\
-              _GODOT_VERSION=$GODOT_VERSION" \
+            --substitutions="_TAG_NAME=$TAG_NAME,_BUCKET=$GCS_BUCKET,_EXPORT_NAME=$EXPORT_NAME,_PROJECT_NAME=$PROJECT_NAME,_PROJECT_PATH=$PROJECT_PATH,_GODOT_VERSION=$GODOT_VERSION" \
             --format='value(id)' \
             --async)
           
