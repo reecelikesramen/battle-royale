@@ -35,7 +35,7 @@ autowrap_mode = 3
 
 [node name="Header" type="Label" parent="PanelContainer/VBoxContainer"]
 layout_mode = 2
-text = "YOLO"
+text = "Battle Royale"
 horizontal_alignment = 1
 
 [node name="UsernameEdit" type="LineEdit" parent="PanelContainer/VBoxContainer"]

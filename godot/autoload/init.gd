@@ -65,7 +65,7 @@ func get_os_prefix() -> String:
 
 func check_for_updates() -> void:
 	print("Checking for updates...")
-	var url = GCS_BASE_URL + "/versions.json"
+	var url = GCS_BASE_URL + "/versions.json?t=" + str(Time.get_unix_time_from_system())
 	var error = _http.request(url)
 	if error != OK:
 		push_error("Failed to request versions.json: " + str(error))
