@@ -13,6 +13,7 @@ func _exit_tree() -> void:
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
+	print("yolo")
 	if NetworkTransport.is_dedicated_server:
 		get_tree().call_deferred("change_scene_to_file", Constants.MAP_SCENE_PATH)
 		return
