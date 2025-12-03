@@ -23,10 +23,18 @@ func _ready() -> void:
 	_r.compile(SEMVER_PATTERN)
 	_os_prefix = get_os_prefix()
 	
-	# Get build version from project settings
-	_build_version = ProjectSettings.get_setting("application/config/version", "")
+	# Get build version from VERSION file
+	var version_file = FileAccess.open("res://VERSION", FileAccess.READ)
+	if version_file == null:
+		push_error("VERSION file not found at res://VERSION")
+		# Fall back to loading existing patches
+		load_existing_patches()
+		return
+	
+	_build_version = version_file.get_as_text().strip_edges()
+	version_file.close()
 	if _build_version.is_empty():
-		push_error("Build version not found in project settings")
+		push_error("VERSION file is empty")
 		# Fall back to loading existing patches
 		load_existing_patches()
 		return
@@ -48,7 +56,7 @@ func get_os_prefix() -> String:
 	match OS.get_name():
 		"Windows":
 			return "windows"
-		"Linux", "FreeBSD":
+		"Linux":
 			return "linux"
 		"macOS":
 			return "mac"
@@ -64,7 +72,7 @@ func check_for_updates() -> void:
 		# Fall back to loading existing patches
 		load_existing_patches()
 
-func _on_http_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_http_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	if _downloading_manifest:
 		# Handle manifest download
 		if response_code != 200:
