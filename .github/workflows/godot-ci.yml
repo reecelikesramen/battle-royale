@@ -14,6 +14,7 @@ on:
 env:
   GODOT_VERSION: 4.5
   EXPORT_NAME: battle-royale
+  PROJECT_NAME: Battle Royale
   PROJECT_PATH: godot
 
 jobs:
@@ -318,8 +319,8 @@ jobs:
           cd "$EXPORT_DIR/mac"
           unzip -q "$EXPORT_NAME.zip" || true
           # Copy generated PCK to base.pck (PCK is in app bundle)
-          if [ -f "$EXPORT_NAME.app/Contents/Resources/Battle Royale.pck" ]; then
-            cp "$EXPORT_NAME.app/Contents/Resources/Battle Royale.pck" "mac-base.pck"
+          if [ -f "$PROJECT_NAME.app/Contents/Resources/$PROJECT_NAME.pck" ]; then
+            cp "$PROJECT_NAME.app/Contents/Resources/$PROJECT_NAME.pck" "mac-base.pck"
           fi
           # Generate patch if previous release exists (previous-pcks is at workspace root)
           PREV_PCK="$(readlink -f ../../previous-pcks/mac-base.pck 2>/dev/null || echo "")"
