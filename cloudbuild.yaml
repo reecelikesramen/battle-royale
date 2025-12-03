@@ -64,6 +64,17 @@ steps:
         fi
         ls -la previous-pcks/ || true
 
+  # ============ SET VERSION IN project.godot ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'set-version'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        sed -i 's/config\/version="[^"]*"/config\/version="${_TAG_NAME}"/' ${_PROJECT_PATH}/project.godot
+        echo "Set version to ${_TAG_NAME} in project.godot"
+        grep 'config/version' ${_PROJECT_PATH}/project.godot
+
   # ============ RUN GODOT EDITOR (import assets) ============
   - name: 'barichello/godot-ci:${_GODOT_VERSION}'
     id: 'godot-import'
@@ -204,6 +215,25 @@ steps:
       - '-r'
       - 'release/*'
       - 'gs://${_BUCKET}/releases/${_TAG_NAME}/'
+
+  # ============ GENERATE versions.json MANIFEST ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'update-manifest'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        # List all release tags, extract patch PCK versions
+        VERSIONS=$$(gsutil ls gs://${_BUCKET}/releases/ 2>/dev/null | grep -oP 'v[\d.]+(-[a-zA-Z0-9.]+)?' | sort -V | uniq)
+        if [ -z "$$VERSIONS" ]; then
+          VERSIONS="${_TAG_NAME}"
+        fi
+        # Convert to JSON array
+        VERSIONS_JSON=$$(echo "$$VERSIONS" | sed 's/^/"/' | sed 's/$$/"/' | tr '\n' ',' | sed 's/,$$//')
+        echo "{\"versions\": [$$VERSIONS_JSON], \"latest\": \"${_TAG_NAME}\"}" > versions.json
+        cat versions.json
+        gsutil cp versions.json gs://${_BUCKET}/versions.json
+        echo "Manifest updated with versions: $$VERSIONS"
 
   # ============ SAVE .godot CACHE ============
   - name: 'gcr.io/cloud-builders/gsutil'

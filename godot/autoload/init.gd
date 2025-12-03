@@ -1,9 +1,17 @@
 extends Node
 
 const SEMVER_PATTERN = "^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][a-zA-Z0-9-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][a-zA-Z0-9-]*))*))?(?:\\+([a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)*))?\\.pck$"
-var _r = RegEx.new()
+const GCS_BUCKET = "erudite-cycle-480104-game-builds"
+const GCS_BASE_URL = "https://storage.googleapis.com/" + GCS_BUCKET
 
+var _r = RegEx.new()
 var _game_dir: DirAccess
+var _http: HTTPRequest
+var _pending_downloads: Array[String] = []
+var _download_index := 0
+var _build_version: String = ""
+var _os_prefix: String = ""
+var _downloading_manifest := true
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -12,22 +20,169 @@ func _ready() -> void:
 		get_tree().call_deferred(&"change_scene_to_file", Constants.MAIN_MENU_SCENE_PATH)
 		return
 	
-	print(ProjectSettings.globalize_path("res://"))
-	print(ProjectSettings.localize_path(OS.get_executable_path().get_base_dir()))
-	print("Loading patches...")
-	
 	_r.compile(SEMVER_PATTERN)
-	_game_dir = DirAccess.open(OS.get_executable_path().get_base_dir())
-	print(OS.get_executable_path().get_base_dir())
-	if _game_dir:
-		load_patches()
-	else:
-		push_error("Failed to load game executable dir and patch game")
+	_os_prefix = get_os_prefix()
 	
+	# Get build version from project settings
+	_build_version = ProjectSettings.get_setting("application/config/version", "")
+	if _build_version.is_empty():
+		push_error("Build version not found in project settings")
+		# Fall back to loading existing patches
+		load_existing_patches()
+		return
+	
+	print("Build version: ", _build_version)
+	print("OS prefix: ", _os_prefix)
+	print("Executable dir: ", OS.get_executable_path().get_base_dir())
+	
+	# Setup HTTP client for downloads
+	_http = HTTPRequest.new()
+	add_child(_http)
+	_http.request_completed.connect(_on_http_request_completed)
+	
+	# Check for updates
+	check_for_updates()
+
+
+func get_os_prefix() -> String:
+	match OS.get_name():
+		"Windows":
+			return "windows"
+		"Linux", "FreeBSD":
+			return "linux"
+		"macOS":
+			return "mac"
+		_:
+			return "linux"
+
+func check_for_updates() -> void:
+	print("Checking for updates...")
+	var url = GCS_BASE_URL + "/versions.json"
+	var error = _http.request(url)
+	if error != OK:
+		push_error("Failed to request versions.json: " + str(error))
+		# Fall back to loading existing patches
+		load_existing_patches()
+
+func _on_http_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	if _downloading_manifest:
+		# Handle manifest download
+		if response_code != 200:
+			push_error("Failed to fetch versions.json: HTTP " + str(response_code))
+			load_existing_patches()
+			return
+		
+		var json = JSON.new()
+		var parse_error = json.parse(body.get_string_from_utf8())
+		if parse_error != OK:
+			push_error("Failed to parse versions.json: " + str(parse_error))
+			load_existing_patches()
+			return
+		
+		var data = json.data
+		if not data.has("versions") or not data.versions is Array:
+			push_error("Invalid versions.json format")
+			load_existing_patches()
+			return
+		
+		var available_versions: Array = data.versions
+		print("Available versions: ", available_versions)
+		
+		# Find local patches
+		_game_dir = DirAccess.open(OS.get_executable_path().get_base_dir())
+		if not _game_dir:
+			push_error("Failed to open game directory")
+			load_existing_patches()
+			return
+		
+		var local_files = Array(_game_dir.get_files())
+		var local_patches = filter_semver(local_files)
+		local_patches.sort_custom(compare_semver)
+		print("Local patches: ", local_patches)
+		
+		# Find latest local version
+		var latest_local = _build_version
+		if local_patches.size() > 0:
+			# Extract version from patch filename (remove OS prefix and .pck)
+			var latest_file = local_patches[local_patches.size() - 1]
+			var version_match = _r.search(latest_file)
+			if version_match:
+				latest_local = version_match.get_string(0).trim_suffix(".pck")
+		
+		print("Latest local version: ", latest_local)
+		
+		# Find versions to download (newer than latest_local)
+		_pending_downloads.clear()
+		for version in available_versions:
+			if compare_semver(latest_local + ".pck", version + ".pck"):
+				_pending_downloads.append(version)
+		
+		if _pending_downloads.size() == 0:
+			print("No updates available")
+			load_existing_patches()
+			return
+		
+		print("Found ", _pending_downloads.size(), " updates to download: ", _pending_downloads)
+		_download_index = 0
+		_downloading_manifest = false
+		download_next_patch()
+	else:
+		# Handle patch download
+		if response_code != 200:
+			push_error("Failed to download patch: HTTP " + str(response_code))
+			_download_index += 1
+			download_next_patch()
+			return
+		
+		# Save patch file (remove OS prefix from filename)
+		var version = _pending_downloads[_download_index]
+		var save_filename = version + ".pck"
+		var save_path = OS.get_executable_path().get_base_dir().path_join(save_filename)
+		
+		var file = FileAccess.open(save_path, FileAccess.WRITE)
+		if file == null:
+			push_error("Failed to open file for writing: " + save_path)
+			_download_index += 1
+			download_next_patch()
+			return
+		
+		file.store_buffer(body)
+		file.close()
+		print("Saved patch: ", save_path)
+		
+		_download_index += 1
+		download_next_patch()
+
+func download_next_patch() -> void:
+	if _download_index >= _pending_downloads.size():
+		print("All patches downloaded")
+		load_existing_patches()
+		return
+	
+	var version = _pending_downloads[_download_index]
+	var filename = _os_prefix + "-" + version + ".pck"
+	var url = GCS_BASE_URL + "/releases/" + version + "/" + filename
+	print("Downloading patch ", _download_index + 1, "/", _pending_downloads.size(), ": ", filename)
+	
+	var error = _http.request(url)
+	if error != OK:
+		push_error("Failed to request patch: " + str(error))
+		_download_index += 1
+		download_next_patch()
+
+func load_existing_patches() -> void:
+	print("Loading existing patches...")
+	_game_dir = DirAccess.open(OS.get_executable_path().get_base_dir())
+	if not _game_dir:
+		push_error("Failed to load game executable dir and patch game")
+		Engine.set_meta(&"patches_loaded", true)
+		get_tree().call_deferred(&"reload_current_scene")
+		return
+	
+	load_patches()
 	Engine.set_meta(&"patches_loaded", true)
 	print("Loaded patches, reloading...")
 	get_tree().call_deferred(&"reload_current_scene")
-
 
 func load_patches():
 	var files := Array(_game_dir.get_files())
