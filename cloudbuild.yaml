@@ -51,12 +51,12 @@ steps:
       - |
         mkdir -p previous-pcks
         # Find previous release (list releases, get second newest if exists)
-        RELEASES=$(gsutil ls gs://${_BUCKET}/releases/ 2>/dev/null | grep -v "^gs://${_BUCKET}/releases/$" | sort -V)
-        PREV_RELEASE=$(echo "$RELEASES" | grep -v "${_TAG_NAME}" | tail -1)
+        RELEASES=$$(gsutil ls gs://${_BUCKET}/releases/ 2>/dev/null | grep -v "^gs://${_BUCKET}/releases/$$" | sort -V)
+        PREV_RELEASE=$$(echo "$$RELEASES" | grep -v "${_TAG_NAME}" | tail -1)
         
-        if [ -n "$PREV_RELEASE" ]; then
-          echo "Previous release: $PREV_RELEASE"
-          gsutil -m cp ${PREV_RELEASE}*-base.pck previous-pcks/ 2>/dev/null \
+        if [ -n "$$PREV_RELEASE" ]; then
+          echo "Previous release: $$PREV_RELEASE"
+          gsutil -m cp $${PREV_RELEASE}*-base.pck previous-pcks/ 2>/dev/null \
             && echo "Previous PCKs downloaded" \
             || echo "No previous base PCKs found"
         else
@@ -94,7 +94,7 @@ steps:
         # Generate patch if previous exists
         if [ -f "../previous-pcks/windows-base.pck" ]; then
           godot --headless --export-patch "Windows" "../build/windows/${_TAG_NAME}.pck" \
-            --patches "$(readlink -f ../previous-pcks/windows-base.pck)" || true
+            --patches "$$(readlink -f ../previous-pcks/windows-base.pck)" || true
         fi
         
         ls -la ../build/windows/
@@ -118,7 +118,7 @@ steps:
         # Generate patch if previous exists
         if [ -f "../previous-pcks/linux-base.pck" ]; then
           godot --headless --export-patch "Linux" "../build/linux/${_TAG_NAME}.pck" \
-            --patches "$(readlink -f ../previous-pcks/linux-base.pck)" || true
+            --patches "$$(readlink -f ../previous-pcks/linux-base.pck)" || true
         fi
         
         ls -la ../build/linux/
@@ -147,7 +147,7 @@ steps:
         if [ -f "../../previous-pcks/mac-base.pck" ]; then
           cd ../../${_PROJECT_PATH}
           godot --headless --export-patch "macOS" "../build/mac/${_TAG_NAME}.pck" \
-            --patches "$(readlink -f ../previous-pcks/mac-base.pck)" || true
+            --patches "$$(readlink -f ../previous-pcks/mac-base.pck)" || true
         fi
         
         # Clean up extracted app (save space)
