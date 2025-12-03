@@ -71,9 +71,9 @@ steps:
     args:
       - -c
       - |
-        # Create VERSION file with full semver tag
-        echo "${_TAG_NAME}" > ${_PROJECT_PATH}/VERSION
-        echo "Created VERSION file with: ${_TAG_NAME}"
+        # Create VERSION.txt file with full semver tag
+        echo "${_TAG_NAME}" > ${_PROJECT_PATH}/VERSION.txt
+        echo "Created VERSION.txt file with: ${_TAG_NAME}"
         
         # Extract numeric version (strip 'v' prefix and prerelease/build metadata)
         # e.g., v0.2.5-alpha.1 => 0.2.5

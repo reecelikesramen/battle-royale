@@ -23,10 +23,10 @@ func _ready() -> void:
 	_r.compile(SEMVER_PATTERN)
 	_os_prefix = get_os_prefix()
 	
-	# Get build version from VERSION file
-	var version_file = FileAccess.open("res://VERSION", FileAccess.READ)
+	# Get build version from VERSION.txt file
+	var version_file = FileAccess.open("res://VERSION.txt", FileAccess.READ)
 	if version_file == null:
-		push_error("VERSION file not found at res://VERSION")
+		push_error("VERSION.txt file not found at res://VERSION.txt")
 		# Fall back to loading existing patches
 		load_existing_patches()
 		return
@@ -34,7 +34,7 @@ func _ready() -> void:
 	_build_version = version_file.get_as_text().strip_edges()
 	version_file.close()
 	if _build_version.is_empty():
-		push_error("VERSION file is empty")
+		push_error("VERSION.txt file is empty")
 		# Fall back to loading existing patches
 		load_existing_patches()
 		return
