@@ -68,6 +68,7 @@ steps:
   - name: 'barichello/godot-ci:${_GODOT_VERSION}'
     id: 'godot-import'
     entrypoint: bash
+    env: ['HOME=/root']
     args:
       - -c
       - |
@@ -79,6 +80,7 @@ steps:
   - name: 'barichello/godot-ci:${_GODOT_VERSION}'
     id: 'export-windows'
     entrypoint: bash
+    env: ['HOME=/root']
     args:
       - -c
       - |
@@ -103,6 +105,7 @@ steps:
   - name: 'barichello/godot-ci:${_GODOT_VERSION}'
     id: 'export-linux'
     entrypoint: bash
+    env: ['HOME=/root']
     args:
       - -c
       - |
@@ -127,15 +130,24 @@ steps:
   - name: 'barichello/godot-ci:${_GODOT_VERSION}'
     id: 'export-mac'
     entrypoint: bash
+    env: ['HOME=/root']
     args:
       - -c
       - |
         mkdir -p build/mac
         cd ${_PROJECT_PATH}
         godot --headless --export-release "macOS" ../build/mac/${_EXPORT_NAME}.zip || true
+        cd ..
+        
+        # Only proceed if export succeeded
+        if [ ! -f "build/mac/${_EXPORT_NAME}.zip" ]; then
+          echo "macOS export failed - no zip file created"
+          ls -la build/mac/ || true
+          exit 0
+        fi
         
         # Extract to get PCK
-        cd ../build/mac
+        cd build/mac
         unzip -q ${_EXPORT_NAME}.zip || true
         
         # Copy base PCK (from app bundle)
@@ -143,17 +155,19 @@ steps:
           cp "${_PROJECT_NAME}.app/Contents/Resources/${_PROJECT_NAME}.pck" "mac-base.pck"
         fi
         
-        # Generate patch if previous exists
-        if [ -f "../../previous-pcks/mac-base.pck" ]; then
-          cd ../../${_PROJECT_PATH}
-          godot --headless --export-patch "macOS" "../build/mac/${_TAG_NAME}.pck" \
-            --patches "$$(readlink -f ../previous-pcks/mac-base.pck)" || true
-        fi
-        
         # Clean up extracted app (save space)
         rm -rf "${_PROJECT_NAME}.app" || true
+        cd ../..
         
-        ls -la ../build/mac/ || ls -la ../../build/mac/
+        # Generate patch if previous exists
+        if [ -f "previous-pcks/mac-base.pck" ]; then
+          cd ${_PROJECT_PATH}
+          godot --headless --export-patch "macOS" "../build/mac/${_TAG_NAME}.pck" \
+            --patches "$$(readlink -f ../previous-pcks/mac-base.pck)" || true
+          cd ..
+        fi
+        
+        ls -la build/mac/
 
   # ============ ZIP BUILDS ============
   - name: 'gcr.io/cloud-builders/gsutil'
