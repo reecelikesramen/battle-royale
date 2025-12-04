@@ -1,4 +1,4 @@
-[gd_scene load_steps=26 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=27 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://bmbvova1tm3y8" path="res://controllers/player/player.gd" id="1_icig3"]
 [ext_resource type="PackedScene" uid="uid://dqvg7w4c8u3oa" path="res://assets/mesh/fps_hands/fps_hands_rigged_by_evolvegames.glb" id="2_g7yr6"]
@@ -515,10 +515,74 @@ tracks/2/keys = {
 "times": PackedFloat32Array(0)
 }
 
+[sub_resource type="Animation" id="Animation_u54hw"]
+resource_name = "Prone2"
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("VisualCollider:position")
+tracks/0/interp = 2
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 1, 0), Vector3(0, 0.5, 0)]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("VisualCollider:rotation")
+tracks/1/interp = 2
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 0, 0), Vector3(-1.5707964, 0, 0)]
+}
+tracks/2/type = "value"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("CameraController:position")
+tracks/2/interp = 2
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0, 0.5, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Vector3(0, 1.5, 0), Vector3(0, 1.1024281, -0.35314357), Vector3(0, 0.5, -0.5)]
+}
+tracks/3/type = "value"
+tracks/3/imported = false
+tracks/3/enabled = true
+tracks/3/path = NodePath("GameController/GameCollider:position")
+tracks/3/interp = 1
+tracks/3/loop_wrap = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 1, 0), Vector3(0, 0.5, 0)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("GameController/GameCollider:rotation")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 0, 0), Vector3(-1.5707964, 0, 0)]
+}
+
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_xc2pf"]
 _data = {
 &"Crouch": SubResource("Animation_ca8e7"),
 &"Prone": SubResource("Animation_icig3"),
+&"Prone2": SubResource("Animation_u54hw"),
 &"RESET": SubResource("Animation_xc2pf"),
 &"Sprint": SubResource("Animation_rk4xh"),
 &"Walk": SubResource("Animation_jdr2h")
@@ -539,7 +603,7 @@ mesh = SubResource("CapsuleMesh_gf80s")
 top_level = true
 
 [node name="GameCollider" type="CollisionShape3D" parent="GameController"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 0.99999994, 0, 0, 0, 0.99999994, 0, 1, 0)
 shape = SubResource("CapsuleShape3D_uovkr")
 
 [node name="PlaceholderMesh" type="MeshInstance3D" parent="GameController/GameCollider"]
@@ -607,7 +671,6 @@ metadata/_custom_type_script = "uid://8ywkt0fgrttk"
 script = ExtResource("9_qdb0h")
 SPEED = 1.5
 ACCELERATION = 0.1
-TOGGLE_CROUCH = true
 metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
 [node name="JumpMovementState" type="Node" parent="MovementStateMachine"]

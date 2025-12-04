@@ -40,12 +40,23 @@ func _ready() -> void:
 # TODO: known bug where visual/game desync for single frame transitions
 func run_logic(delta: float) -> void:
 	_logic_state.logic_physics(delta)
+	var visited_states: Dictionary = {}
+	var transition_path: PackedStringArray = []
+	visited_states[_logic_state.name] = true
+	transition_path.append(String(_logic_state.name))
 	while true:
 		_logic_state.logic_transitions()
 		if _pending_transition == &"":
 			break
-		_switch_logic(_pending_transition)
+		var next_state_name := _pending_transition
 		_pending_transition = &""
+		if visited_states.has(next_state_name):
+			transition_path.append(String(next_state_name))
+			push_warning("State Machine '%s' detected same-frame cycle: %s" % [name, " -> ".join(transition_path)])
+			break
+		visited_states[next_state_name] = true
+		transition_path.append(String(next_state_name))
+		_switch_logic(next_state_name)
 
 
 # TODO: known bug where visual/game desync for single frame transitions

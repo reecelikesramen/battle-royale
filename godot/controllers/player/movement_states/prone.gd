@@ -6,20 +6,19 @@ extends MovementState
 @export_range(0.5, 6, 0.1) var PRONE_SPEED := 1.5
 @export_range(0.5, 6, 0.1) var UNPRONE_SPEED := 0.8
 
-const PRONE_ANIM := &"Prone"
+const PRONE_ANIM := &"Prone2"
 const RESET_ANIM := &"RESET"
 
 var _wants_to_unprone := false
 var _progress := 0.0
 var _prone_anim_length := 0.0
 var _last_toggle_time := 0
-var _last_exit_time := 0
 
 var _crouch_shapecast: ShapeCast3D:
 	get: return player.crouch_shapecast
 
 func _ready() -> void:
-	await owner.ready
+	await player.ready
 	var anim := animation_player.get_animation(PRONE_ANIM)
 	if anim:
 		_prone_anim_length = anim.length
@@ -27,14 +26,10 @@ func _ready() -> void:
 
 func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
-	if Time.get_ticks_usec() - _last_exit_time > 50_000:
+	if not player._test_is_replaying:
+		_last_toggle_time = Time.get_ticks_usec()
 		_wants_to_unprone = false
 		_progress = 0.0
-
-
-func logic_exit() -> void:
-	_last_exit_time = Time.get_ticks_usec()
-	pass
 
 
 func visual_enter() -> void:
@@ -46,6 +41,9 @@ func logic_physics(delta: float) -> void:
 	player.update_gravity(delta, Enums.IntegrationContext.GAME)
 	player.update_movement(Enums.IntegrationContext.GAME)
 	player.update_velocity(Enums.IntegrationContext.GAME)
+	
+	if player._test_is_replaying:
+		return
 	
 	if _wants_to_unprone and not _crouch_shapecast.is_colliding():
 		_progress -= delta * UNPRONE_SPEED

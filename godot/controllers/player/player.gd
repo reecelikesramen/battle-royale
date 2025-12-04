@@ -1,6 +1,9 @@
-class_name PlayerController extends CharacterBody3D
+class_name PlayerController
+extends CharacterBody3D
 
 signal reconcile_network_debug(delta_pos: Vector3, delta_vel: Vector3, unacked_inputs: SequenceRingBuffer)
+
+@export var TOGGLE_CROUCH: bool = false
 
 @export var TILT_LOWER_LIMIT: float = deg_to_rad(-90.0)
 @export var TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
@@ -46,6 +49,9 @@ var _y_mouse_input: float
 
 # look absolute for camera and player rotation
 var _look_abs: Vector2 = Vector2()
+
+# used only for toggle crouch, if not using toggle crouch always false
+var _is_toggle_crouching := false
 
 # server authoritative game state
 var game_transform: Transform3D = Transform3D()
@@ -175,7 +181,11 @@ func _client_authority_physics_step(delta: float) -> void:
 	player_input.move_left_right = Input.get_axis("move_left", "move_right")
 	player_input.look_abs = _look_abs
 	player_input.jump = Input.is_action_pressed("jump")
-	player_input.crouch = Input.is_action_pressed("crouch")
+	if TOGGLE_CROUCH:
+		if Input.is_action_just_pressed("crouch"): _is_toggle_crouching = !_is_toggle_crouching
+		player_input.crouch = _is_toggle_crouching
+	else:
+		player_input.crouch = Input.is_action_pressed("crouch")
 	player_input.sprint = Input.is_action_pressed("sprint")
 	player_input.prone = Input.is_action_pressed("prone")
 	_unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)

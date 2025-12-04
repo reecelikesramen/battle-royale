@@ -3,7 +3,6 @@ extends MovementState
 @export var SPEED := 3.0
 @export var ACCELERATION := 0.15
 @export var DECELERATION := 0.3
-@export var TOGGLE_CROUCH := false
 @export_range(1, 6, 0.1) var CROUCH_SPEED := 4.0
 @export_range(1, 6, 0.1) var UNCROUCH_SPEED := 6.0
 
@@ -13,8 +12,6 @@ const RESET_ANIM := &"RESET"
 var _wants_to_uncrouch := false
 var _progress := 0.0
 var _crouch_anim_length := 0.0
-var _last_toggle_time := 0
-var _last_exit_time := 0
 
 var _crouch_shapecast: ShapeCast3D:
 	get: return player.crouch_shapecast
@@ -28,40 +25,38 @@ func _ready() -> void:
 
 func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
-	if Time.get_ticks_usec() - _last_exit_time > 50_000:
-		_wants_to_uncrouch = false
+	if not player._test_is_replaying:
 		_progress = 0.0
-
-
-func logic_exit() -> void:
-	_last_exit_time = Time.get_ticks_usec()
+		_wants_to_uncrouch = false
+	# if player.is_authority: print("logic enter, progress: ", _progress)
 
 
 func visual_enter() -> void:
 	if is_remote_player:
 		animation_player.play(CROUCH_ANIM, -1, CROUCH_SPEED)
+	# if player.is_authority: print("visual enter, progress: ", _progress)
 
 
 func logic_physics(delta: float) -> void:
 	player.update_gravity(delta, Enums.IntegrationContext.GAME)
 	player.update_movement(Enums.IntegrationContext.GAME)
 	player.update_velocity(Enums.IntegrationContext.GAME)
+
+	if player._test_is_replaying:
+		return
 	
 	if _wants_to_uncrouch and not _crouch_shapecast.is_colliding():
 		_progress -= delta * UNCROUCH_SPEED
 	else:
 		_progress += delta * CROUCH_SPEED
+		
 	
 	_progress = clampf(_progress, 0.0, _crouch_anim_length)
+	# if player.is_authority: print("logic physics, progress: ", _progress)
 
 
 func logic_transitions() -> void:
-	if TOGGLE_CROUCH:
-		if player.input.is_crouch_just_pressed() and _toggle_debounce_us() > 50_000:
-			_last_toggle_time = Time.get_ticks_usec()
-			_wants_to_uncrouch = !_wants_to_uncrouch
-	else:
-		_wants_to_uncrouch = !player.input.is_crouching()
+	_wants_to_uncrouch = !player.input.is_crouching()
 
 	if _wants_to_uncrouch and _progress <= 0.0:
 		# Block uncrouch if hitting ceiling
@@ -81,6 +76,7 @@ func visual_physics(delta: float) -> void:
 		if animation_player.current_animation != CROUCH_ANIM:
 			animation_player.play(CROUCH_ANIM)
 		animation_player.seek(_progress, true)
+	# if player.is_authority: print("visual physics, progress: ", _progress)
 
 
 func visual_exit() -> void:
@@ -89,7 +85,4 @@ func visual_exit() -> void:
 	else:
 		animation_player.stop()
 	animation_player.speed_scale = 1.0
-
-
-func _toggle_debounce_us() -> int:
-	return Time.get_ticks_usec() - _last_toggle_time
+	# if player.is_authority: print("visual exit, progress: ", _progress)

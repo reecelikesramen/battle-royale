@@ -1,5 +1,11 @@
 extends Node
 
+const META_PATCHES_LOADED := &"patches_loaded"
+const META_PATCHES_APPLIED_PHASE1 := &"patches_applied_phase1"
+const META_AUTO_UPDATE_COMPLETE := &"auto_update_complete"
+const META_PROGRESS_VALUE := &"init_progress_value"
+const META_PROGRESS_TEXT := &"init_progress_text"
+
 const SEMVER_PATTERN = "^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][a-zA-Z0-9-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][a-zA-Z0-9-]*))*))?(?:\\+([a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)*))?\\.pck$"
 const GCS_BUCKET = "erudite-cycle-480104-game-builds"
 const GCS_BASE_URL = "https://storage.googleapis.com/" + GCS_BUCKET
@@ -12,14 +18,16 @@ var _download_index := 0
 var _build_version: String = ""
 var _os_prefix: String = ""
 var _downloading_manifest := true
-const META_PROGRESS_VALUE := &"init_progress_value"
-const META_PROGRESS_TEXT := &"init_progress_text"
 
 @onready var _status_label: Label = %Label
 @onready var _progress_bar: ProgressBar = %ProgressBar
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
+	if NetworkTransport.is_dedicated_server:
+		initialize()
+		return
+	
 	restore_progress_ui()
 	process_patches_and_updates()
 
@@ -34,7 +42,7 @@ func initialize() -> void:
 # Handles patching and auto-update flow. Separated from initialize() so patches can modify init logic.
 func process_patches_and_updates() -> void:
 	# Final state: all patches loaded, proceed to initialization
-	if Engine.has_meta(&"patches_loaded"):
+	if Engine.has_meta(META_PATCHES_LOADED):
 		print("All patches loaded, initializing...")
 		update_progress(100.0, "Launching game...")
 		clear_progress_meta()
@@ -42,14 +50,14 @@ func process_patches_and_updates() -> void:
 		return
 	
 	# Phase 2: Auto-update check (after Phase 1 reload)
-	if Engine.has_meta(&"patches_applied_phase1") and not Engine.has_meta(&"auto_update_complete"):
+	if Engine.has_meta(META_PATCHES_APPLIED_PHASE1) and not Engine.has_meta(META_AUTO_UPDATE_COMPLETE):
 		print("Phase 1 complete, starting auto-update...")
 		update_progress(45.0, "Checking for updates...")
 		start_auto_update()
 		return
 	
 	# Phase 1: Apply existing patches first
-	if not Engine.has_meta(&"patches_applied_phase1"):
+	if not Engine.has_meta(META_PATCHES_APPLIED_PHASE1):
 		print("Phase 1: Applying existing patches...")
 		update_progress(15.0, "Applying local patches...")
 		apply_existing_patches()
@@ -61,12 +69,12 @@ func apply_existing_patches() -> void:
 	if not _game_dir:
 		push_error("Failed to load game executable dir")
 		# Mark phase 1 complete anyway, continue to auto-update
-		Engine.set_meta(&"patches_applied_phase1", true)
+		Engine.set_meta(META_PATCHES_APPLIED_PHASE1, true)
 		get_tree().call_deferred(&"reload_current_scene")
 		return
 	
 	load_patches()
-	Engine.set_meta(&"patches_applied_phase1", true)
+	Engine.set_meta(META_PATCHES_APPLIED_PHASE1, true)
 	update_progress(35.0, "Local patches applied. Restarting...")
 	print("Phase 1 complete: Existing patches applied, reloading...")
 	get_tree().call_deferred(&"reload_current_scene")
@@ -102,8 +110,8 @@ func start_auto_update() -> void:
 	check_for_updates()
 
 func complete_patching_flow() -> void:
-	Engine.set_meta(&"auto_update_complete", true)
-	Engine.set_meta(&"patches_loaded", true)
+	Engine.set_meta(META_AUTO_UPDATE_COMPLETE, true)
+	Engine.set_meta(META_PATCHES_LOADED, true)
 	update_progress(95.0, "Finalizing...")
 	print("Patching flow complete, reloading...")
 	get_tree().call_deferred(&"reload_current_scene")
