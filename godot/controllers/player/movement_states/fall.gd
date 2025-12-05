@@ -1,11 +1,26 @@
 extends MovementState
 
-
-# Called when the node enters the scene tree for the first time.
-func _ready() -> void:
-	pass # Replace with function body.
+@export var SPEED := 6.0
+@export var ACCELERATION := 20.0
 
 
-# Called every frame. 'delta' is the elapsed time since the previous frame.
-func _process(delta: float) -> void:
-	pass
+func logic_enter() -> void:
+	player.set_parameters(SPEED, ACCELERATION)
+
+
+func logic_physics(delta: float) -> void:
+	player.update_gravity(delta, Enums.IntegrationContext.GAME)
+	player.update_movement(delta, Enums.IntegrationContext.GAME)
+	player.update_velocity(Enums.IntegrationContext.GAME)
+
+
+func logic_transitions() -> void:
+	if player.on_floor(Enums.IntegrationContext.GAME):
+		transition.emit(&"IdleMovementState")
+
+
+func visual_physics(delta: float) -> void:
+	if !is_remote_player:
+		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
+		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
+		player.update_velocity(Enums.IntegrationContext.VISUAL)

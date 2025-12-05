@@ -1,4 +1,4 @@
-[gd_scene load_steps=32 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=33 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://bmbvova1tm3y8" path="res://controllers/player/player.gd" id="1_icig3"]
 [ext_resource type="PackedScene" uid="uid://dqvg7w4c8u3oa" path="res://assets/mesh/fps_hands/fps_hands_rigged_by_evolvegames.glb" id="2_g7yr6"]
@@ -10,6 +10,7 @@
 [ext_resource type="Script" uid="uid://bb1ogkg56vx5s" path="res://controllers/player/movement_states/crouch.gd" id="9_qdb0h"]
 [ext_resource type="Script" uid="uid://d0igha5eqiup3" path="res://controllers/player/movement_states/jump.gd" id="10_fy606"]
 [ext_resource type="Script" uid="uid://b62btg7hc68a1" path="res://controllers/player/movement_states/prone.gd" id="10_icig3"]
+[ext_resource type="Script" uid="uid://sjabr5vf27je" path="res://controllers/player/movement_states/fall.gd" id="11_6e1eu"]
 [ext_resource type="Script" uid="uid://dwr5fk7m6jfqm" path="res://controllers/player/peek_state_machine.gd" id="11_a1kld"]
 [ext_resource type="Script" uid="uid://xirslhtv3akx" path="res://controllers/player/peek_states/not_peek_state.gd" id="11_bn7gw"]
 [ext_resource type="Script" uid="uid://oowrww0px1ws" path="res://controllers/player/peek_states/peeking_state.gd" id="12_a1kld"]
@@ -849,6 +850,10 @@ metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
 [node name="ProneMovementState" type="Node" parent="MovementStateMachine"]
 script = ExtResource("10_icig3")
+
+[node name="FallMovementState" type="Node" parent="MovementStateMachine"]
+script = ExtResource("11_6e1eu")
+metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
 [node name="PeekStateMachine" type="Node" parent="." node_paths=PackedStringArray("INITIAL_STATE")]
 unique_name_in_owner = true

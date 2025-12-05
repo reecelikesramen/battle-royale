@@ -14,12 +14,12 @@ func logic_physics(delta: float) -> void:
 
 
 func logic_transitions() -> void:
-	#print("i x: %f, z: %f" % [player.game_velocity.x, player.game_velocity.z])
+	if not player.on_floor(Enums.IntegrationContext.GAME):
+		transition.emit(&"FallMovementState")
+		return
+	
 	if !is_zero_approx(player.game_velocity.x) or !is_zero_approx(player.game_velocity.z):
 		transition.emit(&"WalkMovementState")
-	
-	if not player.on_floor(Enums.IntegrationContext.GAME):
-		return
 	
 	if player.input.is_jump_just_pressed():
 		transition.emit(&"JumpMovementState")

@@ -64,6 +64,10 @@ func logic_transitions() -> void:
 	if player.input.is_prone_just_pressed() and _toggle_debounce_us() > 50_000:
 		_last_toggle_time = Time.get_ticks_usec()
 		_wants_to_unprone = !_wants_to_unprone
+	
+	# TODO: make work with jump prone
+	if not player.on_floor(Enums.IntegrationContext.GAME):
+		_wants_to_unprone = true
 
 	if _wants_to_unprone and progress <= 0.0:
 		# Block uncrouch if hitting ceiling

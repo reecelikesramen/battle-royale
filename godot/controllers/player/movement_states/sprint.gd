@@ -22,6 +22,10 @@ func logic_physics(delta: float) -> void:
 
 
 func logic_transitions() -> void:
+	if not player.on_floor(Enums.IntegrationContext.GAME):
+		transition.emit(&"FallMovementState")
+		return
+	
 	if player.game_velocity.is_zero_approx():
 		transition.emit(&"IdleMovementState")
 

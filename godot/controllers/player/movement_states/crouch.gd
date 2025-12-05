@@ -60,6 +60,10 @@ func logic_physics(delta: float) -> void:
 
 func logic_transitions() -> void:
 	_wants_to_uncrouch = !player.input.is_crouching()
+	
+	# TODO: make work with crouch jump
+	if not player.on_floor(Enums.IntegrationContext.GAME):
+		_wants_to_uncrouch = true
 
 	if _wants_to_uncrouch and progress <= 0.0:
 		# Block uncrouch if hitting ceiling
