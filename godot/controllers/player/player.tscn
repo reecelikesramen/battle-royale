@@ -1,4 +1,4 @@
-[gd_scene load_steps=33 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=32 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://bmbvova1tm3y8" path="res://controllers/player/player.gd" id="1_icig3"]
 [ext_resource type="PackedScene" uid="uid://dqvg7w4c8u3oa" path="res://assets/mesh/fps_hands/fps_hands_rigged_by_evolvegames.glb" id="2_g7yr6"]
@@ -12,8 +12,7 @@
 [ext_resource type="Script" uid="uid://b62btg7hc68a1" path="res://controllers/player/movement_states/prone.gd" id="10_icig3"]
 [ext_resource type="Script" uid="uid://dwr5fk7m6jfqm" path="res://controllers/player/peek_state_machine.gd" id="11_a1kld"]
 [ext_resource type="Script" uid="uid://xirslhtv3akx" path="res://controllers/player/peek_states/not_peek_state.gd" id="11_bn7gw"]
-[ext_resource type="Script" uid="uid://duys4x20ydfaa" path="res://controllers/player/peek_states/left_peek_state.gd" id="12_a1kld"]
-[ext_resource type="Script" uid="uid://6prpyuccvsby" path="res://controllers/player/peek_states/right_peek_state.gd" id="13_6e1eu"]
+[ext_resource type="Script" uid="uid://oowrww0px1ws" path="res://controllers/player/peek_states/peeking_state.gd" id="12_a1kld"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_74qjk"]
 resource_local_to_scene = true
@@ -205,6 +204,30 @@ tracks/3/keys = {
 "update": 0,
 "values": [Vector3(0, 0, 0), Vector3(0, 0, 0.34906584)]
 }
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("GameController/GameCollider:position")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 1, 0), Vector3(-0.171, 0.97, 0)]
+}
+tracks/5/type = "value"
+tracks/5/imported = false
+tracks/5/enabled = true
+tracks/5/path = NodePath("GameController/GameCollider:rotation")
+tracks/5/interp = 1
+tracks/5/loop_wrap = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 0, 0), Vector3(0, 0, 0.34906584)]
+}
 
 [sub_resource type="Animation" id="Animation_a1kld"]
 resource_name = "PeekRight"
@@ -251,6 +274,30 @@ tracks/3/path = NodePath("CameraController:rotation")
 tracks/3/interp = 2
 tracks/3/loop_wrap = true
 tracks/3/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 0, 0), Vector3(0, 0, -0.34906584)]
+}
+tracks/4/type = "value"
+tracks/4/imported = false
+tracks/4/enabled = true
+tracks/4/path = NodePath("GameController/GameCollider:position")
+tracks/4/interp = 1
+tracks/4/loop_wrap = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 1, 0), Vector3(0.171, 0.97, 0)]
+}
+tracks/5/type = "value"
+tracks/5/imported = false
+tracks/5/enabled = true
+tracks/5/path = NodePath("GameController/GameCollider:rotation")
+tracks/5/interp = 1
+tracks/5/loop_wrap = true
+tracks/5/keys = {
 "times": PackedFloat32Array(0, 1),
 "transitions": PackedFloat32Array(1, 1),
 "update": 0,
@@ -713,6 +760,7 @@ slide_on_ceiling = false
 script = ExtResource("1_icig3")
 FRICTION = 6.5
 STOP_SPEED = 0.7
+TOGGLE_PEEK = true
 
 [node name="VisualCollider" type="CollisionShape3D" parent="."]
 transform = Transform3D(0.99999994, 0, 0, 0, 0.99999994, 0, 0, 0, 1, 0, 1, 0)
@@ -813,12 +861,8 @@ metadata/_custom_type_script = "uid://c1csw7q0gomdp"
 script = ExtResource("11_bn7gw")
 metadata/_custom_type_script = "uid://micpxcoldkpl"
 
-[node name="LeftPeekState" type="Node" parent="PeekStateMachine"]
+[node name="PeekState" type="Node" parent="PeekStateMachine"]
 script = ExtResource("12_a1kld")
-metadata/_custom_type_script = "uid://micpxcoldkpl"
-
-[node name="RightPeekState" type="Node" parent="PeekStateMachine"]
-script = ExtResource("13_6e1eu")
 metadata/_custom_type_script = "uid://micpxcoldkpl"
 
 [connection signal="reconcile_network_debug" from="." to="GUI" method="_on_fps_controller_reconcile_network_debug"]

@@ -12,8 +12,5 @@ func logic_transitions() -> void:
 	if player.game_velocity.length() > MAX_VELOCITY:
 		return
 	
-	if player.input.is_peeking_left():
-		transition.emit(&"LeftPeekState")
-	
-	if player.input.is_peeking_right():
-		transition.emit(&"RightPeekState")
+	if player.input.is_peeking_left() or player.input.is_peeking_right():
+		transition.emit(&"PeekState")

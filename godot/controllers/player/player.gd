@@ -58,7 +58,9 @@ var _y_mouse_input: float
 var _look_abs: Vector2 = Vector2()
 
 # used only for toggle crouch, if not using toggle crouch always false
-var _is_toggle_crouching := false
+var _is_toggle_crouched := false
+var _is_toggle_peeked_left := false
+var _is_toggle_peeked_right := false
 
 # client authority replaying inputs
 var _is_replaying_inputs := false
@@ -100,15 +102,13 @@ func _ready():
 	game_body.global_position = game_position
 	
 	if is_authority:
-		add_to_group("local_player")
 		camera.make_current()
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	else:
 		call_deferred("remove_child", %GUI)
 		camera.call_deferred("remove_child", $CameraController/Camera3D/ReflectionProbe)
-
-	if !is_authority and !NetworkTransport.is_server:
-		call_deferred("remove_child", $GameController)
+		if not NetworkTransport.is_server:
+			call_deferred("remove_child", $GameController)
 
 
 func _unhandled_input(event):
@@ -195,12 +195,26 @@ func _client_authority_physics_step(delta: float) -> void:
 	player_input.timestamp_us = Time.get_ticks_usec()
 	player_input.move_forward_backward = Input.get_axis("move_forward", "move_backward")
 	player_input.move_left_right = Input.get_axis("move_left", "move_right")
-	player_input.peek_left_right = Input.get_axis("peek_left", "peek_right")
+	if TOGGLE_PEEK:
+		var left := Input.is_action_just_pressed("peek_left")
+		var right := Input.is_action_just_pressed("peek_right")
+		if left and right:
+			_is_toggle_peeked_left = false
+			_is_toggle_peeked_right = false
+		elif left:
+			_is_toggle_peeked_left = not _is_toggle_peeked_left
+			_is_toggle_peeked_right = false
+		elif right:
+			_is_toggle_peeked_right = not _is_toggle_peeked_right
+			_is_toggle_peeked_left = false
+		player_input.peek_left_right = float(_is_toggle_peeked_right) - float(_is_toggle_peeked_left)
+	else:
+		player_input.peek_left_right = Input.get_axis("peek_left", "peek_right")
 	player_input.look_abs = _look_abs
 	player_input.jump = Input.is_action_pressed("jump")
 	if TOGGLE_CROUCH:
-		if Input.is_action_just_pressed("crouch"): _is_toggle_crouching = !_is_toggle_crouching
-		player_input.crouch = _is_toggle_crouching
+		if Input.is_action_just_pressed("crouch"): _is_toggle_crouched = !_is_toggle_crouched
+		player_input.crouch = _is_toggle_crouched
 	else:
 		player_input.crouch = Input.is_action_pressed("crouch")
 	player_input.sprint = Input.is_action_pressed("sprint")
@@ -248,7 +262,7 @@ func _client_remote_physics_step(delta: float) -> void:
 		%MovementStateMachine.run_visual(delta)
 		%PeekStateMachine.set_visual_state_by_id(packet.peek_state)
 		# TODO: assert peek progress and not peek state
-		if packet.peek_progress > 0.0:
+		if packet.peek_progress != 0.0:
 			%PeekStateMachine._visual_state.progress = packet.peek_progress
 		%PeekStateMachine.run_visual(delta)
 	else:
@@ -270,7 +284,7 @@ func _client_remote_physics_step(delta: float) -> void:
 			%MovementStateMachine._visual_state.progress = lerp(from.prone_progress, to.prone_progress, alpha)
 		%MovementStateMachine.run_visual(delta)
 		%PeekStateMachine.set_visual_state_by_id(from.peek_state if alpha < 0.5 else to.peek_state)
-		if %PeekStateMachine._visual_state.name == &"LeftPeekState" or %PeekStateMachine._visual_state.name == &"RightPeekState":
+		if %PeekStateMachine._visual_state.name == &"PeekState":
 			%PeekStateMachine._visual_state.progress = lerp(from.peek_progress, to.peek_progress, alpha)
 		%PeekStateMachine.run_visual(delta)
 

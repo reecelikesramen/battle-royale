@@ -1,7 +1,6 @@
 extends PanelContainer
 
 @onready var property_container = %VBoxContainer
-@onready var repeat_actions_button: Button = %RepeatActionsButton
 @onready var chat_hide_timer: Timer = null
 
 var props = {}
