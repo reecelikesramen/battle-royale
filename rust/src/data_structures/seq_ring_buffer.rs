@@ -9,7 +9,7 @@ const MIN_DELAY_US: i64 = 33_000i64; // 33ms
 #[derive(Clone)]
 struct BufferEntry {
     arrival_timestamp_us: i64,  // when this client received the packet
-    server_timestamp_us: i64,
+    // server_timestamp_us: i64,
     value: Variant,
 }
 
@@ -91,7 +91,7 @@ impl SequenceRingBuffer {
             }
         }
 
-        self.buffer[index] = Some(BufferEntry { arrival_timestamp_us, server_timestamp_us, value });
+        self.buffer[index] = Some(BufferEntry { arrival_timestamp_us, /*server_timestamp_us,*/ value });
 
         if was_empty {
             self.count += 1;
@@ -266,7 +266,7 @@ impl SequenceRingBuffer {
             let index = (current & self.mask) as usize;
 
             if let Some(ref entry) = self.buffer[index] {
-                if entry.server_timestamp_us <= target_time {
+                if entry.arrival_timestamp_us <= target_time {
                     from = Some(entry)
                 } else if to.is_none() {
                     to = Some(entry);
@@ -286,13 +286,13 @@ impl SequenceRingBuffer {
         }
 
         if let (Some(from), Some(to)) = (from, to) {
-            let mut span = to.server_timestamp_us - from.server_timestamp_us;
+            let mut span = to.arrival_timestamp_us - from.arrival_timestamp_us;
             if span < 0 {
-                godot_warn!("Timestamp is older than previous entry: {} < {}", to.server_timestamp_us, from.server_timestamp_us);
+                godot_warn!("Timestamp is older than previous entry: {} < {}", to.arrival_timestamp_us, from.arrival_timestamp_us);
             }
             span = span.max(1);
-            let alpha = ((target_time - from.server_timestamp_us) as f64 / span as f64).clamp(0.0, 1.0);
-            let extrapolation_us = (target_time - to.server_timestamp_us).max(0);
+            let alpha = ((target_time - from.arrival_timestamp_us) as f64 / span as f64).clamp(0.0, 1.0);
+            let extrapolation_us = (target_time - to.arrival_timestamp_us).max(0);
             pair.bind_mut().from = from.value.clone();
             pair.bind_mut().to = to.value.clone();
             pair.bind_mut().alpha = alpha;

@@ -1,15 +1,14 @@
 extends MovementState
 
 @export var SPEED := 7.0
-@export var ACCELERATION := 0.1
-@export var DECELERATION := 0.25
+@export var ACCELERATION := 35.0
 @export var TOP_ANIM_SPEED: float = 1.6
 
 var TOP_SPEED_SQ: float:
 	get: return SPEED * SPEED
 
 func logic_enter() -> void:
-	player.set_parameters(SPEED, ACCELERATION, DECELERATION)
+	player.set_parameters(SPEED, ACCELERATION)
 
 
 func visual_enter() -> void:
@@ -18,28 +17,31 @@ func visual_enter() -> void:
 
 func logic_physics(delta: float) -> void:
 	player.update_gravity(delta, Enums.IntegrationContext.GAME)
-	player.update_movement(Enums.IntegrationContext.GAME)
+	player.update_movement(delta, Enums.IntegrationContext.GAME)
 	player.update_velocity(Enums.IntegrationContext.GAME)
 
 
 func logic_transitions() -> void:
 	if player.game_velocity.is_zero_approx():
-		transition.emit("IdleMovementState")
+		transition.emit(&"IdleMovementState")
 
 	if !player.input.is_sprinting():
-		transition.emit("WalkMovementState")
-
-	if player.input.is_crouching():
-		transition.emit("CrouchMovementState")
+		transition.emit(&"WalkMovementState")
 
 	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
-		transition.emit("JumpMovementState")
+		transition.emit(&"JumpMovementState")
+	
+	if player.input.is_crouching():
+		transition.emit(&"CrouchMovementState")
+	
+	if player.input.is_prone_just_pressed():
+		transition.emit(&"ProneMovementState")
 
 
 func visual_physics(delta: float) -> void:
 	if !is_remote_player:
 		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
-		player.update_movement(Enums.IntegrationContext.VISUAL)
+		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
 		player.update_velocity(Enums.IntegrationContext.VISUAL)
 	_set_animation_speed(player.velocity.length_squared())
 

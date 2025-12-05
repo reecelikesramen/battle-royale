@@ -3,20 +3,27 @@ extends CharacterBody3D
 
 signal reconcile_network_debug(delta_pos: Vector3, delta_vel: Vector3, unacked_inputs: SequenceRingBuffer)
 
-@export var TOGGLE_CROUCH: bool = false
+const TILT_LOWER_LIMIT: float = deg_to_rad(-90.0)
+const TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
 
-@export var TILT_LOWER_LIMIT: float = deg_to_rad(-90.0)
-@export var TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
+
+@export_group("Movement Tunables")
+@export var FRICTION: float = 8.0
+@export var AIR_FRICTION: float = 0.5
+@export var STOP_SPEED: float = 0.5
+@export var TOGGLE_CROUCH: bool = false
+@export var TOGGLE_PEEK: bool = false
+
+@export_group("Camera Tunables")
 @export var MOUSE_SENSITIVITY: float = 0.5
 
-# reconciliation tunables
+@export_group("Reconciliation Tunables")
 @export var SNAP_THRESHOLD_HORIZONTAL := 1.5
 @export var SNAP_THRESHOLD_VERTICAL := 2.5
 @export var CORRECTION_RATE_HORIZONTAL := 8.0
 @export var CORRECTION_RATE_VERTICAL := 4.0
 @export var POSITION_CORRECTION_DEADBAND_HORIZONTAL := 0.07
 @export var POSITION_CORRECTION_DEADBAND_VERTICAL := 0.15
-
 @export var VELOCITY_CORRECTION_THRESHOLD := 1.5
 @export var VELOCITY_CORRECTION_RATE := 12.0
 @export var VELOCITY_CORRECTION_DEADBAND := 0.2
@@ -30,18 +37,18 @@ signal reconcile_network_debug(delta_pos: Vector3, delta_vel: Vector3, unacked_i
 var is_authority: bool:
 	get: return !NetworkTransport.is_server && _owner_id == NetworkClient.id
 
+var is_replaying_inputs: bool:
+	get: return _is_replaying_inputs
+
 var context := Enums.IntegrationContext.VISUAL
 var input := PlayerInput.new()
 
-var _test_is_replaying := false
 
-# var _current_frame_input: PlayerInputPacket = null
 var _owner_id: int
 
 # movement parameters
 var _speed := 0.0
 var _acceleration := 0.0
-var _deceleration := 0.0
 
 # x and y mouse input for accumulating mouse movement
 var _x_mouse_input: float
@@ -52,6 +59,9 @@ var _look_abs: Vector2 = Vector2()
 
 # used only for toggle crouch, if not using toggle crouch always false
 var _is_toggle_crouching := false
+
+# client authority replaying inputs
+var _is_replaying_inputs := false
 
 # server authoritative game state
 var game_transform: Transform3D = Transform3D()
@@ -141,17 +151,19 @@ func _server_physics_step(delta: float) -> void:
 	for frame in frames:
 		assert(frame.packet is PlayerInputPacket, "Packet is not a PlayerInputPacket")
 		assert(frame.delta > 0.0, "Delta is not positive")
-		# _current_frame_input = frame.packet as PlayerInputPacket
 		input.prev_input_packet = _prev_server_input
 		_prev_server_input = frame.packet
 		input.input_packet = frame.packet
 		update_camera(input.input_packet.look_abs)
 		context = Enums.IntegrationContext.GAME
 		game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
-		$MovementStateMachine.run_logic(frame.delta)
+		%MovementStateMachine.run_logic(frame.delta)
+		%PeekStateMachine.run_logic(frame.delta)
 		context = Enums.IntegrationContext.VISUAL
-		$MovementStateMachine.sync_visual()
-		$MovementStateMachine.run_visual(frame.delta)
+		%MovementStateMachine.sync_visual()
+		%MovementStateMachine.run_visual(frame.delta)
+		%PeekStateMachine.sync_visual()
+		%PeekStateMachine.run_visual(frame.delta)
 		global_position = game_position
 		velocity = game_velocity
 
@@ -163,7 +175,11 @@ func _server_physics_step(delta: float) -> void:
 	player_state.position = game_position
 	player_state.look_abs = input.input_packet.look_abs
 	player_state.velocity = game_velocity
-	player_state.movement_state = $MovementStateMachine.get_logic_state_id()
+	player_state.movement_state = %MovementStateMachine.get_logic_state_id()
+	player_state.crouch_progress = %MovementStateMachine.crouch_progress
+	player_state.prone_progress = %MovementStateMachine.prone_progress
+	player_state.peek_state = %PeekStateMachine.get_logic_state_id()
+	player_state.peek_progress = %PeekStateMachine.peek_progress
 	NetworkTransport.broadcast_packet(player_state.to_payload())
 
 
@@ -179,6 +195,7 @@ func _client_authority_physics_step(delta: float) -> void:
 	player_input.timestamp_us = Time.get_ticks_usec()
 	player_input.move_forward_backward = Input.get_axis("move_forward", "move_backward")
 	player_input.move_left_right = Input.get_axis("move_left", "move_right")
+	player_input.peek_left_right = Input.get_axis("peek_left", "peek_right")
 	player_input.look_abs = _look_abs
 	player_input.jump = Input.is_action_pressed("jump")
 	if TOGGLE_CROUCH:
@@ -190,7 +207,6 @@ func _client_authority_physics_step(delta: float) -> void:
 	player_input.prone = Input.is_action_pressed("prone")
 	_unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)
 	NetworkTransport.send_packet(player_input.to_payload())
-	# _current_frame_input = player_input
 	input.prev_input_packet = _prev_client_input
 	_prev_client_input = player_input
 	input.input_packet = player_input
@@ -198,12 +214,15 @@ func _client_authority_physics_step(delta: float) -> void:
 	# run prediction on authoritative copy
 	context = Enums.IntegrationContext.GAME
 	game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
-	$MovementStateMachine.run_logic(delta)
+	%MovementStateMachine.run_logic(delta)
+	%PeekStateMachine.run_logic(delta)
 
 	context = Enums.IntegrationContext.VISUAL
 	update_camera(input.input_packet.look_abs)
-	$MovementStateMachine.sync_visual()
-	$MovementStateMachine.run_visual(delta)
+	%MovementStateMachine.sync_visual()
+	%MovementStateMachine.run_visual(delta)
+	%PeekStateMachine.sync_visual()
+	%PeekStateMachine.run_visual(delta)
 
 	_client_authority_reconcile_visual_state(delta)
 
@@ -211,7 +230,7 @@ func _client_authority_physics_step(delta: float) -> void:
 func _client_remote_physics_step(delta: float) -> void:
 	var now_us := Time.get_ticks_usec()
 	var interpolation_pair := _player_state_buffer.get_interpolation_pair(now_us);
-	if !interpolation_pair.is_valid:
+	if not interpolation_pair.is_valid:
 		return
 
 	if interpolation_pair.to == null:
@@ -219,8 +238,19 @@ func _client_remote_physics_step(delta: float) -> void:
 		global_position = packet.position
 		velocity = packet.velocity
 		update_camera(packet.look_abs)
-		$MovementStateMachine.set_visual_state_by_id(packet.movement_state)
-		$MovementStateMachine.run_visual(delta)
+		%MovementStateMachine.set_visual_state_by_id(packet.movement_state)
+		assert(not (packet.crouch_progress > 0.0 and packet.prone_progress > 0.0), "Player state packet should not have non-zero crouch AND prone progress")
+		# TODO: assert crouch progress and not crouch state, equiv prone
+		if packet.crouch_progress > 0.0:
+			%MovementStateMachine._visual_state.progress = packet.crouch_progress
+		elif packet.prone_progress > 0.0:
+			%MovementStateMachine._visual_state.progress = packet.prone_progress
+		%MovementStateMachine.run_visual(delta)
+		%PeekStateMachine.set_visual_state_by_id(packet.peek_state)
+		# TODO: assert peek progress and not peek state
+		if packet.peek_progress > 0.0:
+			%PeekStateMachine._visual_state.progress = packet.peek_progress
+		%PeekStateMachine.run_visual(delta)
 	else:
 		var from: PlayerStatePacket = interpolation_pair.from as PlayerStatePacket
 		var to: PlayerStatePacket = interpolation_pair.to as PlayerStatePacket
@@ -233,8 +263,16 @@ func _client_remote_physics_step(delta: float) -> void:
 		global_position = blended_pos
 		velocity = blended_vel
 		update_camera(blended_look_abs)
-		$MovementStateMachine.set_visual_state_by_id(from.movement_state if alpha < 0.5 else to.movement_state)
-		$MovementStateMachine.run_visual(delta)
+		%MovementStateMachine.set_visual_state_by_id(from.movement_state if alpha < 0.5 else to.movement_state)
+		if %MovementStateMachine._visual_state.name == &"CrouchMovementState":
+			%MovementStateMachine._visual_state.progress = lerp(from.crouch_progress, to.crouch_progress, alpha)
+		elif %MovementStateMachine._visual_state.name == &"ProneMovementState":
+			%MovementStateMachine._visual_state.progress = lerp(from.prone_progress, to.prone_progress, alpha)
+		%MovementStateMachine.run_visual(delta)
+		%PeekStateMachine.set_visual_state_by_id(from.peek_state if alpha < 0.5 else to.peek_state)
+		if %PeekStateMachine._visual_state.name == &"LeftPeekState" or %PeekStateMachine._visual_state.name == &"RightPeekState":
+			%PeekStateMachine._visual_state.progress = lerp(from.peek_progress, to.peek_progress, alpha)
+		%PeekStateMachine.run_visual(delta)
 
 
 func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
@@ -246,22 +284,24 @@ func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
 	game_movement_state_id = game_state.movement_state
 
 	context = Enums.IntegrationContext.GAME
-	$MovementStateMachine.set_logic_state_by_id(game_state.movement_state)
+	%MovementStateMachine.set_logic_state_by_id(game_state.movement_state)
+	%PeekStateMachine.set_logic_state_by_id(game_state.peek_state)
 
-	_test_is_replaying = true
+	_is_replaying_inputs = true
 	var inputs := _unacked_inputs.get_starting_at(game_sequence_id)
 	for i in range(1, inputs.size()):
 		input.prev_input_packet = inputs[i - 1]
 		input.input_packet = inputs[i]
-		# _current_frame_input = repeat_input
 		game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
-		$MovementStateMachine.run_logic(delta)
-	_test_is_replaying = false
+		%MovementStateMachine.run_logic(delta)
+		%PeekStateMachine.run_logic(delta)
+	_is_replaying_inputs = false
 	
 	context = Enums.IntegrationContext.VISUAL
 	_client_authority_reconcile_visual_state(delta)
 
 
+# TODO: reconcile state_progress?
 func _client_authority_reconcile_visual_state(delta: float) -> void:
 	var delta_pos := game_position - global_position
 	var horizontal_err := Vector2(delta_pos.x, delta_pos.z)
@@ -333,10 +373,9 @@ func _correction_alpha(
 	)
 	return 1.0 - exp(-rate * delta * normalized)
 
-func set_parameters(speed: float, acceleration: float, deceleration: float) -> void:
+func set_parameters(speed: float, acceleration: float) -> void:
 	_speed = speed
 	_acceleration = acceleration
-	_deceleration = deceleration
 
 
 func on_floor(ctx: Enums.IntegrationContext) -> bool:
@@ -372,29 +411,54 @@ func update_gravity(delta: float, ctx: Enums.IntegrationContext) -> void:
 		game_velocity += get_gravity() * delta
 
 
-var _input_dir := Vector2.ZERO
-func update_movement(ctx: Enums.IntegrationContext) -> void:
-	_input_dir.x = input.input_packet.move_left_right
-	_input_dir.y = input.input_packet.move_forward_backward
+func update_movement(delta: float, ctx: Enums.IntegrationContext) -> void:
+	var _input_dir := Vector2(
+		input.input_packet.move_left_right,
+		input.input_packet.move_forward_backward,
+	)
 	
 	var _basis := transform.basis if ctx == Enums.IntegrationContext.VISUAL else game_transform.basis
-	var direction = (_basis * Vector3(_input_dir.x, 0, _input_dir.y)).normalized()
+	var wish_dir := (_basis * Vector3(_input_dir.x, 0, _input_dir.y)).normalized()
 
-	if direction:
-		if ctx == Enums.IntegrationContext.VISUAL:
-			velocity.x = lerp(velocity.x, direction.x * _speed, _acceleration)
-			velocity.z = lerp(velocity.z, direction.z * _speed, _acceleration)
-		else:
-			game_velocity.x = lerp(game_velocity.x, direction.x * _speed, _acceleration)
-			game_velocity.z = lerp(game_velocity.z, direction.z * _speed, _acceleration)
+	var grounded := on_floor(ctx)
+	var vel := velocity if ctx == Enums.IntegrationContext.VISUAL else game_velocity
+	var horizontal_vel := Vector3(vel.x, 0, vel.z)
+	var speed := horizontal_vel.length()
+	var friction := FRICTION if grounded else AIR_FRICTION
+
+	if not is_zero_approx(speed):
+		var drop := speed * friction * delta
+		horizontal_vel *= maxf(speed - drop, 0.0) / speed
+
+	if not wish_dir.is_zero_approx():
+		var curr_speed_in_wish_dir := horizontal_vel.dot(wish_dir)
+		var add_speed := clampf(_speed - curr_speed_in_wish_dir, 0.0, _acceleration * delta)
+		horizontal_vel += wish_dir * add_speed
+	elif grounded and speed < STOP_SPEED:
+		horizontal_vel = Vector3.ZERO
+		
+	if ctx == Enums.IntegrationContext.VISUAL:
+		velocity.x = horizontal_vel.x
+		velocity.z = horizontal_vel.z
 	else:
-		# TODO: fix this logic, axes come to rest at different rates; not at same time, feels clunky
-		if ctx == Enums.IntegrationContext.VISUAL:
-			velocity.x = move_toward(velocity.x, 0, _deceleration)
-			velocity.z = move_toward(velocity.z, 0, _deceleration)
-		else:
-			game_velocity.x = move_toward(game_velocity.x, 0, _deceleration)
-			game_velocity.z = move_toward(game_velocity.z, 0, _deceleration)
+		game_velocity.x = horizontal_vel.x
+		game_velocity.z = horizontal_vel.z
+
+	# if direction:
+	# 	if ctx == Enums.IntegrationContext.VISUAL:
+	# 		velocity.x = lerp(velocity.x, direction.x * _speed, _acceleration)
+	# 		velocity.z = lerp(velocity.z, direction.z * _speed, _acceleration)
+	# 	else:
+	# 		game_velocity.x = lerp(game_velocity.x, direction.x * _speed, _acceleration)
+	# 		game_velocity.z = lerp(game_velocity.z, direction.z * _speed, _acceleration)
+	# else:
+	# 	# TODO: fix this logic, axes come to rest at different rates; not at same time, feels clunky
+	# 	if ctx == Enums.IntegrationContext.VISUAL:
+	# 		velocity.x = move_toward(velocity.x, 0, _deceleration)
+	# 		velocity.z = move_toward(velocity.z, 0, _deceleration)
+	# 	else:
+	# 		game_velocity.x = move_toward(game_velocity.x, 0, _deceleration)
+	# 		game_velocity.z = move_toward(game_velocity.z, 0, _deceleration)
 
 
 const MAX_SLIDES := 4 # Engine.max_physics_steps_per_frame
@@ -444,4 +508,4 @@ func client_handle_player_state(player_state: PlayerStatePacket) -> void:
 
 func despawn() -> void:
 	print("I'm (%s) being despawned!" % name)
-	if is_authority: get_tree().change_scene_to_file("res://main_menu.tscn")
+	if is_authority: get_tree().change_scene_to_file(Constants.MAIN_MENU_SCENE_PATH)

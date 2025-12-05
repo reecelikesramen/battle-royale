@@ -14,13 +14,12 @@ func _ready() -> void:
 
 
 func spawn_player(id: int) -> void:
-	NetworkClient.player = PLAYER.instantiate()
-	var player := NetworkClient.player
+	var player: PlayerController = PLAYER.instantiate()
 	player._owner_id = id
-	if id == NetworkClient.id:
-		NetworkClient.player = player
 	player.name = "Player_%d" % id # Optional, but it beats the name "@CharacterBody2D@2/3/4..."
 	players[id] = player
+	if id == NetworkClient.id:
+		NetworkClient.player = player
 	call_deferred("add_child", player)
 
 

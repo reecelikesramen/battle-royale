@@ -4,3 +4,4 @@
 
 [node name="NetworkTransport" type="NetworkDriver"]
 script = ExtResource("1_yduhh")
+load_testing_off = true

@@ -21,17 +21,14 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	visible = false
 	
-	# set debug to client globals if the scene root (player) is authority
-	if !player.is_authority:
-		print("%s not authority" % NetworkTransport.is_server)
+	if NetworkTransport.is_server:
 		return
-	else:
-		print("%s is authority" % NetworkTransport.is_server)
-		NetworkClient.debug = self
 	
+	if not player or not player.is_authority:
+		return
+	
+	NetworkClient.debug = self
 	%ScrollContainer.visible = false
-	if NetworkTransport.is_dedicated_server:
-		%ExitToMenuButton.visible = false
 
 	# Timer to auto-hide chat when debug overlay is off
 	chat_hide_timer = Timer.new()
@@ -78,7 +75,6 @@ func _on_quit_button_pressed() -> void:
 
 func _on_chat_edit_text_submitted(new_text: String) -> void:
 	%ChatEdit.text = ""
-	_record_action_repeat_chat(new_text)
 	var packet = ChatPacket.new()
 	packet.username = NetworkClient.username
 	packet.message = new_text
@@ -117,34 +113,3 @@ func _on_chat_hide_timeout() -> void:
 	if visible:
 		return
 	%ScrollContainer.visible = false
-
-
-func _on_repeat_actions_button_toggled(toggled_on: bool) -> void:
-	var player := get_tree().get_first_node_in_group("local_player")
-	if player == null:
-		_set_repeat_actions_button(false)
-		return
-	if !player.has_method("set_action_repeat"):
-		_set_repeat_actions_button(false)
-		return
-	var applied: bool = player.set_action_repeat(toggled_on)
-	if applied == toggled_on:
-		return
-	_set_repeat_actions_button(applied)
-
-
-func _set_repeat_actions_button(state: bool) -> void:
-	if repeat_actions_button == null:
-		return
-	if repeat_actions_button.button_pressed == state:
-		return
-	repeat_actions_button.set_pressed_no_signal(state)
-
-
-func _record_action_repeat_chat(message: String) -> void:
-	var player := get_tree().get_first_node_in_group("local_player")
-	if player == null:
-		return
-	if !player.has_method("record_chat_event"):
-		return
-	player.record_chat_event(NetworkClient.username, message)

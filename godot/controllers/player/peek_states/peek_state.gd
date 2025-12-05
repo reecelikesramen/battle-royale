@@ -1,5 +1,9 @@
-class_name MovementState
+class_name PeekState
 extends State
+
+const MAX_VELOCITY: float = 2.0
+const PEEK_SPEED: float = 5.0
+const UNPEEK_SPEED: float = 7.0
 
 @onready var player: PlayerController = owner
 var animation_player: AnimationPlayer:

@@ -1,7 +1,6 @@
 use crate::packet::prelude::*;
 
 // TODO: quantization of inputs
-// TODO: use connection id to identify player
 // TODO: wrap timestamp_us to save bytes
 define_packet! {
     name: PlayerInputPacket,
@@ -39,6 +38,10 @@ define_packet! {
         prone: {
             godot: bool,
         },
+        peek_left_right: {
+            godot: f64,
+            wire: i8,
+        }
     },
     codec: postcard
 }

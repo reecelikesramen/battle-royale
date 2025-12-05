@@ -26,3 +26,9 @@ func is_prone() -> bool:
 
 func is_prone_just_pressed() -> bool:
 	return input_packet.prone and not prev_input_packet.prone
+
+func is_peeking_left() -> bool:
+	return input_packet.peek_left_right < 0
+
+func is_peeking_right() -> bool:
+	return input_packet.peek_left_right > 0

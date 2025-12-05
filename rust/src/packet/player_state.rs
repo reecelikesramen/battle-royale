@@ -31,7 +31,23 @@ define_packet! {
         movement_state: {
             godot: i64,
             wire: u8
-        }
+        },
+        crouch_progress: {
+            godot: f64,
+            wire: f32,
+        },
+        prone_progress: {
+            godot: f64,
+            wire: f32,
+        },
+        peek_state: {
+            godot: i64,
+            wire: u8,
+        },
+        peek_progress: {
+            godot: f64,
+            wire: f32,
+        },
     },
     codec: postcard
 }

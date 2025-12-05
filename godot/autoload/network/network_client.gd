@@ -6,10 +6,16 @@ signal handle_player_disconnected(player_id: int)
 signal handle_player_state(player_state: PlayerStatePacket)
 signal handle_chat(message: ChatPacket)
 signal handle_disconnect_from_server()
+signal self_spawned()
 
 var username: String
 var id: int = -1
-var player: PlayerController
+var player: PlayerController:
+	get: return player
+	set(value):
+		player = value
+		self_spawned.emit()
+	
 var debug
 var remote_ids: Array[int]
 var _disconnected_message: String = ""

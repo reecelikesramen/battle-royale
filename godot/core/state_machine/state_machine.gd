@@ -1,8 +1,11 @@
 class_name StateMachine extends Node
 
-@export var CURRENT_STATE: State
+@export var INITIAL_STATE: State
 @export var DEBUG_NAME: String
 @export var SHOW_IN_DEBUG: bool = true
+
+var current_state: StringName:
+	get: return _logic_state.name
 
 var states: Dictionary[StringName, State] = {}
 var state_to_id: Dictionary[StringName, int] = {}
@@ -16,9 +19,10 @@ var _show_in_debug: bool:
 	get:
 		if !SHOW_IN_DEBUG: return false
 		if NetworkTransport.is_server: return false
-		var player := owner as PlayerController
-		if player == null: return false
+		if not NetworkClient.debug: return false
+		var player: PlayerController = owner
 		return player.is_authority
+
 
 func _ready() -> void:
 	for child in get_children():
@@ -30,9 +34,11 @@ func _ready() -> void:
 		else:
 			push_warning("State Machine '%s' contains an incompatible child node '%s', type '%s'" % [name, child.name, type_string(typeof(child))])
 	
-	_logic_state = CURRENT_STATE
-	_visual_state = CURRENT_STATE
+	_logic_state = INITIAL_STATE
+	_visual_state = INITIAL_STATE
 	await owner.ready
+	_logic_state.previous_state = null
+	_visual_state.previous_state = null
 	_logic_state.logic_enter()
 	_visual_state.visual_enter()
 
@@ -81,6 +87,7 @@ func set_logic_state_by_id(new_state_id: int) -> void:
 	if target == null or target == _logic_state:
 		return
 	_logic_state.logic_exit()
+	target.previous_state = _logic_state
 	_logic_state = target
 	_logic_state.logic_enter()
 
@@ -90,6 +97,7 @@ func set_visual_state_by_id(new_state_id: int) -> void:
 	if target == null or target == _visual_state:
 		return
 	_visual_state.visual_exit()
+	target.previous_state = _visual_state
 	_visual_state = target
 	_visual_state.visual_enter()
 
@@ -103,11 +111,11 @@ func _switch_logic(new_state_name: StringName) -> void:
 	if target == null or target == _logic_state:
 		return
 	_logic_state.logic_exit()
+	target.previous_state = _logic_state
 	_logic_state = target
 	_logic_state.logic_enter()
 
 
 func _process(_delta: float) -> void:
-	# CURRENT_STATE.update(delta)
 	if _show_in_debug:
 		NetworkClient.debug.set_debug_property(DEBUG_NAME, _logic_state.name)
