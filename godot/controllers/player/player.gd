@@ -31,6 +31,8 @@ const TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
 @onready var camera: Camera3D = $CameraController/Camera3D
 @onready var tp_camera: Camera3D = $CameraController/ThirdPersonCamera3D
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
+@onready var animation_tree: AnimationTree = $AnimationTree
+@onready var camera_animation_player: AnimationPlayer = $CameraAnimationPlayer
 @onready var game_body: CharacterBody3D = $GameController
 @onready var crouch_shapecast: ShapeCast3D = %CrouchShapeCast3D
 

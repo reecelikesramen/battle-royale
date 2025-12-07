@@ -8,6 +8,8 @@ const UNPEEK_SPEED: float = 7.0
 @onready var player: PlayerController = owner
 var animation_player: AnimationPlayer:
 	get: return player.animation_player
+var animation_tree: AnimationTree:
+	get: return player.animation_tree
 var ctx: Enums.IntegrationContext:
 	get: return player.context
 var is_remote_player: bool:

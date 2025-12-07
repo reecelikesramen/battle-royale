@@ -17,11 +17,8 @@ func logic_enter() -> void:
 func visual_enter() -> void:
 	if !is_remote_player and player.input.is_jump_just_pressed():
 		player.velocity.y += JUMP_VELOCITY
-	animation_player.pause()
-
-
-func visual_exit() -> void:
-	animation_player.speed_scale = 1.0
+	animation_tree.set("parameters/Movement/transition_request", "Jump")
+	camera_animation_player.stop()
 
 
 func logic_physics(delta: float) -> void:

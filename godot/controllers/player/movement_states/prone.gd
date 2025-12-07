@@ -35,12 +35,9 @@ func logic_enter() -> void:
 		progress = 0.0
 
 
-func visual_exit() -> void:
-	if animation_player.has_animation(RESET_ANIM):
-		animation_player.play(RESET_ANIM)
-	else:
-		animation_player.stop()
-	animation_player.speed_scale = 1.0
+func visual_enter() -> void:
+	animation_tree.set("parameters/Movement/transition_request", "Prone")
+	camera_animation_player.stop()
 
 
 func logic_physics(delta: float) -> void:
@@ -83,10 +80,8 @@ func visual_physics(delta: float) -> void:
 		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
 		player.update_velocity(Enums.IntegrationContext.VISUAL)
 		
-	# Sync animation to logic progress`
-	if animation_player.current_animation != PRONE_ANIM:
-		animation_player.play(PRONE_ANIM)
-	animation_player.seek(progress, true)
+	# Sync animation to logic progress via TimeSeek
+	animation_tree.set("parameters/ProneTimeSeek/seek_request", progress)
 
 
 func _toggle_debounce_us() -> int:

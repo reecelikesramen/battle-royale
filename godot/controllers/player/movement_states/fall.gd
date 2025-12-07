@@ -8,6 +8,11 @@ func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION)
 
 
+func visual_enter() -> void:
+	animation_tree.set("parameters/Movement/transition_request", "Fall")
+	camera_animation_player.stop()
+
+
 func logic_physics(delta: float) -> void:
 	player.update_gravity(delta, Enums.IntegrationContext.GAME)
 	player.update_movement(delta, Enums.IntegrationContext.GAME)

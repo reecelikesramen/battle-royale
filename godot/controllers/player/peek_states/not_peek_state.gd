@@ -1,8 +1,7 @@
 extends PeekState
 
 func visual_enter() -> void:
-	animation_player.play(&"RESET")
-	pass
+	animation_tree.set("parameters/Peeking/transition_request", "Not Peek")
 
 
 func logic_transitions() -> void:

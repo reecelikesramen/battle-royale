@@ -9,6 +9,7 @@ const RESET_ANIM := &"RESET"
 var progress := 0.0
 
 var _peek_anim_length := 0.0
+var _force_unpeak := false
 
 
 func _ready() -> void:
@@ -21,18 +22,21 @@ func _ready() -> void:
 func logic_enter() -> void:
 	if not player.is_replaying_inputs:
 		progress = 0.0
+		_force_unpeak = false
 
 
-func visual_exit() -> void:
-	if animation_player.has_animation(RESET_ANIM):
-		animation_player.play(RESET_ANIM)
-	else:
-		animation_player.stop()
-	animation_player.speed_scale = 1.0
+func visual_enter() -> void:
+	animation_tree.set("parameters/Peeking/transition_request", "Peek")
 
 
 func logic_physics(delta: float) -> void:
 	if player.is_replaying_inputs:
+		return
+	
+	# If forced to unpeak, always move toward center
+	if _force_unpeak:
+		_move_toward_center(delta)
+		progress = clampf(progress, -_peek_anim_length, _peek_anim_length)
 		return
 	
 	var target := _target_direction()
@@ -69,16 +73,16 @@ func _move_toward_target(delta: float, target: int) -> void:
 
 
 func logic_transitions() -> void:
+	# Check if we need to force unpeak due to movement state or velocity
 	if %MovementStateMachine.current_state not in [&"IdleMovementState", &"CrouchMovementState", &"WalkMovementState"]:
-		transition.emit(&"NotPeekState")
-		return
+		_force_unpeak = true
+	elif player.game_velocity.length() > MAX_VELOCITY:
+		_force_unpeak = true
+	elif _target_direction() == 0:
+		_force_unpeak = true
 	
-	if player.game_velocity.length() > MAX_VELOCITY:
-		transition.emit(&"NotPeekState")
-		return
-	
-	# Only exit when centered and no input
-	if absf(progress) < 0.001 and _target_direction() == 0:
+	# Only transition when progress has wound down to center
+	if _force_unpeak and absf(progress) < 0.001:
 		transition.emit(&"NotPeekState")
 
 
@@ -88,11 +92,10 @@ func visual_physics(delta: float) -> void:
 		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
 		player.update_velocity(Enums.IntegrationContext.VISUAL)
 	
-	# Direction derived from progress sign - works for remote clients
-	var anim_name := LEFT_ANIM if progress < 0 else RIGHT_ANIM
-	if animation_player.current_animation != anim_name:
-		animation_player.play(anim_name)
-	animation_player.seek(absf(progress), true)
+	# Set peek direction: -1.0 for left, 1.0 for right
+	var add_amount := -1.0 if progress < 0 else 1.0
+	animation_tree.set("parameters/Add Peek/add_amount", add_amount)
+	animation_tree.set("parameters/PeekTimeSeek/seek_request", absf(progress))
 
 
 func _target_direction() -> int:

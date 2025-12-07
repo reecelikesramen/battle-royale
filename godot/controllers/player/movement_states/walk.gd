@@ -12,7 +12,8 @@ func logic_enter() -> void:
 
 
 func visual_enter() -> void:
-	animation_player.play(&"Walk", -1, 1.0)
+	animation_tree.set("parameters/Movement/transition_request", "Idle")
+	camera_animation_player.play(&"Walk")
 
 
 func logic_physics(delta: float) -> void:
@@ -52,4 +53,4 @@ func visual_physics(delta: float) -> void:
 
 func _set_animation_speed(speed_sq: float) -> void:
 	var alpha = remap(speed_sq, 0.0, TOP_SPEED_SQ, 0.0, 1.0)
-	animation_player.speed_scale = lerp(0.0, TOP_ANIM_SPEED, alpha)
+	camera_animation_player.speed_scale = lerp(0.0, TOP_ANIM_SPEED, alpha)

@@ -31,13 +31,9 @@ func logic_enter() -> void:
 	# if player.is_authority: print("logic enter, progress: ", progress)
 
 
-func visual_exit() -> void:
-	if animation_player.has_animation(RESET_ANIM):
-		animation_player.play(RESET_ANIM)
-	else:
-		animation_player.stop()
-	animation_player.speed_scale = 1.0
-	# if player.is_authority: print("visual exit, progress: ", progress)
+func visual_enter() -> void:
+	animation_tree.set("parameters/Movement/transition_request", "Crouch")
+	camera_animation_player.stop()
 
 
 func logic_physics(delta: float) -> void:
@@ -79,8 +75,5 @@ func visual_physics(delta: float) -> void:
 		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
 		player.update_velocity(Enums.IntegrationContext.VISUAL)
 		
-	# Sync animation to logic progress
-	if animation_player.current_animation != CROUCH_ANIM:
-		animation_player.play(CROUCH_ANIM)
-	animation_player.seek(progress, true)
-	# if player.is_authority: print("visual physics, progress: ", progress)
+	# Sync animation to logic progress via TimeSeek
+	animation_tree.set("parameters/CrouchTimeSeek/seek_request", progress)

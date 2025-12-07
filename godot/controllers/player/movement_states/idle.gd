@@ -1,10 +1,8 @@
 extends MovementState
 
 func visual_enter() -> void:
-	#animation_player.play(&"RESET")
-	#animation_player.play("Idle")
-	#animation_player.pause()
-	pass
+	animation_tree.set("parameters/Movement/transition_request", "Idle")
+	camera_animation_player.stop()
 
 
 func logic_physics(delta: float) -> void:
