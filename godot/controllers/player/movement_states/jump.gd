@@ -5,13 +5,11 @@ extends MovementState
 @export var JUMP_VELOCITY := 4.5
 
 var _enter_time := -1
-var _enter_height := 0.0
 
 func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION)
 	player.game_velocity.y += JUMP_VELOCITY
 	_enter_time = Time.get_ticks_usec()
-	_enter_height = player.game_position.y
 
 
 func visual_enter() -> void:
@@ -33,9 +31,10 @@ func logic_transitions() -> void:
 		transition.emit(&"IdleMovementState")
 	
 	if player.input.is_prone_just_pressed():
+		print("prone")
 		transition.emit(&"ProneMovementState")
 	
-	if player.game_position.y < _enter_height:
+	if player.game_position.y < player.last_grounded_height:
 		transition.emit(&"FallMovementState")
 
 

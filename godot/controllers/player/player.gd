@@ -42,6 +42,8 @@ var is_authority: bool:
 var is_replaying_inputs: bool:
 	get: return _is_replaying_inputs
 
+var last_grounded_height: float = 0.0
+
 var context := Enums.IntegrationContext.VISUAL
 var input := PlayerInput.new()
 
@@ -399,7 +401,10 @@ func on_floor(ctx: Enums.IntegrationContext) -> bool:
 	if ctx == Enums.IntegrationContext.VISUAL:
 		return is_on_floor()
 	else:
-		return game_body.is_on_floor()
+		var _on_floor := game_body.is_on_floor()
+		if _on_floor:
+			last_grounded_height = game_body.global_position.y
+		return _on_floor
 
 
 # persistent local vars for performance

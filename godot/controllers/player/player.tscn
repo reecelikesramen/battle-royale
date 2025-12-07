@@ -794,7 +794,7 @@ parameters/PeekTimeSeek/seek_request = -1.0
 libraries = {
 &"": SubResource("AnimationLibrary_afx4e")
 }
-blend_times = [&"RESET", &"RESET", 0.1, &"RESET", &"Sprint", 0.1, &"RESET", &"Walk", 0.1, &"Sprint", &"Sprint", 0.1, &"Sprint", &"Walk", 0.1]
+blend_times = [&"RESET", &"RESET", 0.25, &"RESET", &"Sprint", 0.25, &"RESET", &"Walk", 0.25, &"Sprint", &"RESET", 0.25, &"Sprint", &"Sprint", 0.25, &"Sprint", &"Walk", 0.25, &"Walk", &"RESET", 0.25, &"Walk", &"Sprint", 0.25, &"Walk", &"Walk", 0.25]
 
 [node name="GUI" parent="." instance=ExtResource("2_jja72")]
 unique_name_in_owner = true

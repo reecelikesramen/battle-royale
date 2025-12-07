@@ -7,6 +7,7 @@ extends MovementState
 
 const CROUCH_ANIM := &"Crouch"
 const RESET_ANIM := &"RESET"
+const UNCROUCH_FALL_DISTANCE := 2.0
 
 var progress := 0.0
 
@@ -58,7 +59,7 @@ func logic_transitions() -> void:
 	_wants_to_uncrouch = !player.input.is_crouching()
 	
 	# TODO: make work with crouch jump
-	if not player.on_floor(Enums.IntegrationContext.GAME):
+	if not player.on_floor(Enums.IntegrationContext.GAME) and player.game_position.y < player.last_grounded_height - UNCROUCH_FALL_DISTANCE:
 		_wants_to_uncrouch = true
 
 	if _wants_to_uncrouch and progress <= 0.0:

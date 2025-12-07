@@ -8,6 +8,7 @@ extends MovementState
 const PRONE_ANIM := &"Prone2"
 const RESET_ANIM := &"RESET"
 const JUMP_PRONE_MODIFIER := 2.0
+const UNPRONE_FALL_DISTANCE := 2.0
 
 var progress := 0.0
 
@@ -63,7 +64,7 @@ func logic_transitions() -> void:
 		_wants_to_unprone = !_wants_to_unprone
 	
 	# TODO: make work with jump prone
-	if not player.on_floor(Enums.IntegrationContext.GAME):
+	if not player.on_floor(Enums.IntegrationContext.GAME) and player.game_position.y < player.last_grounded_height - UNPRONE_FALL_DISTANCE:
 		_wants_to_unprone = true
 
 	if _wants_to_unprone and progress <= 0.0:
