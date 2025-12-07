@@ -1,8 +1,9 @@
-[gd_scene load_steps=33 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene load_steps=49 format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://bmbvova1tm3y8" path="res://controllers/player/player.gd" id="1_icig3"]
 [ext_resource type="PackedScene" uid="uid://dqvg7w4c8u3oa" path="res://assets/mesh/fps_hands/fps_hands_rigged_by_evolvegames.glb" id="2_g7yr6"]
 [ext_resource type="PackedScene" uid="uid://trgd65vjwowf" path="res://ui/debug/debug.tscn" id="2_jja72"]
+[ext_resource type="PackedScene" uid="uid://cjlrm8h7knl1t" path="res://ui/escape_menu/escape_menu.tscn" id="4_6e1eu"]
 [ext_resource type="Script" uid="uid://d1a1jff1dcldq" path="res://controllers/player/movement_state_machine.gd" id="4_a1kld"]
 [ext_resource type="Script" uid="uid://c70m5pqrvihff" path="res://controllers/player/movement_states/idle.gd" id="6_6e1eu"]
 [ext_resource type="Script" uid="uid://6qifdlt057ir" path="res://controllers/player/movement_states/walk.gd" id="7_afx4e"]
@@ -532,7 +533,7 @@ tracks/3/keys = {
 tracks/4/type = "bezier"
 tracks/4/imported = false
 tracks/4/enabled = true
-tracks/4/path = NodePath("CameraController:position:x")
+tracks/4/path = NodePath("CameraController/Camera3D:position:x")
 tracks/4/interp = 1
 tracks/4/loop_wrap = true
 tracks/4/keys = {
@@ -543,18 +544,18 @@ tracks/4/keys = {
 tracks/5/type = "bezier"
 tracks/5/imported = false
 tracks/5/enabled = true
-tracks/5/path = NodePath("CameraController:position:y")
+tracks/5/path = NodePath("CameraController/Camera3D:position:y")
 tracks/5/interp = 1
 tracks/5/loop_wrap = true
 tracks/5/keys = {
 "handle_modes": PackedInt32Array(0),
-"points": PackedFloat32Array(1.5, -0.25, 0, 0.25, 0),
+"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
 "times": PackedFloat32Array(0)
 }
 tracks/6/type = "bezier"
 tracks/6/imported = false
 tracks/6/enabled = true
-tracks/6/path = NodePath("CameraController:position:z")
+tracks/6/path = NodePath("CameraController/Camera3D:position:z")
 tracks/6/interp = 1
 tracks/6/loop_wrap = true
 tracks/6/keys = {
@@ -562,106 +563,73 @@ tracks/6/keys = {
 "points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
 "times": PackedFloat32Array(0)
 }
-tracks/7/type = "bezier"
+tracks/7/type = "value"
 tracks/7/imported = false
 tracks/7/enabled = true
-tracks/7/path = NodePath("CameraController/Camera3D:position:x")
+tracks/7/path = NodePath("GameController/GameCollider:shape:height")
 tracks/7/interp = 1
 tracks/7/loop_wrap = true
 tracks/7/keys = {
-"handle_modes": PackedInt32Array(0),
-"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
-"times": PackedFloat32Array(0)
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [2.0]
 }
-tracks/8/type = "bezier"
+tracks/8/type = "value"
 tracks/8/imported = false
 tracks/8/enabled = true
-tracks/8/path = NodePath("CameraController/Camera3D:position:y")
+tracks/8/path = NodePath("GameController/GameCollider:position")
 tracks/8/interp = 1
 tracks/8/loop_wrap = true
 tracks/8/keys = {
-"handle_modes": PackedInt32Array(0),
-"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
-"times": PackedFloat32Array(0)
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector3(0, 1, 0)]
 }
-tracks/9/type = "bezier"
+tracks/9/type = "value"
 tracks/9/imported = false
 tracks/9/enabled = true
-tracks/9/path = NodePath("CameraController/Camera3D:position:z")
+tracks/9/path = NodePath("GameController/GameCollider/PlaceholderMesh:mesh:height")
 tracks/9/interp = 1
 tracks/9/loop_wrap = true
 tracks/9/keys = {
-"handle_modes": PackedInt32Array(0),
-"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
-"times": PackedFloat32Array(0)
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [2.0]
 }
 tracks/10/type = "value"
 tracks/10/imported = false
 tracks/10/enabled = true
-tracks/10/path = NodePath("GameController/GameCollider:shape:height")
+tracks/10/path = NodePath("VisualCollider:rotation")
 tracks/10/interp = 1
 tracks/10/loop_wrap = true
 tracks/10/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 0,
-"values": [2.0]
+"values": [Vector3(0, 0, 0)]
 }
 tracks/11/type = "value"
 tracks/11/imported = false
 tracks/11/enabled = true
-tracks/11/path = NodePath("GameController/GameCollider:position")
+tracks/11/path = NodePath("GameController/GameCollider:rotation")
 tracks/11/interp = 1
 tracks/11/loop_wrap = true
 tracks/11/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 0,
-"values": [Vector3(0, 1, 0)]
+"values": [Vector3(0, 0, 0)]
 }
 tracks/12/type = "value"
 tracks/12/imported = false
 tracks/12/enabled = true
-tracks/12/path = NodePath("GameController/GameCollider/PlaceholderMesh:mesh:height")
+tracks/12/path = NodePath("CameraController:rotation")
 tracks/12/interp = 1
 tracks/12/loop_wrap = true
 tracks/12/keys = {
-"times": PackedFloat32Array(0),
-"transitions": PackedFloat32Array(1),
-"update": 0,
-"values": [2.0]
-}
-tracks/13/type = "value"
-tracks/13/imported = false
-tracks/13/enabled = true
-tracks/13/path = NodePath("VisualCollider:rotation")
-tracks/13/interp = 1
-tracks/13/loop_wrap = true
-tracks/13/keys = {
-"times": PackedFloat32Array(0),
-"transitions": PackedFloat32Array(1),
-"update": 0,
-"values": [Vector3(0, 0, 0)]
-}
-tracks/14/type = "value"
-tracks/14/imported = false
-tracks/14/enabled = true
-tracks/14/path = NodePath("GameController/GameCollider:rotation")
-tracks/14/interp = 1
-tracks/14/loop_wrap = true
-tracks/14/keys = {
-"times": PackedFloat32Array(0),
-"transitions": PackedFloat32Array(1),
-"update": 0,
-"values": [Vector3(0, 0, 0)]
-}
-tracks/15/type = "value"
-tracks/15/imported = false
-tracks/15/enabled = true
-tracks/15/path = NodePath("CameraController:rotation")
-tracks/15/interp = 1
-tracks/15/loop_wrap = true
-tracks/15/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 0,
@@ -756,12 +724,114 @@ _data = {
 &"Walk": SubResource("Animation_jdr2h")
 }
 
+[sub_resource type="AnimationNodeAdd2" id="AnimationNodeAdd2_6e1eu"]
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_6e1eu"]
+animation = &"Crouch"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_fy606"]
+animation = &"RESET"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_afx4e"]
+animation = &"RESET"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_7eurj"]
+animation = &"PeekRight"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_271ko"]
+animation = &"Prone2"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_40vpa"]
+animation = &"Sprint"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_qdb0h"]
+animation = &"Walk"
+
+[sub_resource type="AnimationNodeAnimation" id="AnimationNodeAnimation_n0fl1"]
+animation = &"RESET"
+
+[sub_resource type="AnimationNodeTimeSeek" id="AnimationNodeTimeSeek_7eurj"]
+
+[sub_resource type="AnimationNodeTransition" id="AnimationNodeTransition_fy606"]
+xfade_time = 0.5
+input_0/name = "Idle"
+input_0/auto_advance = false
+input_0/break_loop_at_end = false
+input_0/reset = true
+input_1/name = "Walk"
+input_1/auto_advance = false
+input_1/break_loop_at_end = false
+input_1/reset = true
+input_2/name = "Sprint"
+input_2/auto_advance = false
+input_2/break_loop_at_end = false
+input_2/reset = true
+input_3/name = "Crouch"
+input_3/auto_advance = false
+input_3/break_loop_at_end = false
+input_3/reset = true
+input_4/name = "Prone"
+input_4/auto_advance = false
+input_4/break_loop_at_end = false
+input_4/reset = true
+input_5/name = "Fall"
+input_5/auto_advance = false
+input_5/break_loop_at_end = false
+input_5/reset = true
+
+[sub_resource type="AnimationNodeTimeSeek" id="AnimationNodeTimeSeek_6e1eu"]
+
+[sub_resource type="AnimationNodeTransition" id="AnimationNodeTransition_6e1eu"]
+input_0/name = "Not Peek"
+input_0/auto_advance = false
+input_0/break_loop_at_end = false
+input_0/reset = true
+input_1/name = "Peek"
+input_1/auto_advance = false
+input_1/break_loop_at_end = false
+input_1/reset = true
+
+[sub_resource type="AnimationNodeTimeSeek" id="AnimationNodeTimeSeek_n0fl1"]
+
+[sub_resource type="AnimationNodeBlendTree" id="AnimationNodeBlendTree_6e1eu"]
+graph_offset = Vector2(-288.60864, -182.32399)
+nodes/output/position = Vector2(800, 370)
+nodes/Movement/node = SubResource("AnimationNodeTransition_fy606")
+nodes/Movement/position = Vector2(179.92107, 134.40173)
+nodes/AnimIdle/node = SubResource("AnimationNodeAnimation_afx4e")
+nodes/AnimIdle/position = Vector2(-270, -230)
+nodes/AnimWalk/node = SubResource("AnimationNodeAnimation_qdb0h")
+nodes/AnimWalk/position = Vector2(-270, -70)
+nodes/AnimSprint/node = SubResource("AnimationNodeAnimation_40vpa")
+nodes/AnimSprint/position = Vector2(-270, 90)
+nodes/AnimCrouch/node = SubResource("AnimationNodeAnimation_6e1eu")
+nodes/AnimCrouch/position = Vector2(-270, 250)
+nodes/AnimProne/node = SubResource("AnimationNodeAnimation_271ko")
+nodes/AnimProne/position = Vector2(-270, 410)
+nodes/AnimFall/node = SubResource("AnimationNodeAnimation_fy606")
+nodes/AnimFall/position = Vector2(-270, 570)
+nodes/CrouchTimeSeek/node = SubResource("AnimationNodeTimeSeek_7eurj")
+nodes/CrouchTimeSeek/position = Vector2(-100, 240)
+nodes/ProneTimeSeek/node = SubResource("AnimationNodeTimeSeek_n0fl1")
+nodes/ProneTimeSeek/position = Vector2(-100, 420)
+nodes/Peeking/node = SubResource("AnimationNodeTransition_6e1eu")
+nodes/Peeking/position = Vector2(180, 840)
+nodes/AnimPeek/node = SubResource("AnimationNodeAnimation_7eurj")
+nodes/AnimPeek/position = Vector2(-270, 960)
+nodes/PeekTimeSeek/node = SubResource("AnimationNodeTimeSeek_6e1eu")
+nodes/PeekTimeSeek/position = Vector2(-100, 950)
+nodes/Animation/node = SubResource("AnimationNodeAnimation_n0fl1")
+nodes/Animation/position = Vector2(-270, 780)
+"nodes/Add Peek/node" = SubResource("AnimationNodeAdd2_6e1eu")
+"nodes/Add Peek/position" = Vector2(500, 360)
+node_connections = [&"output", 0, &"Add Peek", &"Movement", 0, &"AnimIdle", &"Movement", 1, &"AnimWalk", &"Movement", 2, &"AnimSprint", &"Movement", 3, &"CrouchTimeSeek", &"Movement", 4, &"ProneTimeSeek", &"Movement", 5, &"AnimFall", &"CrouchTimeSeek", 0, &"AnimCrouch", &"ProneTimeSeek", 0, &"AnimProne", &"Peeking", 0, &"Animation", &"Peeking", 1, &"PeekTimeSeek", &"PeekTimeSeek", 0, &"AnimPeek", &"Add Peek", 0, &"Movement", &"Add Peek", 1, &"Peeking"]
+
 [node name="PlayerController" type="CharacterBody3D"]
 slide_on_ceiling = false
 script = ExtResource("1_icig3")
 FRICTION = 6.5
 STOP_SPEED = 0.7
-TOGGLE_PEEK = true
+TOGGLE_CROUCH = true
 
 [node name="VisualCollider" type="CollisionShape3D" parent="."]
 transform = Transform3D(0.99999994, 0, 0, 0, 0.99999994, 0, 0, 0, 1, 0, 1, 0)
@@ -815,8 +885,25 @@ libraries = {
 &"": SubResource("AnimationLibrary_xc2pf")
 }
 
+[node name="AnimationTree" type="AnimationTree" parent="."]
+tree_root = SubResource("AnimationNodeBlendTree_6e1eu")
+anim_player = NodePath("../AnimationPlayer")
+parameters/Movement/current_state = "Idle"
+parameters/Movement/transition_request = ""
+parameters/Movement/current_index = 0
+parameters/CrouchTimeSeek/seek_request = -1.0
+parameters/ProneTimeSeek/seek_request = -1.0
+parameters/Peeking/current_state = "Not Peek"
+parameters/Peeking/transition_request = ""
+parameters/Peeking/current_index = 0
+parameters/PeekTimeSeek/seek_request = -1.0
+"parameters/Add Peek/add_amount" = 0.0
+
 [node name="GUI" parent="." instance=ExtResource("2_jja72")]
 unique_name_in_owner = true
+
+[node name="EscapeMenu" parent="." instance=ExtResource("4_6e1eu")]
+visible = false
 
 [node name="MovementStateMachine" type="Node" parent="." node_paths=PackedStringArray("INITIAL_STATE")]
 unique_name_in_owner = true

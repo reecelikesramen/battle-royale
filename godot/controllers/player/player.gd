@@ -106,6 +106,7 @@ func _ready():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	else:
 		call_deferred("remove_child", %GUI)
+		call_deferred("remove_child", $EscapeMenu)
 		camera.call_deferred("remove_child", $CameraController/Camera3D/ReflectionProbe)
 		if not NetworkTransport.is_server:
 			call_deferred("remove_child", $GameController)

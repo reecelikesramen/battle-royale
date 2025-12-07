@@ -1,0 +1,100 @@
+[gd_scene load_steps=5 format=3 uid="uid://cjlrm8h7knl1t"]
+
+[ext_resource type="Theme" uid="uid://rai2e421dmte" path="res://ui/themes/main_menu.tres" id="1_1yra2"]
+[ext_resource type="Script" uid="uid://cqwjgcdirm54s" path="res://ui/escape_menu/escape_menu.gd" id="1_g21w1"]
+[ext_resource type="Texture2D" uid="uid://dfxutwkcgtsav" path="res://assets/icons/gear-solid-full.svg" id="2_g21w1"]
+[ext_resource type="Texture2D" uid="uid://ck0ludtevgqo3" path="res://assets/icons/right-from-bracket-solid-full.svg" id="3_3548v"]
+
+[node name="ToggleUI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_1yra2")
+script = ExtResource("1_g21w1")
+ACTION_NAME = &"toggle_menu"
+metadata/_custom_type_script = "uid://btd1eharrdpb6"
+
+[node name="TransparentOverlay" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0.039215688, 0.47058824)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="TopHBox" type="HBoxContainer" parent="VBoxContainer/PanelContainer"]
+layout_mode = 2
+alignment = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="VBoxContainer/PanelContainer/TopHBox"]
+layout_mode = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/PanelContainer/TopHBox/PanelContainer"]
+layout_mode = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="VBoxContainer/PanelContainer/TopHBox/PanelContainer/MarginContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+
+[node name="OptionsButton" type="Button" parent="VBoxContainer/PanelContainer/TopHBox/PanelContainer/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "Options"
+icon = ExtResource("2_g21w1")
+icon_alignment = 2
+expand_icon = true
+
+[node name="ExitButton" type="Button" parent="VBoxContainer/PanelContainer/TopHBox/PanelContainer/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "Exit"
+icon = ExtResource("3_3548v")
+icon_alignment = 2
+expand_icon = true
+
+[node name="OptionsAreaHBox" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="VBoxContainer/OptionsAreaHBox"]
+layout_mode = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/OptionsAreaHBox/PanelContainer"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer"]
+layout_mode = 2
+
+[node name="GameplaySettingsButton" type="Button" parent="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Gameplay
+"
+
+[node name="DisplaySettingsButton" type="Button" parent="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Display"
+
+[node name="GraphicsSettingsButton" type="Button" parent="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Graphics"
+
+[node name="AudioSettingsButton" type="Button" parent="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Audio"
+
+[connection signal="pressed" from="VBoxContainer/PanelContainer/TopHBox/PanelContainer/MarginContainer/HBoxContainer/OptionsButton" to="." method="_on_options_button_pressed"]
+[connection signal="pressed" from="VBoxContainer/PanelContainer/TopHBox/PanelContainer/MarginContainer/HBoxContainer/ExitButton" to="." method="_on_exit_button_pressed"]
