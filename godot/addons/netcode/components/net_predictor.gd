@@ -21,6 +21,17 @@ var is_replaying_inputs: bool = false
 # full snapshot.
 var last_received_tick: int = 0
 
+# Sequence id of the latest input the server confirmed it had applied when it
+# built this snapshot. Drives input ack-and-replay on the authority client and
+# enables prune-up-to on unacked_inputs. Was previously carried by
+# PlayerStatePacket.last_input_sequence_id; now sourced from NetStatePacket.
+var last_input_seq: int = -1
+
+# Fires after handle_net_state_packet has decoded an inbound snapshot into
+# shadow_state. Subscribers (player controller, debug overlays) react to a
+# fresh server view. Passes (shadow_state, last_input_seq, new_tick).
+signal state_snapshot_received(state: NetState, last_input_seq: int, new_tick: int)
+
 # Inspector-authored schema describing this entity's state + command shape,
 # tick rates, codec metadata, and reconcile channels. Set externally before
 # _ready. state_class and command_class accessors below pull from the schema.
@@ -105,14 +116,6 @@ var game_velocity := Vector3.ZERO
 var game_movement_state_id: int = 0
 var game_sequence_id: int = 65535
 
-# Last NetStatePacket payload received from the server. Phase 6b stops here:
-# the snapshot round-trips end-to-end via NetStatePacket so the wire format is
-# proven, but the predictor still reconciles off the per-entity packets the
-# controller already wires (e.g. PlayerStatePacket). Phase 6b.2 swaps the
-# reconcile source onto this payload.
-var last_net_state_payload: PackedByteArray = PackedByteArray()
-
-
 # Serialize shadow_state into a payload via per-field reflection over the
 # discovered state_field_names. Phase 6b: full snapshot, self-describing Variant
 # encoding. Phase 6b.3 swaps in dirty-mask + delta against the per-client
@@ -126,12 +129,26 @@ func snapshot_payload() -> PackedByteArray:
 	return sp.data_array
 
 
-# Decode an inbound NetStatePacket. Currently just stashes the payload; Phase
-# 6b.2 wires it into the reconcile path. Server tick comes from the packet's
-# new_tick field (replaces the NetTimeline.server_tick proxy from 6a).
+# Mutates `state` in-place by reading one Variant per state_field_name from
+# `payload`. Encoder mirror; used by handle_net_state_packet and snapshot tests.
+func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
+	if state == null or payload.is_empty():
+		return
+	var sp := StreamPeerBuffer.new()
+	sp.data_array = payload
+	for fname in state_field_names:
+		state.set(fname, sp.get_var())
+
+
+# Decode an inbound NetStatePacket directly into shadow_state, update tick +
+# input-ack bookkeeping, then notify subscribers. Phase 6b.4 will swap the
+# player controller's reconcile reads onto shadow_state and retire
+# PlayerStatePacket entirely.
 func handle_net_state_packet(packet) -> void:
-	last_net_state_payload = packet.payload
 	last_received_tick = packet.new_tick
+	last_input_seq = packet.last_input_seq
+	decode_payload_into(shadow_state, packet.payload)
+	state_snapshot_received.emit(shadow_state, last_input_seq, last_received_tick)
 
 
 # Broadcast this entity's current shadow state. Server-side; called from the
