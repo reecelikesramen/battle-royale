@@ -41,6 +41,10 @@ define_packet! {
         peek_left_right: {
             godot: f64,
             wire: i8,
+        },
+        last_received_tick: {
+            godot: i64,
+            wire: u32,
         }
     },
     codec: postcard

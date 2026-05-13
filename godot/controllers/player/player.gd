@@ -229,6 +229,7 @@ func _client_authority_physics_step(delta: float) -> void:
 		player_input.crouch = Input.is_action_pressed("crouch")
 	player_input.sprint = Input.is_action_pressed("sprint")
 	player_input.prone = Input.is_action_pressed("prone")
+	player_input.last_received_tick = _net.last_received_tick
 	_net.unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)
 
 	_net.input_redundancy_ring.append(player_input)
@@ -518,6 +519,8 @@ func client_handle_player_state(player_state: PlayerStatePacket) -> void:
 	# not owner
 	if _owner_id != player_state.player_id:
 		return
+
+	_net.last_received_tick = NetTimeline.server_tick
 
 	if is_authority:
 		var ack_sequence := player_state.last_input_sequence_id

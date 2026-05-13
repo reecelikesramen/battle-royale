@@ -11,6 +11,12 @@ var owner_id: int = -1
 # Authority + replay flags read by states & systems.
 var is_replaying_inputs: bool = false
 
+# Server tick we last received a state snapshot for. Echoed in every outbound
+# input so the server can advance its per-client baseline and delta-encode the
+# next NetStatePacket against it. 0 = no snapshot acked yet -> server sends
+# full snapshot.
+var last_received_tick: int = 0
+
 # Inspector-authored schema describing this entity's state + command shape,
 # tick rates, codec metadata, and reconcile channels. Set externally before
 # _ready. state_class and command_class accessors below pull from the schema.

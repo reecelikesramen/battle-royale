@@ -18,3 +18,5 @@ class_name PlayerInput extends NetCommand
 @export var prone: bool = false
 
 @export var peek_left_right: float = 0.0
+
+@export var last_received_tick: int = 0

@@ -13,6 +13,7 @@ pub(crate) enum PacketId {
     PlayerState,
     PlayerDisconnected,
     ServerTick,
+    NetState,
     Null,
 }
 
@@ -23,6 +24,7 @@ pub(crate) enum Packet {
     Chat(ChatPacketWire),
     PlayerDisconnected(PlayerDisconnectedPacketWire),
     ServerTick(ServerTickPacketWire),
+    NetState(NetStatePacketWire),
     Null(NullPacketWire),
 }
 
@@ -35,6 +37,7 @@ impl Packet {
             Packet::Chat(_) => PacketId::Chat,
             Packet::PlayerDisconnected(_) => PacketId::PlayerDisconnected,
             Packet::ServerTick(_) => PacketId::ServerTick,
+            Packet::NetState(_) => PacketId::NetState,
             Packet::Null(_) => PacketId::Null,
         }
     }
@@ -47,6 +50,7 @@ impl Packet {
             Packet::Chat(_) => ChatPacketWire::IS_RELIABLE,
             Packet::PlayerDisconnected(_) => PlayerDisconnectedPacketWire::IS_RELIABLE,
             Packet::ServerTick(_) => ServerTickPacketWire::IS_RELIABLE,
+            Packet::NetState(_) => NetStatePacketWire::IS_RELIABLE,
             Packet::Null(_) => NullPacketWire::IS_RELIABLE,
         }
     }
@@ -60,6 +64,7 @@ impl Packet {
             Packet::Chat(packet) => packet.encode(),
             Packet::PlayerDisconnected(packet) => packet.encode(),
             Packet::ServerTick(packet) => packet.encode(),
+            Packet::NetState(packet) => packet.encode(),
             Packet::Null(packet) => packet.encode(),
         });
         bytes
@@ -89,6 +94,7 @@ impl Packet {
                 PlayerDisconnectedPacketWire::decode(packet_data)?,
             )),
             PacketId::ServerTick => Ok(Packet::ServerTick(ServerTickPacketWire::decode(packet_data)?)),
+            PacketId::NetState => Ok(Packet::NetState(NetStatePacketWire::decode(packet_data)?)),
             PacketId::Null => Ok(Packet::Null(NullPacketWire::decode(packet_data)?)),
         }
     }
@@ -101,6 +107,7 @@ impl Packet {
             Packet::Chat(packet) => packet.as_gd(),
             Packet::PlayerDisconnected(packet) => packet.as_gd(),
             Packet::ServerTick(packet) => packet.as_gd(),
+            Packet::NetState(packet) => packet.as_gd(),
             Packet::Null(packet) => packet.as_gd(),
         }
     }
