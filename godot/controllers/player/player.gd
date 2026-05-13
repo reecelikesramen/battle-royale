@@ -59,7 +59,8 @@ var _x_mouse_input: float
 var _y_mouse_input: float
 
 # look absolute for camera and player rotation
-var _look_abs: Vector2 = Vector2()
+var _look_abs := Vector2.ZERO
+var _free_look_abs := Vector2.ZERO
 
 # used only for toggle crouch, if not using toggle crouch always false
 var _is_toggle_crouched := false
@@ -74,7 +75,7 @@ var game_transform: Transform3D = Transform3D()
 var game_position: Vector3:
 	get: return game_transform.origin
 	set(value): game_transform.origin = value
-var game_velocity: Vector3 = Vector3()
+var game_velocity := Vector3.ZERO
 var game_movement_state_id: int = 0
 var game_sequence_id: int = 65535
 
@@ -191,9 +192,16 @@ func _server_physics_step(delta: float) -> void:
 var _prev_client_input: PlayerInputPacket = null
 func _client_authority_physics_step(delta: float) -> void:
 	# camera movement integration
-	_look_abs.x += _y_mouse_input * delta
-	_look_abs.x = clamp(_look_abs.x, TILT_LOWER_LIMIT, TILT_UPPER_LIMIT)
-	_look_abs.y += _x_mouse_input * delta
+	var look := _free_look_abs if Input.is_action_pressed("free_look") else _look_abs
+	look.x += _y_mouse_input * delta
+	look.x = clamp(look.x, TILT_LOWER_LIMIT, TILT_UPPER_LIMIT)
+	look.y += _x_mouse_input * delta
+	
+	if not Input.is_action_pressed("free_look"):
+		_look_abs = look
+		_free_look_abs = _free_look_abs.lerp(Vector2.ZERO, 0.5 * delta)
+	else:
+		_free_look_abs = look
 
 	var player_input := PlayerInputPacket.new()
 	player_input.sequence_id = _input_sequence.next()
@@ -413,6 +421,10 @@ var _camera_rotation: Vector3 = Vector3.ZERO
 func update_camera(look_abs: Vector2) -> void:
 	_player_rotation.y = look_abs.y
 	_camera_rotation.x = look_abs.x
+	if is_authority:
+		var free_look := Vector3(_free_look_abs.x, _free_look_abs.y, 0.0)
+		print(free_look)
+		$CameraController.basis = Basis.from_euler(free_look)
 	
 	camera.transform.basis = Basis.from_euler(_camera_rotation)
 	camera.rotation.z = 0

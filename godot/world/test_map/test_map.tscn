@@ -1,6 +1,7 @@
-[gd_scene load_steps=35 format=3 uid="uid://j7crtp8h0nc8"]
+[gd_scene load_steps=36 format=3 uid="uid://j7crtp8h0nc8"]
 
 [ext_resource type="Environment" uid="uid://b8030pxcma3ij" path="res://assets/environment/WE_test.tres" id="1_0xm2m"]
+[ext_resource type="PackedScene" uid="uid://0khchil1lxqs" path="res://assets/mesh/player/player_mesh.tscn" id="1_pxb0g"]
 [ext_resource type="Material" uid="uid://coj2xaqc2thxc" path="res://assets/material/grid.tres" id="2_h2yge"]
 [ext_resource type="Shader" uid="uid://dvq3trjwd367g" path="res://assets/shader/grid.gdshader" id="3_1bvp3"]
 [ext_resource type="Texture2D" uid="uid://cewyuaqy0fesh" path="res://assets/texture/grid.jpg" id="4_lquwl"]
@@ -546,6 +547,8 @@ material = SubResource("ShaderMaterial_cegan")
 size = Vector3(21, 4, 0.25)
 
 [node name="Node3D" type="Node3D"]
+
+[node name="Meshy_Merged_Animations" parent="." instance=ExtResource("1_pxb0g")]
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = ExtResource("1_0xm2m")
