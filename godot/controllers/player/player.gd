@@ -85,6 +85,11 @@ var _player_state_buffer := SequenceRingBuffer.new()
 var _input_sequence := PacketSequence.new()
 var _unacked_inputs := SequenceRingBuffer.new()
 
+# Send last N inputs per tick so single-packet loss within an N-tick window is
+# recovered by the next packet. Server JitterBuffer dedupes by sequence_id.
+const INPUT_REDUNDANCY: int = 3
+var _input_redundancy_ring: Array[PlayerInputPacket] = []
+
 func _enter_tree() -> void:
 	NetworkServer.handle_player_input.connect(server_handle_player_input)
 	NetworkClient.handle_player_state.connect(client_handle_player_state)
@@ -233,7 +238,13 @@ func _client_authority_physics_step(delta: float) -> void:
 	player_input.sprint = Input.is_action_pressed("sprint")
 	player_input.prone = Input.is_action_pressed("prone")
 	_unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)
-	NetworkTransport.send_packet(player_input.to_payload())
+
+	_input_redundancy_ring.append(player_input)
+	if _input_redundancy_ring.size() > INPUT_REDUNDANCY:
+		_input_redundancy_ring.pop_front()
+	for redundant_input in _input_redundancy_ring:
+		NetworkTransport.send_packet(redundant_input.to_payload())
+
 	input.prev_input_packet = _prev_client_input
 	_prev_client_input = player_input
 	input.input_packet = player_input
