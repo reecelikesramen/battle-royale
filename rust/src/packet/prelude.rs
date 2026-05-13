@@ -3,7 +3,6 @@ pub(crate) use super::packet::Packet;
 pub(crate) use super::gd_packet::GdPacket;
 pub(super) use super::packet_data::PacketData;
 pub(crate) use super::null::NullPacketWire;
-pub(crate) use super::chat::ChatPacketWire;
 pub(crate) use super::id_assignment::IdAssignmentPacketWire;
 pub(crate) use super::player_disconnected::PlayerDisconnectedPacketWire;
 pub(crate) use super::player_input::PlayerInputPacketWire;

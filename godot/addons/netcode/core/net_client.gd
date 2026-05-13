@@ -6,7 +6,6 @@ signal handle_player_disconnected(player_id: int)
 signal handle_net_state(packet: NetStatePacket)
 signal handle_net_reliable(packet: NetReliablePacket)
 signal handle_server_tick(tick: ServerTickPacket)
-signal handle_chat(message: ChatPacket)
 signal handle_disconnect_from_server()
 signal self_spawned()
 
@@ -36,8 +35,6 @@ func on_client_packet(data) -> void:
 		handle_net_reliable.emit(data)
 	elif data is ServerTickPacket:
 		handle_server_tick.emit(data)
-	elif data is ChatPacket:
-		handle_chat.emit(data)
 	elif data is PlayerDisconnectedPacket:
 		handle_player_disconnected.emit(data.player_id)
 	else:

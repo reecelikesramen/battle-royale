@@ -12,6 +12,17 @@ func _ready() -> void:
 	NetworkClient.handle_remote_id_assignment.connect(spawn_player)
 	NetworkClient.handle_player_disconnected.connect(despawn_player)
 
+	# Phase 9b: server-side reliable RPC fan-out. Chat is the first user — when
+	# a peer sends, the server re-broadcasts the same payload to all peers so
+	# every client sees it. Fresh idem_key per fan-out is fine; the hub's per-
+	# topic dedup ring isolates client and server views.
+	if NetworkTransport.is_server:
+		NetReliableHub.subscribe(Enums.ReliableTopic.CHAT, _relay_chat_to_clients)
+
+
+func _relay_chat_to_clients(_peer_id: int, payload: PackedByteArray) -> void:
+	NetReliableHub.broadcast(Enums.ReliableTopic.CHAT, payload)
+
 
 func spawn_player(id: int) -> void:
 	var player: PlayerController = PLAYER.instantiate()
