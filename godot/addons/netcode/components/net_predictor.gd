@@ -56,6 +56,11 @@ var command_field_names: PackedStringArray = PackedStringArray()
 # this list after the state_fields block.
 var _resolved_children: Array = []
 
+# Phase 8c: per-child baseline values for delta encoding. Parallel to
+# _resolved_children: entry i is a Dictionary{field_name: last_broadcast_value}.
+# Populated/updated by server_broadcast_snapshot alongside _last_broadcasted_state.
+var _last_child_values: Array = []
+
 
 func _ready() -> void:
 	if state_class:
@@ -79,6 +84,7 @@ func _ready() -> void:
 # rest so a broken NetChildRef doesn't take the whole entity offline.
 func _resolve_children() -> void:
 	_resolved_children.clear()
+	_last_child_values.clear()
 	if schema == null or get_parent() == null:
 		return
 	for cref in schema.child_refs:
@@ -87,6 +93,7 @@ func _resolve_children() -> void:
 			push_warning("NetChildRef '%s' path '%s' did not resolve" % [cref.name, cref.path])
 			continue
 		_resolved_children.append([node, cref.fields])
+		_last_child_values.append({})
 
 
 func _exit_tree() -> void:
@@ -161,9 +168,13 @@ var _history_ticks: Array[int] = []    # insertion order, used for FIFO prune
 
 # Wire format for snapshot_payload / decode_payload_into:
 #   byte 0:  is_keyframe (1 = full snapshot, 0 = delta)
-#   keyframe:  put_var per state_field_name, in order
-#   delta:     ceil(N/8) bytes of dirty_mask, then put_var for each set bit
+#   keyframe:  put_var per state_field_name, then per child-ref field, in order
+#   delta:     ceil(N_total/8) bytes of dirty_mask covering [state_fields...,
+#              child_0_fields..., child_1_fields..., ...]; then put_var for each
+#              set bit, in the same order.
 #
+# Phase 8c: child-ref fields share the dirty mask with state_fields so unchanged
+# child properties (e.g. an idle AnimationTree blend) cost only a bit per tick.
 # Per-field quantization will land in a follow-on commit; AUTO Variant encoding
 # is used everywhere for now.
 func snapshot_payload(force_keyframe: bool = false) -> PackedByteArray:
@@ -177,32 +188,49 @@ func snapshot_payload(force_keyframe: bool = false) -> PackedByteArray:
 		sp.put_u8(1)
 		for fname in state_field_names:
 			sp.put_var(shadow_state.get(fname))
+		for entry in _resolved_children:
+			var node: Node = entry[0]
+			for f in entry[1]:
+				sp.put_var(node.get(f))
 	else:
 		sp.put_u8(0)
-		var n := state_field_names.size()
-		var mask_bytes := (n + 7) / 8
+		var n_state := state_field_names.size()
+		var n_total := n_state
+		for entry in _resolved_children:
+			n_total += entry[1].size()
+		var mask_bytes := (n_total + 7) / 8
 		var mask := PackedByteArray()
 		mask.resize(mask_bytes)
-		for i in n:
+		for i in n_state:
 			if shadow_state.get(state_field_names[i]) != _last_broadcasted_state.get(state_field_names[i]):
 				mask[i / 8] = mask[i / 8] | (1 << (i % 8))
+		var bit_idx := n_state
+		for child_i in _resolved_children.size():
+			var node: Node = _resolved_children[child_i][0]
+			var fields: PackedStringArray = _resolved_children[child_i][1]
+			var last: Dictionary = _last_child_values[child_i] if child_i < _last_child_values.size() else {}
+			for f in fields:
+				var cur = node.get(f)
+				if not last.has(f) or last[f] != cur:
+					mask[bit_idx / 8] = mask[bit_idx / 8] | (1 << (bit_idx % 8))
+				bit_idx += 1
 		sp.put_data(mask)
-		for i in n:
+		for i in n_state:
 			if mask[i / 8] & (1 << (i % 8)):
 				sp.put_var(shadow_state.get(state_field_names[i]))
-	# Phase 8a: child-ref fields are written unconditionally after state block.
-	# Phase 8c will fold them into the dirty mask for proper delta savings.
-	for entry in _resolved_children:
-		var node: Node = entry[0]
-		var fields: PackedStringArray = entry[1]
-		for f in fields:
-			sp.put_var(node.get(f))
+		bit_idx = n_state
+		for child_i in _resolved_children.size():
+			var node: Node = _resolved_children[child_i][0]
+			var fields: PackedStringArray = _resolved_children[child_i][1]
+			for f in fields:
+				if mask[bit_idx / 8] & (1 << (bit_idx % 8)):
+					sp.put_var(node.get(f))
+				bit_idx += 1
 	return sp.data_array
 
 
 # Mutates `state` in-place. Keyframe payloads overwrite every field; delta
-# payloads only touch fields with their dirty bit set, leaving the rest at
-# their current (post-prior-decode) values.
+# payloads only touch fields (state or child) with their dirty bit set.
 func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 	if state == null or payload.is_empty():
 		return
@@ -212,22 +240,29 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 	if is_keyframe:
 		for fname in state_field_names:
 			state.set(fname, sp.get_var())
+		for entry in _resolved_children:
+			var node: Node = entry[0]
+			for f in entry[1]:
+				node.set(f, sp.get_var())
 	else:
-		var n := state_field_names.size()
-		var mask_bytes := (n + 7) / 8
+		var n_state := state_field_names.size()
+		var n_total := n_state
+		for entry in _resolved_children:
+			n_total += entry[1].size()
+		var mask_bytes := (n_total + 7) / 8
 		var mask_pair: Array = sp.get_data(mask_bytes)
 		var mask: PackedByteArray = mask_pair[1]
-		for i in n:
+		for i in n_state:
 			if mask[i / 8] & (1 << (i % 8)):
 				state.set(state_field_names[i], sp.get_var())
-	# Phase 8a: matching read of child-ref fields appended by the encoder in
-	# both keyframe and delta modes. Child decode runs unconditionally after
-	# the state block.
-	for entry in _resolved_children:
-		var node: Node = entry[0]
-		var fields: PackedStringArray = entry[1]
-		for f in fields:
-			node.set(f, sp.get_var())
+		var bit_idx := n_state
+		for entry in _resolved_children:
+			var node: Node = entry[0]
+			var fields: PackedStringArray = entry[1]
+			for f in fields:
+				if mask[bit_idx / 8] & (1 << (bit_idx % 8)):
+					node.set(f, sp.get_var())
+				bit_idx += 1
 
 
 # Decode an inbound NetStatePacket directly into shadow_state, update tick +
@@ -264,6 +299,16 @@ func server_broadcast_snapshot(last_input_seq: int) -> void:
 	# duplicate() snapshots shadow_state so subsequent in-place mutation by the
 	# sim doesn't poison the baseline mid-tick.
 	_last_broadcasted_state = shadow_state.duplicate()
+	# Phase 8c: child baselines mirror the state baseline so the next snapshot's
+	# dirty mask correctly identifies child-field changes.
+	for child_i in _resolved_children.size():
+		var node: Node = _resolved_children[child_i][0]
+		var fields: PackedStringArray = _resolved_children[child_i][1]
+		while _last_child_values.size() <= child_i:
+			_last_child_values.append({})
+		var baseline: Dictionary = _last_child_values[child_i]
+		for f in fields:
+			baseline[f] = node.get(f)
 	_record_history(packet.new_tick, _last_broadcasted_state)
 	if is_keyframe_now:
 		_ticks_since_keyframe = 1

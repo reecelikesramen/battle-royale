@@ -169,6 +169,50 @@ func test_child_ref_round_trip() -> void:
 	dst_probe.free()
 
 
+func test_delta_omits_unchanged_child_fields() -> void:
+	# Phase 8c: child-ref fields share the dirty mask with state_fields. When a
+	# child property matches the prior broadcast, it should cost only a mask bit
+	# (no put_var write).
+	var probe := Node3D.new()
+	probe.position = Vector3(1.0, 2.0, 3.0)
+
+	var sender: NetPredictor = _make_predictor()
+	sender._resolved_children.append([probe, PackedStringArray(["position"])])
+	sender._last_child_values.append({})
+
+	# First call: keyframe, sets up baselines for both state + child.
+	var keyframe_payload: PackedByteArray = sender.snapshot_payload()
+	sender._last_broadcasted_state = sender.shadow_state.duplicate()
+	sender._ticks_since_keyframe = 1
+	sender._last_child_values[0]["position"] = probe.position
+
+	# Unchanged state + unchanged child: delta is mask-only.
+	var unchanged_delta: PackedByteArray = sender.snapshot_payload()
+
+	# Now mutate the child only. Delta should grow vs unchanged but stay under
+	# the keyframe size.
+	probe.position = Vector3(7.0, 8.0, 9.0)
+	var changed_child_delta: PackedByteArray = sender.snapshot_payload()
+	assert_true(changed_child_delta.size() > unchanged_delta.size(),
+			"child change should grow delta (unchanged=%d changed=%d)" % [unchanged_delta.size(), changed_child_delta.size()])
+	assert_true(changed_child_delta.size() < keyframe_payload.size(),
+			"child-only delta should still be smaller than keyframe (delta=%d kf=%d)" % [changed_child_delta.size(), keyframe_payload.size()])
+
+	# End-to-end apply: keyframe -> unchanged delta -> changed delta.
+	var receiver_probe := Node3D.new()
+	var receiver: NetPredictor = _make_predictor()
+	receiver._resolved_children.append([receiver_probe, PackedStringArray(["position"])])
+	receiver._last_child_values.append({})
+	receiver.decode_payload_into(receiver.shadow_state, keyframe_payload)
+	receiver.decode_payload_into(receiver.shadow_state, unchanged_delta)
+	assert_vec3_approx(receiver_probe.position, Vector3(1.0, 2.0, 3.0), 0.0001, "unchanged delta clobbered child")
+	receiver.decode_payload_into(receiver.shadow_state, changed_child_delta)
+	assert_vec3_approx(receiver_probe.position, Vector3(7.0, 8.0, 9.0), 0.0001, "child delta failed to apply")
+
+	probe.free()
+	receiver_probe.free()
+
+
 func _make_predictor() -> NetPredictor:
 	var p := NetPredictor.new()
 	p.schema = PlayerSchema.build()
