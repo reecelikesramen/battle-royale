@@ -10,7 +10,6 @@ pub(crate) enum PacketId {
     IdAssignment,
     Chat,
     PlayerInput,
-    PlayerState,
     PlayerDisconnected,
     ServerTick,
     NetState,
@@ -20,7 +19,6 @@ pub(crate) enum PacketId {
 pub(crate) enum Packet {
     IdAssignment(IdAssignmentPacketWire),
     PlayerInput(PlayerInputPacketWire),
-    PlayerState(PlayerStatePacketWire),
     Chat(ChatPacketWire),
     PlayerDisconnected(PlayerDisconnectedPacketWire),
     ServerTick(ServerTickPacketWire),
@@ -33,7 +31,6 @@ impl Packet {
         match self {
             Packet::IdAssignment(_) => PacketId::IdAssignment,
             Packet::PlayerInput(_) => PacketId::PlayerInput,
-            Packet::PlayerState(_) => PacketId::PlayerState,
             Packet::Chat(_) => PacketId::Chat,
             Packet::PlayerDisconnected(_) => PacketId::PlayerDisconnected,
             Packet::ServerTick(_) => PacketId::ServerTick,
@@ -46,7 +43,6 @@ impl Packet {
         match self {
             Packet::IdAssignment(_) => IdAssignmentPacketWire::IS_RELIABLE,
             Packet::PlayerInput(_) => PlayerInputPacketWire::IS_RELIABLE,
-            Packet::PlayerState(_) => PlayerStatePacketWire::IS_RELIABLE,
             Packet::Chat(_) => ChatPacketWire::IS_RELIABLE,
             Packet::PlayerDisconnected(_) => PlayerDisconnectedPacketWire::IS_RELIABLE,
             Packet::ServerTick(_) => ServerTickPacketWire::IS_RELIABLE,
@@ -60,7 +56,6 @@ impl Packet {
         bytes.extend(match self {
             Packet::IdAssignment(packet) => packet.encode(),
             Packet::PlayerInput(packet) => packet.encode(),
-            Packet::PlayerState(packet) => packet.encode(),
             Packet::Chat(packet) => packet.encode(),
             Packet::PlayerDisconnected(packet) => packet.encode(),
             Packet::ServerTick(packet) => packet.encode(),
@@ -88,7 +83,6 @@ impl Packet {
                 packet_data,
             )?)),
             PacketId::PlayerInput => Ok(Packet::PlayerInput(PlayerInputPacketWire::decode(packet_data)?)),
-            PacketId::PlayerState => Ok(Packet::PlayerState(PlayerStatePacketWire::decode(packet_data)?)),
             PacketId::Chat => Ok(Packet::Chat(ChatPacketWire::decode(packet_data)?)),
             PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(
                 PlayerDisconnectedPacketWire::decode(packet_data)?,
@@ -103,7 +97,6 @@ impl Packet {
         match self {
             Packet::IdAssignment(packet) => packet.as_gd(),
             Packet::PlayerInput(packet) => packet.as_gd(),
-            Packet::PlayerState(packet) => packet.as_gd(),
             Packet::Chat(packet) => packet.as_gd(),
             Packet::PlayerDisconnected(packet) => packet.as_gd(),
             Packet::ServerTick(packet) => packet.as_gd(),
