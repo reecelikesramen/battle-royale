@@ -34,7 +34,7 @@ var is_replaying_inputs: bool:
 var last_grounded_height: float = 0.0
 
 var context := Enums.IntegrationContext.VISUAL
-var input := PlayerInput.new()
+var input := PlayerInputContext.new()
 
 # Networking state container. Phase 3: pure data store; Phase 4 will pull
 # gather/simulate/apply hooks into it.
@@ -80,6 +80,8 @@ var _is_toggle_peeked_right := false
 func _enter_tree() -> void:
 	if _net.get_parent() == null:
 		_net.name = "NetPredictor"
+		_net.state_class = PlayerState
+		_net.command_class = PlayerInput
 		add_child(_net)
 
 	NetworkServer.handle_player_input.connect(server_handle_player_input)

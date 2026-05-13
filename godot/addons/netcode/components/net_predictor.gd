@@ -11,6 +11,54 @@ var owner_id: int = -1
 # Authority + replay flags read by states & systems.
 var is_replaying_inputs: bool = false
 
+# Typed Resource classes for state + command. Set externally before _ready
+# (e.g. by the owning controller in _enter_tree). Phase 4 introduces these
+# but the controller still drives the game_* fields directly; Phase 5/6 swap
+# the source of truth onto shadow_state.
+@export var state_class: Script
+@export var command_class: Script
+
+var shadow_state: NetState
+var render_state: NetState
+
+# Discovered user-authored @export fields (excludes Resource-base properties).
+var state_field_names: PackedStringArray = PackedStringArray()
+var command_field_names: PackedStringArray = PackedStringArray()
+
+
+func _ready() -> void:
+	if state_class:
+		shadow_state = state_class.new()
+		render_state = state_class.new()
+		state_field_names = _user_field_names(shadow_state)
+	if command_class:
+		var probe: NetCommand = command_class.new()
+		command_field_names = _user_field_names(probe)
+
+
+# Returns the names of user-declared @export fields on a Resource, skipping
+# Resource-base properties so reflection only sees what the user wrote.
+static func _user_field_names(res: Resource) -> PackedStringArray:
+	var out := PackedStringArray()
+	const SKIP := [
+		&"resource_local_to_scene",
+		&"resource_path",
+		&"resource_name",
+		&"resource_scene_unique_id",
+		&"script",
+	]
+	for prop in res.get_property_list():
+		if (prop.usage & PROPERTY_USAGE_EDITOR) == 0:
+			continue
+		if (prop.usage & PROPERTY_USAGE_CATEGORY) != 0:
+			continue
+		if (prop.usage & PROPERTY_USAGE_GROUP) != 0:
+			continue
+		if prop.name in SKIP:
+			continue
+		out.append(prop.name)
+	return out
+
 # Networking data structures.
 var server_input_queue := JitterBuffer.new()
 var player_state_buffer := SequenceRingBuffer.new()

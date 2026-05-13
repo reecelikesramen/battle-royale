@@ -1,34 +1,20 @@
-class_name PlayerInput extends RefCounted
+class_name PlayerInput extends NetCommand
 
-var input_packet: PlayerInputPacket = null
-var prev_input_packet: PlayerInputPacket = null
+# Per-tick player input. Mirrors the field shape of PlayerInputPacket so Phase
+# 5/6 can swap to a schema-driven codec without changing the input-gathering
+# surface. Edge helpers (`is_jump_just_pressed` etc.) live on
+# PlayerInputContext, which wraps two consecutive frames.
 
-func is_sprinting() -> bool:
-	return input_packet.sprint
+@export var sequence_id: int = 0
+@export var timestamp_us: int = 0
 
-func is_sprint_just_pressed() -> bool:
-	return input_packet.sprint and not prev_input_packet.sprint
+@export var move_forward_backward: float = 0.0
+@export var move_left_right: float = 0.0
+@export var look_abs: Vector2 = Vector2.ZERO
 
-func is_crouching() -> bool:
-	return input_packet.crouch
+@export var jump: bool = false
+@export var crouch: bool = false
+@export var sprint: bool = false
+@export var prone: bool = false
 
-func is_crouch_just_pressed() -> bool:
-	return input_packet.crouch and not prev_input_packet.crouch
-
-func is_jumping() -> bool:
-	return input_packet.jump
-
-func is_jump_just_pressed() -> bool:
-	return input_packet.jump and not prev_input_packet.jump
-
-func is_prone() -> bool:
-	return input_packet.prone
-
-func is_prone_just_pressed() -> bool:
-	return input_packet.prone and not prev_input_packet.prone
-
-func is_peeking_left() -> bool:
-	return input_packet.peek_left_right < 0
-
-func is_peeking_right() -> bool:
-	return input_packet.peek_left_right > 0
+@export var peek_left_right: float = 0.0
