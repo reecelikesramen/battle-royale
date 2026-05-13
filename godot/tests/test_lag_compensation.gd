@@ -104,6 +104,40 @@ func test_with_rewind_returns_callback_result() -> void:
 	NetReplication.unregister_entity(p.schema.id, 4244)
 
 
+func test_apply_state_hook_fires_on_rewind_and_restore() -> void:
+	# Phase 10c: shadow_state_applied signal fires once after rewind and once
+	# after restore. Subscriber mirrors shadow_state.pos onto a Node3D so
+	# downstream collision queries (physics, raycast) see the rewound pose.
+	var p: NetPredictor = _make_predictor()
+	var history := PlayerState.new()
+	history.pos = Vector3(50.0, 0.0, 0.0)
+	p._record_history(11, history)
+	(p.shadow_state as PlayerState).pos = Vector3(1.0, 2.0, 3.0)
+
+	var scene_node := Node3D.new()
+	scene_node.position = (p.shadow_state as PlayerState).pos
+	var sync_to_scene := func():
+		scene_node.position = (p.shadow_state as PlayerState).pos
+	p.shadow_state_applied.connect(sync_to_scene)
+
+	NetReplication.register_entity(p.schema.id, 4245, p)
+	var comp := NetLagCompensator.new()
+	comp.max_rewind_ticks = 1000
+	comp.set_current_tick(15)
+
+	assert_eq(comp.rewind_to(11), 1)
+	assert_vec3_approx(scene_node.position, Vector3(50.0, 0.0, 0.0), 0.0001,
+			"scene node not pushed to rewound pose")
+
+	comp.restore()
+	assert_vec3_approx(scene_node.position, Vector3(1.0, 2.0, 3.0), 0.0001,
+			"scene node not restored to live pose")
+
+	p.shadow_state_applied.disconnect(sync_to_scene)
+	NetReplication.unregister_entity(p.schema.id, 4245)
+	scene_node.free()
+
+
 func _make_predictor() -> NetPredictor:
 	# Construct without entering tree to skip NetReplication autoload coupling.
 	var n := NetPredictor.new()

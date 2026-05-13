@@ -6,11 +6,10 @@ class_name NetLagCompensator extends RefCounted
 # closure (typically a raycast / overlap check), then restores live state.
 # Refuses rewinds older than max_rewind_ticks to bound anti-cheat exposure.
 #
-# Hit detection wrapper that physically moves CharacterBody3D positions for
-# collision is still per-game: this class only rewinds the *replicated state*,
-# and entity controllers must read shadow_state when computing intersections.
-# Phase 10c could add an opt-in "apply state to scene-node" hook on
-# NetPredictor that wires this automatically.
+# Phase 10c: NetPredictor.apply_shadow_state_to_scene() fires after each
+# rewind and again on restore so subscribers can push shadow_state onto the
+# scene graph (e.g. CharacterBody3D.position) for collision queries. Entities
+# not participating in lag-comp can ignore the signal.
 
 const DEFAULT_MAX_REWIND_TICKS: int = NetPredictor.HISTORY_TICK_CAPACITY
 
@@ -44,6 +43,7 @@ func rewind_to(tick: int) -> int:
 		_saved_live[Vector2i(schema_id, entity_id)] = predictor.shadow_state.duplicate()
 		var historical: NetState = predictor.rewind_to(tick)
 		_copy_state(historical, predictor.shadow_state, predictor.state_field_names)
+		predictor.apply_shadow_state_to_scene()
 		count += 1
 	return count
 
@@ -58,6 +58,7 @@ func restore() -> void:
 			continue
 		var saved: NetState = _saved_live[key]
 		_copy_state(saved, predictor.shadow_state, predictor.state_field_names)
+		predictor.apply_shadow_state_to_scene()
 	_saved_live.clear()
 
 

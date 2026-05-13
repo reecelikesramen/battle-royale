@@ -32,6 +32,14 @@ var last_input_seq: int = -1
 # fresh server view. Passes (shadow_state, last_input_seq, new_tick).
 signal state_snapshot_received(state: NetState, last_input_seq: int, new_tick: int)
 
+# Phase 10c: fires whenever shadow_state is mutated externally and the scene
+# graph should re-sync to it. Currently emitted by NetLagCompensator after
+# rewinding to a historical state and again on restore. Subscribers push
+# relevant fields onto scene-graph nodes (e.g. CharacterBody3D.position) so
+# collision queries see the rewound pose. Entities not participating in
+# lag-comp can ignore the signal.
+signal shadow_state_applied()
+
 # Inspector-authored schema describing this entity's state + command shape,
 # tick rates, codec metadata, and reconcile channels. Set externally before
 # _ready. state_class and command_class accessors below pull from the schema.
@@ -346,6 +354,13 @@ func oldest_history_tick() -> int:
 	if _history_ticks.is_empty():
 		return -1
 	return _history_ticks[0]
+
+
+# Phase 10c: emits shadow_state_applied so subscribers can push relevant
+# shadow_state fields onto the scene graph. Called by NetLagCompensator after
+# rewind/restore mutate shadow_state in-place.
+func apply_shadow_state_to_scene() -> void:
+	shadow_state_applied.emit()
 
 
 ## Framerate-independent correction alpha:
