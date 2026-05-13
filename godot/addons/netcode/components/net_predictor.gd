@@ -127,6 +127,15 @@ const KEYFRAME_INTERVAL: int = 10
 var _last_broadcasted_state: NetState = null
 var _ticks_since_keyframe: int = 0
 
+# Phase 10: server-side historical state ring for lag-comp rewind. Keyed by
+# the server tick the snapshot was authoritative at. Bounded so memory stays
+# flat (32 entries @ 120Hz physics = 266ms rewind window). LagCompensator
+# (later commit) reads from this when verifying client-perspective hit
+# detection: rewind to client_tick, run intersect, restore.
+const HISTORY_TICK_CAPACITY: int = 32
+var _history_states: Dictionary = {}   # int (tick) -> NetState (duplicate)
+var _history_ticks: Array[int] = []    # insertion order, used for FIFO prune
+
 # Wire format for snapshot_payload / decode_payload_into:
 #   byte 0:  is_keyframe (1 = full snapshot, 0 = delta)
 #   keyframe:  put_var per state_field_name, in order
@@ -217,10 +226,43 @@ func server_broadcast_snapshot(last_input_seq: int) -> void:
 	# duplicate() snapshots shadow_state so subsequent in-place mutation by the
 	# sim doesn't poison the baseline mid-tick.
 	_last_broadcasted_state = shadow_state.duplicate()
+	_record_history(packet.new_tick, _last_broadcasted_state)
 	if is_keyframe_now:
 		_ticks_since_keyframe = 1
 	else:
 		_ticks_since_keyframe += 1
+
+
+# Records the just-broadcast state at `tick` in the history ring, evicting
+# the oldest entry when capacity is exceeded. The _last_broadcasted_state
+# duplicate is reused to avoid allocating twice per tick.
+func _record_history(tick: int, state: NetState) -> void:
+	_history_states[tick] = state
+	_history_ticks.append(tick)
+	while _history_ticks.size() > HISTORY_TICK_CAPACITY:
+		var oldest: int = _history_ticks.pop_front()
+		_history_states.erase(oldest)
+
+
+# Returns the historical shadow_state authoritative at `tick`, or null if the
+# tick is outside the retained window. Tick wraparound (u32 mod) isn't
+# special-cased yet — at 120Hz wrap happens every ~414 days, well past lag
+# comp horizons.
+func rewind_to(tick: int) -> NetState:
+	return _history_states.get(tick, null)
+
+
+# True if the history ring still has an entry for `tick`.
+func has_history_at(tick: int) -> bool:
+	return _history_states.has(tick)
+
+
+# Oldest tick currently retained. Useful for lag-comp clamps: clients can't
+# request rewinds older than this. Returns -1 if history is empty.
+func oldest_history_tick() -> int:
+	if _history_ticks.is_empty():
+		return -1
+	return _history_ticks[0]
 
 
 ## Framerate-independent correction alpha:

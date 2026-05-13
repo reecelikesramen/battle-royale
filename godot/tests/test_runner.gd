@@ -13,6 +13,7 @@ const TEST_SCRIPTS := [
 	"res://tests/test_jitter_buffer.gd",
 	"res://tests/test_snapshot_roundtrip.gd",
 	"res://tests/test_net_replication.gd",
+	"res://tests/test_lag_compensation.gd",
 	"res://tests/test_player_state_packet.gd",
 ]
 
