@@ -16,18 +16,45 @@ func _ready() -> void:
 	if NetworkTransport.is_dedicated_server:
 		get_tree().call_deferred("change_scene_to_file", Constants.MAP_SCENE_PATH)
 		return
-	
+
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	set_disconnected_message()
-	
+
 	if OS.get_name() == "macOS":
 		get_window().content_scale_factor = 1.5
-	
+
 	if ip_regex.compile("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$") != OK:
 		push_error("IP regex failed to compile")
 	if num_regex.compile("^\\d+$") != OK:
 		push_error("Numeric regex failed to compile")
+
+	_maybe_autoconnect()
+
+
+# Honors `-- --client [ip] [port] [username]` user args so scripts/run-debug.sh
+# can spin up clients without anyone clicking the Connect button. All three
+# trailing args are optional and fall back to localhost / default port / a
+# generated username.
+func _maybe_autoconnect() -> void:
+	var args := OS.get_cmdline_user_args()
+	var idx := args.find("--client")
+	if idx == -1:
+		return
+
+	var ip := "127.0.0.1"
+	var port := 45876
+	var username := "AutoClient_%d" % (Time.get_ticks_msec() % 10000)
+	if idx + 1 < args.size():
+		ip = args[idx + 1]
+	if idx + 2 < args.size():
+		port = int(args[idx + 2])
+	if idx + 3 < args.size():
+		username = args[idx + 3]
+
+	NetworkClient.username = username
+	NetworkTransport.start_client(ip, port)
+	print("Auto-connecting to %s:%d as %s" % [ip, port, username])
 
 
 func _on_quit_button_pressed() -> void:
