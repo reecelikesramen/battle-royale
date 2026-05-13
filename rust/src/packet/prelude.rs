@@ -8,3 +8,4 @@ pub(crate) use super::id_assignment::IdAssignmentPacketWire;
 pub(crate) use super::player_disconnected::PlayerDisconnectedPacketWire;
 pub(crate) use super::player_input::PlayerInputPacketWire;
 pub(crate) use super::player_state::PlayerStatePacketWire;
+pub(crate) use super::server_tick::ServerTickPacketWire;

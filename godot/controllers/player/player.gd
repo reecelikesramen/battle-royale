@@ -303,7 +303,7 @@ func _client_remote_physics_step(delta: float) -> void:
 
 
 func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
-	var delta := 1.0 / Engine.get_physics_ticks_per_second() as float
+	var delta := NetTimeline.tick_delta()
 	game_sequence_id = game_state.last_input_sequence_id
 	game_transform.origin = game_state.position
 	game_transform.basis = Basis.from_euler(Vector3(0, game_state.look_abs.y, 0))

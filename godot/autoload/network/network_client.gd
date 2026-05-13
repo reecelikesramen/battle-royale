@@ -4,6 +4,7 @@ signal handle_local_id_assignment(local_id: int)
 signal handle_remote_id_assignment(remote_id: int)
 signal handle_player_disconnected(player_id: int)
 signal handle_player_state(player_state: PlayerStatePacket)
+signal handle_server_tick(tick: ServerTickPacket)
 signal handle_chat(message: ChatPacket)
 signal handle_disconnect_from_server()
 signal self_spawned()
@@ -30,6 +31,8 @@ func on_client_packet(data) -> void:
 		manage_ids(data)
 	elif data is PlayerStatePacket:
 		handle_player_state.emit(data)
+	elif data is ServerTickPacket:
+		handle_server_tick.emit(data)
 	elif data is ChatPacket:
 		handle_chat.emit(data)
 	elif data is PlayerDisconnectedPacket:

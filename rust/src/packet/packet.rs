@@ -12,6 +12,7 @@ pub(crate) enum PacketId {
     PlayerInput,
     PlayerState,
     PlayerDisconnected,
+    ServerTick,
     Null,
 }
 
@@ -21,6 +22,7 @@ pub(crate) enum Packet {
     PlayerState(PlayerStatePacketWire),
     Chat(ChatPacketWire),
     PlayerDisconnected(PlayerDisconnectedPacketWire),
+    ServerTick(ServerTickPacketWire),
     Null(NullPacketWire),
 }
 
@@ -32,6 +34,7 @@ impl Packet {
             Packet::PlayerState(_) => PacketId::PlayerState,
             Packet::Chat(_) => PacketId::Chat,
             Packet::PlayerDisconnected(_) => PacketId::PlayerDisconnected,
+            Packet::ServerTick(_) => PacketId::ServerTick,
             Packet::Null(_) => PacketId::Null,
         }
     }
@@ -43,6 +46,7 @@ impl Packet {
             Packet::PlayerState(_) => PlayerStatePacketWire::IS_RELIABLE,
             Packet::Chat(_) => ChatPacketWire::IS_RELIABLE,
             Packet::PlayerDisconnected(_) => PlayerDisconnectedPacketWire::IS_RELIABLE,
+            Packet::ServerTick(_) => ServerTickPacketWire::IS_RELIABLE,
             Packet::Null(_) => NullPacketWire::IS_RELIABLE,
         }
     }
@@ -55,6 +59,7 @@ impl Packet {
             Packet::PlayerState(packet) => packet.encode(),
             Packet::Chat(packet) => packet.encode(),
             Packet::PlayerDisconnected(packet) => packet.encode(),
+            Packet::ServerTick(packet) => packet.encode(),
             Packet::Null(packet) => packet.encode(),
         });
         bytes
@@ -83,6 +88,7 @@ impl Packet {
             PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(
                 PlayerDisconnectedPacketWire::decode(packet_data)?,
             )),
+            PacketId::ServerTick => Ok(Packet::ServerTick(ServerTickPacketWire::decode(packet_data)?)),
             PacketId::Null => Ok(Packet::Null(NullPacketWire::decode(packet_data)?)),
         }
     }
@@ -94,6 +100,7 @@ impl Packet {
             Packet::PlayerState(packet) => packet.as_gd(),
             Packet::Chat(packet) => packet.as_gd(),
             Packet::PlayerDisconnected(packet) => packet.as_gd(),
+            Packet::ServerTick(packet) => packet.as_gd(),
             Packet::Null(packet) => packet.as_gd(),
         }
     }
