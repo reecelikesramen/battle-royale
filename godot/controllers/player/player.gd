@@ -17,17 +17,6 @@ const TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
 @export_group("Camera Tunables")
 @export var MOUSE_SENSITIVITY: float = 0.5
 
-@export_group("Reconciliation Tunables")
-@export var SNAP_THRESHOLD_HORIZONTAL := 1.5
-@export var SNAP_THRESHOLD_VERTICAL := 2.5
-@export var CORRECTION_RATE_HORIZONTAL := 8.0
-@export var CORRECTION_RATE_VERTICAL := 4.0
-@export var POSITION_CORRECTION_DEADBAND_HORIZONTAL := 0.07
-@export var POSITION_CORRECTION_DEADBAND_VERTICAL := 0.15
-@export var VELOCITY_CORRECTION_THRESHOLD := 1.5
-@export var VELOCITY_CORRECTION_RATE := 12.0
-@export var VELOCITY_CORRECTION_DEADBAND := 0.2
-
 @onready var camera: Camera3D = $CameraController/Camera3D
 @onready var tp_camera: Camera3D = $CameraController/ThirdPersonCamera3D
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
@@ -40,13 +29,34 @@ var is_authority: bool:
 	get: return !NetworkTransport.is_server && _owner_id == NetworkClient.id
 
 var is_replaying_inputs: bool:
-	get: return _is_replaying_inputs
+	get: return _net.is_replaying_inputs
 
 var last_grounded_height: float = 0.0
 
 var context := Enums.IntegrationContext.VISUAL
 var input := PlayerInput.new()
 
+# Networking state container. Phase 3: pure data store; Phase 4 will pull
+# gather/simulate/apply hooks into it.
+var _net := NetPredictor.new()
+
+# Proxy properties so state machines and external scripts keep reading
+# `player.game_*` while the data lives on NetPredictor.
+var game_transform: Transform3D:
+	get: return _net.game_transform
+	set(v): _net.game_transform = v
+var game_position: Vector3:
+	get: return _net.game_transform.origin
+	set(v): _net.game_position = v
+var game_velocity: Vector3:
+	get: return _net.game_velocity
+	set(v): _net.game_velocity = v
+var game_movement_state_id: int:
+	get: return _net.game_movement_state_id
+	set(v): _net.game_movement_state_id = v
+var game_sequence_id: int:
+	get: return _net.game_sequence_id
+	set(v): _net.game_sequence_id = v
 
 var _owner_id: int
 
@@ -67,30 +77,11 @@ var _is_toggle_crouched := false
 var _is_toggle_peeked_left := false
 var _is_toggle_peeked_right := false
 
-# client authority replaying inputs
-var _is_replaying_inputs := false
-
-# server authoritative game state
-var game_transform: Transform3D = Transform3D()
-var game_position: Vector3:
-	get: return game_transform.origin
-	set(value): game_transform.origin = value
-var game_velocity := Vector3.ZERO
-var game_movement_state_id: int = 0
-var game_sequence_id: int = 65535
-
-# networking data structures
-var _server_input_queue := JitterBuffer.new()
-var _player_state_buffer := SequenceRingBuffer.new()
-var _input_sequence := PacketSequence.new()
-var _unacked_inputs := SequenceRingBuffer.new()
-
-# Send last N inputs per tick so single-packet loss within an N-tick window is
-# recovered by the next packet. Server JitterBuffer dedupes by sequence_id.
-const INPUT_REDUNDANCY: int = 3
-var _input_redundancy_ring: Array[PlayerInputPacket] = []
-
 func _enter_tree() -> void:
+	if _net.get_parent() == null:
+		_net.name = "NetPredictor"
+		add_child(_net)
+
 	NetworkServer.handle_player_input.connect(server_handle_player_input)
 	NetworkClient.handle_player_state.connect(client_handle_player_state)
 
@@ -153,7 +144,7 @@ func _physics_process(delta: float) -> void:
 
 var _prev_server_input: PlayerInputPacket = null
 func _server_physics_step(delta: float) -> void:
-	var frames := _server_input_queue.consume()
+	var frames := _net.server_input_queue.consume()
 	
 	if frames.is_empty():
 		#push_warning("No input frames to consume")
@@ -209,7 +200,7 @@ func _client_authority_physics_step(delta: float) -> void:
 		_free_look_abs = look
 
 	var player_input := PlayerInputPacket.new()
-	player_input.sequence_id = _input_sequence.next()
+	player_input.sequence_id = _net.input_sequence.next()
 	player_input.timestamp_us = Time.get_ticks_usec()
 	player_input.move_forward_backward = Input.get_axis("move_forward", "move_backward")
 	player_input.move_left_right = Input.get_axis("move_left", "move_right")
@@ -237,12 +228,12 @@ func _client_authority_physics_step(delta: float) -> void:
 		player_input.crouch = Input.is_action_pressed("crouch")
 	player_input.sprint = Input.is_action_pressed("sprint")
 	player_input.prone = Input.is_action_pressed("prone")
-	_unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)
+	_net.unacked_inputs.insert(player_input.sequence_id, -1, player_input.timestamp_us, player_input)
 
-	_input_redundancy_ring.append(player_input)
-	if _input_redundancy_ring.size() > INPUT_REDUNDANCY:
-		_input_redundancy_ring.pop_front()
-	for redundant_input in _input_redundancy_ring:
+	_net.input_redundancy_ring.append(player_input)
+	if _net.input_redundancy_ring.size() > _net.INPUT_REDUNDANCY:
+		_net.input_redundancy_ring.pop_front()
+	for redundant_input in _net.input_redundancy_ring:
 		NetworkTransport.send_packet(redundant_input.to_payload())
 
 	input.prev_input_packet = _prev_client_input
@@ -267,7 +258,7 @@ func _client_authority_physics_step(delta: float) -> void:
 
 func _client_remote_physics_step(delta: float) -> void:
 	var now_us := Time.get_ticks_usec()
-	var interpolation_pair := _player_state_buffer.get_interpolation_pair(now_us);
+	var interpolation_pair := _net.player_state_buffer.get_interpolation_pair(now_us);
 	if not interpolation_pair.is_valid:
 		return
 
@@ -325,15 +316,15 @@ func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
 	%MovementStateMachine.set_logic_state_by_id(game_state.movement_state)
 	%PeekStateMachine.set_logic_state_by_id(game_state.peek_state)
 
-	_is_replaying_inputs = true
-	var inputs := _unacked_inputs.get_starting_at(game_sequence_id)
+	_net.is_replaying_inputs = true
+	var inputs := _net.unacked_inputs.get_starting_at(game_sequence_id)
 	for i in range(1, inputs.size()):
 		input.prev_input_packet = inputs[i - 1]
 		input.input_packet = inputs[i]
 		game_transform.basis = Basis.from_euler(Vector3(0, input.input_packet.look_abs.y, 0))
 		%MovementStateMachine.run_logic(delta)
 		%PeekStateMachine.run_logic(delta)
-	_is_replaying_inputs = false
+	_net.is_replaying_inputs = false
 	
 	context = Enums.IntegrationContext.VISUAL
 	_client_authority_reconcile_visual_state(delta)
@@ -350,66 +341,50 @@ func _client_authority_reconcile_visual_state(delta: float) -> void:
 	var horizontal_vel_err := Vector2(delta_vel.x, delta_vel.z)
 	var horizontal_vel_err_mag := horizontal_vel_err.length()
 	
-	reconcile_network_debug.emit(delta_pos, delta_vel, _unacked_inputs)
+	reconcile_network_debug.emit(delta_pos, delta_vel, _net.unacked_inputs)
 	
 	# TODO: maybe even give snap to game state a lerp so its not instant
 	# Snap or lerp to horizontal game position
-	if horizontal_err_mag > SNAP_THRESHOLD_HORIZONTAL:
+	if horizontal_err_mag > _net.SNAP_THRESHOLD_HORIZONTAL:
 		global_position.x = game_position.x
 		global_position.z = game_position.z
 	else:
-		var pos_alpha := _correction_alpha(
+		var pos_alpha := _net.correction_alpha(
 			delta,
 			horizontal_err_mag,
-			SNAP_THRESHOLD_HORIZONTAL,
-			CORRECTION_RATE_HORIZONTAL,
-			POSITION_CORRECTION_DEADBAND_HORIZONTAL
+			_net.SNAP_THRESHOLD_HORIZONTAL,
+			_net.CORRECTION_RATE_HORIZONTAL,
+			_net.POSITION_CORRECTION_DEADBAND_HORIZONTAL
 		)
 		global_position.x = lerp(global_position.x, game_position.x, pos_alpha)
 		global_position.z = lerp(global_position.z, game_position.z, pos_alpha)
 
 	# Snap or lerp to vertical game position
-	if vertical_err > SNAP_THRESHOLD_VERTICAL:
+	if vertical_err > _net.SNAP_THRESHOLD_VERTICAL:
 		global_position.y = game_position.y
 		velocity.y = game_velocity.y
 	else:
-		var vert_alpha := _correction_alpha(
+		var vert_alpha := _net.correction_alpha(
 			delta,
 			vertical_err,
-			SNAP_THRESHOLD_VERTICAL,
-			CORRECTION_RATE_VERTICAL,
-			POSITION_CORRECTION_DEADBAND_VERTICAL
+			_net.SNAP_THRESHOLD_VERTICAL,
+			_net.CORRECTION_RATE_VERTICAL,
+			_net.POSITION_CORRECTION_DEADBAND_VERTICAL
 		)
 		global_position.y = lerp(global_position.y, game_position.y, vert_alpha)
 		velocity.y = lerp(velocity.y, game_velocity.y, vert_alpha)
 
 	# lerp to horizontal game velocity
-	var vel_alpha := _correction_alpha(
+	var vel_alpha := _net.correction_alpha(
 		delta,
 		horizontal_vel_err_mag,
-		VELOCITY_CORRECTION_THRESHOLD,
-		VELOCITY_CORRECTION_RATE,
-		VELOCITY_CORRECTION_DEADBAND,
+		_net.VELOCITY_CORRECTION_THRESHOLD,
+		_net.VELOCITY_CORRECTION_RATE,
+		_net.VELOCITY_CORRECTION_DEADBAND,
 	)
 	velocity.x = lerp(velocity.x, game_velocity.x, vel_alpha)
 	velocity.z = lerp(velocity.z, game_velocity.z, vel_alpha)
 
-
-func _correction_alpha(
-	delta: float,
-	error_mag: float,
-	snap_threshold: float,
-	rate: float,
-	deadband: float) -> float:
-	if error_mag <= deadband:
-		return 0.0
-	
-	var normalized: float = clamp(
-		(error_mag - deadband) / max(snap_threshold - deadband, 0.001),
-		0.0,
-		1.0
-	)
-	return 1.0 - exp(-rate * delta * normalized)
 
 func set_parameters(speed: float, acceleration: float) -> void:
 	_speed = speed
@@ -529,7 +504,7 @@ func server_handle_player_input(peer_id: int, input_packet: PlayerInputPacket) -
 	if peer_id != _owner_id:
 		return
 
-	_server_input_queue.enqueue(input_packet.sequence_id, input_packet.timestamp_us, input_packet)
+	_net.server_input_queue.enqueue(input_packet.sequence_id, input_packet.timestamp_us, input_packet)
 
 
 func client_handle_player_state(player_state: PlayerStatePacket) -> void:
@@ -542,13 +517,13 @@ func client_handle_player_state(player_state: PlayerStatePacket) -> void:
 
 	if is_authority:
 		var ack_sequence := player_state.last_input_sequence_id
-		_unacked_inputs.prune_up_to(ack_sequence)
+		_net.unacked_inputs.prune_up_to(ack_sequence)
 		if PacketSequence.is_newer(ack_sequence, game_sequence_id):
 			_client_authority_update_game_state(player_state)
 	else:
 		#if _owner_id == 0:
-			#print("Size: %d | Oldest: %d | Newest: %d | Delay US: %d" % [_player_state_buffer.size(), _player_state_buffer.oldest_sequence_id(), _player_state_buffer.newest_sequence_id(), _player_state_buffer.buffer_delay_us()])
-		_player_state_buffer.insert(player_state.last_input_sequence_id, Time.get_ticks_usec(), player_state.timestamp_us, player_state)
+			#print("Size: %d | Oldest: %d | Newest: %d | Delay US: %d" % [_net.player_state_buffer.size(), _net.player_state_buffer.oldest_sequence_id(), _net.player_state_buffer.newest_sequence_id(), _net.player_state_buffer.buffer_delay_us()])
+		_net.player_state_buffer.insert(player_state.last_input_sequence_id, Time.get_ticks_usec(), player_state.timestamp_us, player_state)
 
 
 func despawn() -> void:

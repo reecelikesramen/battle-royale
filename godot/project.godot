@@ -35,7 +35,7 @@ gdscript/warnings/integer_division=0
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/terrain_3d/plugin.cfg")
+enabled=PackedStringArray("res://addons/netcode/plugin.cfg", "res://addons/terrain_3d/plugin.cfg")
 
 [input]
 
