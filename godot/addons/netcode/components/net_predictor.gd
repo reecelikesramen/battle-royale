@@ -6,7 +6,11 @@ class_name NetPredictor extends Node
 # and pulls the simulate/apply hooks into here.
 
 # Identity. Set by the owning controller before/while adding as child.
+# owner_id = the peer that owns the entity (player). entity_id is the routing
+# key on the wire; for the player it equals owner_id, but in general entities
+# don't have an owning peer (e.g. doors, AI) so the two are separate.
 var owner_id: int = -1
+var entity_id: int = -1
 
 # Authority + replay flags read by states & systems.
 var is_replaying_inputs: bool = false
@@ -44,6 +48,16 @@ func _ready() -> void:
 	if command_class:
 		var probe: NetCommand = command_class.new()
 		command_field_names = _user_field_names(probe)
+
+	if schema:
+		NetReplication.register_schema(schema.id, schema)
+		if entity_id >= 0:
+			NetReplication.register_entity(schema.id, entity_id, self)
+
+
+func _exit_tree() -> void:
+	if schema and entity_id >= 0:
+		NetReplication.unregister_entity(schema.id, entity_id)
 
 
 # Returns the names of user-declared @export fields on a Resource, skipping
@@ -90,6 +104,52 @@ var game_position: Vector3:
 var game_velocity := Vector3.ZERO
 var game_movement_state_id: int = 0
 var game_sequence_id: int = 65535
+
+# Last NetStatePacket payload received from the server. Phase 6b stops here:
+# the snapshot round-trips end-to-end via NetStatePacket so the wire format is
+# proven, but the predictor still reconciles off the per-entity packets the
+# controller already wires (e.g. PlayerStatePacket). Phase 6b.2 swaps the
+# reconcile source onto this payload.
+var last_net_state_payload: PackedByteArray = PackedByteArray()
+
+
+# Serialize shadow_state into a payload via per-field reflection over the
+# discovered state_field_names. Phase 6b: full snapshot, self-describing Variant
+# encoding. Phase 6b.3 swaps in dirty-mask + delta against the per-client
+# baseline, plus quantization per NetFieldConfig.
+func snapshot_payload() -> PackedByteArray:
+	if shadow_state == null:
+		return PackedByteArray()
+	var sp := StreamPeerBuffer.new()
+	for fname in state_field_names:
+		sp.put_var(shadow_state.get(fname))
+	return sp.data_array
+
+
+# Decode an inbound NetStatePacket. Currently just stashes the payload; Phase
+# 6b.2 wires it into the reconcile path. Server tick comes from the packet's
+# new_tick field (replaces the NetTimeline.server_tick proxy from 6a).
+func handle_net_state_packet(packet) -> void:
+	last_net_state_payload = packet.payload
+	last_received_tick = packet.new_tick
+
+
+# Broadcast this entity's current shadow state. Server-side; called from the
+# entity controller's _server_physics_step. Phase 6b runs alongside the
+# entity's pre-existing per-type packet (PlayerStatePacket); Phase 6b.2 retires
+# the per-type packets.
+func server_broadcast_snapshot(last_input_seq: int) -> void:
+	if schema == null or entity_id < 0:
+		return
+	var packet := NetStatePacket.new()
+	packet.schema_id = schema.id
+	packet.entity_id = entity_id
+	packet.last_input_seq = last_input_seq
+	packet.baseline_tick = 0  # full snapshot until 6b.3 wires per-client baselines
+	packet.new_tick = NetworkServer.server_tick
+	packet.payload = snapshot_payload()
+	NetworkTransport.broadcast_packet(packet.to_payload())
+
 
 ## Framerate-independent correction alpha:
 ## error scaled to [0, 1] within (deadband, snap_threshold], then run through

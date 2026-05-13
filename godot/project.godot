@@ -26,6 +26,7 @@ NetworkTransport="*res://addons/netcode/core/net_session.tscn"
 NetworkClient="*res://addons/netcode/core/net_client.gd"
 NetworkServer="*res://addons/netcode/core/net_server.gd"
 NetTimeline="*res://addons/netcode/core/net_timeline.gd"
+NetReplication="*res://addons/netcode/core/net_replication.gd"
 Enums="*res://autoload/enums.gd"
 Constants="*res://autoload/constants.gd"
 

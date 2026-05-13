@@ -4,6 +4,11 @@ class_name NetSchema extends Resource
 # in later phases). Carries the state + command class refs, the tick + snapshot
 # rates, per-field codec metadata, and the reconcile channels.
 
+# Globally unique id used on the wire. NetStatePacket carries schema_id +
+# entity_id; the receiver looks up the NetSchema by id to know how to decode
+# payload bytes.
+@export var id: int = 0
+
 @export var state_class: Script
 @export var command_class: Script
 

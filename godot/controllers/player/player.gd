@@ -81,6 +81,8 @@ func _enter_tree() -> void:
 	if _net.get_parent() == null:
 		_net.name = "NetPredictor"
 		_net.schema = PlayerSchema.build()
+		_net.owner_id = _owner_id
+		_net.entity_id = _owner_id
 		add_child(_net)
 
 	NetworkServer.handle_player_input.connect(server_handle_player_input)
@@ -184,6 +186,28 @@ func _server_physics_step(delta: float) -> void:
 	player_state.peek_state = %PeekStateMachine.get_logic_state_id()
 	player_state.peek_progress = %PeekStateMachine.peek_progress
 	NetworkTransport.broadcast_packet(player_state.to_payload())
+
+	# Phase 6b parallel path: schema-driven snapshot.
+	_seed_shadow_from_player_state(player_state)
+	_net.server_broadcast_snapshot(frames[-1].packet.sequence_id)
+
+
+# Phase 6b helper: mirror the fields the server just packed into PlayerStatePacket
+# into the predictor's shadow_state Resource so NetStatePacket carries the same
+# values. Phase 6b.2 inverts this: state lives on shadow_state first and
+# PlayerStatePacket goes away.
+func _seed_shadow_from_player_state(p: PlayerStatePacket) -> void:
+	var s: PlayerState = _net.shadow_state
+	if s == null:
+		return
+	s.pos = p.position
+	s.velocity = p.velocity
+	s.look = p.look_abs
+	s.movement_state = p.movement_state
+	s.peek_state = p.peek_state
+	s.crouch_progress = p.crouch_progress
+	s.prone_progress = p.prone_progress
+	s.peek_progress = p.peek_progress
 
 
 var _prev_client_input: PlayerInputPacket = null

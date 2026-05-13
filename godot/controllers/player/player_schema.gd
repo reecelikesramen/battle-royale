@@ -5,8 +5,11 @@ class_name PlayerSchema
 # may persist it to res://entities/player/player_predicted.tres for inspector
 # editing.
 
+const SCHEMA_ID := 1
+
 static func build() -> NetSchema:
 	var schema := NetSchema.new()
+	schema.id = SCHEMA_ID
 	schema.state_class = PlayerState
 	schema.command_class = PlayerInput
 	schema.tick_hz = 120
