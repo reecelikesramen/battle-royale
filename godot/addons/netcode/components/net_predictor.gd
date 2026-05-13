@@ -116,28 +116,71 @@ var game_velocity := Vector3.ZERO
 var game_movement_state_id: int = 0
 var game_sequence_id: int = 65535
 
-# Serialize shadow_state into a payload via per-field reflection over the
-# discovered state_field_names. Phase 6b: full snapshot, self-describing Variant
-# encoding. Phase 6b.3 swaps in dirty-mask + delta against the per-client
-# baseline, plus quantization per NetFieldConfig.
-func snapshot_payload() -> PackedByteArray:
+# Frames between forced full snapshots. A delta is encoded against the last
+# state we broadcast; on packet loss the client diverges until the next
+# keyframe corrects it. 10 at 30Hz snapshot = ~333ms worst case resync.
+const KEYFRAME_INTERVAL: int = 10
+
+# Server-side delta baseline: the shadow_state contents at the moment of the
+# previous broadcast. duplicate()'d each broadcast so subsequent mutations to
+# shadow_state don't bleed into the baseline. null until first broadcast.
+var _last_broadcasted_state: NetState = null
+var _ticks_since_keyframe: int = 0
+
+# Wire format for snapshot_payload / decode_payload_into:
+#   byte 0:  is_keyframe (1 = full snapshot, 0 = delta)
+#   keyframe:  put_var per state_field_name, in order
+#   delta:     ceil(N/8) bytes of dirty_mask, then put_var for each set bit
+#
+# Per-field quantization will land in a follow-on commit; AUTO Variant encoding
+# is used everywhere for now.
+func snapshot_payload(force_keyframe: bool = false) -> PackedByteArray:
 	if shadow_state == null:
 		return PackedByteArray()
 	var sp := StreamPeerBuffer.new()
-	for fname in state_field_names:
-		sp.put_var(shadow_state.get(fname))
+	var is_keyframe := force_keyframe \
+			or _last_broadcasted_state == null \
+			or _ticks_since_keyframe >= KEYFRAME_INTERVAL
+	if is_keyframe:
+		sp.put_u8(1)
+		for fname in state_field_names:
+			sp.put_var(shadow_state.get(fname))
+	else:
+		sp.put_u8(0)
+		var n := state_field_names.size()
+		var mask_bytes := (n + 7) / 8
+		var mask := PackedByteArray()
+		mask.resize(mask_bytes)
+		for i in n:
+			if shadow_state.get(state_field_names[i]) != _last_broadcasted_state.get(state_field_names[i]):
+				mask[i / 8] = mask[i / 8] | (1 << (i % 8))
+		sp.put_data(mask)
+		for i in n:
+			if mask[i / 8] & (1 << (i % 8)):
+				sp.put_var(shadow_state.get(state_field_names[i]))
 	return sp.data_array
 
 
-# Mutates `state` in-place by reading one Variant per state_field_name from
-# `payload`. Encoder mirror; used by handle_net_state_packet and snapshot tests.
+# Mutates `state` in-place. Keyframe payloads overwrite every field; delta
+# payloads only touch fields with their dirty bit set, leaving the rest at
+# their current (post-prior-decode) values.
 func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 	if state == null or payload.is_empty():
 		return
 	var sp := StreamPeerBuffer.new()
 	sp.data_array = payload
-	for fname in state_field_names:
-		state.set(fname, sp.get_var())
+	var is_keyframe := sp.get_u8() == 1
+	if is_keyframe:
+		for fname in state_field_names:
+			state.set(fname, sp.get_var())
+		return
+	var n := state_field_names.size()
+	var mask_bytes := (n + 7) / 8
+	var mask_pair: Array = sp.get_data(mask_bytes)
+	var mask: PackedByteArray = mask_pair[1]
+	for i in n:
+		if mask[i / 8] & (1 << (i % 8)):
+			state.set(state_field_names[i], sp.get_var())
 
 
 # Decode an inbound NetStatePacket directly into shadow_state, update tick +
@@ -158,14 +201,26 @@ func handle_net_state_packet(packet) -> void:
 func server_broadcast_snapshot(last_input_seq: int) -> void:
 	if schema == null or entity_id < 0:
 		return
+	var is_keyframe_now := _last_broadcasted_state == null \
+			or _ticks_since_keyframe >= KEYFRAME_INTERVAL
 	var packet := NetStatePacket.new()
 	packet.schema_id = schema.id
 	packet.entity_id = entity_id
 	packet.last_input_seq = last_input_seq
-	packet.baseline_tick = 0  # full snapshot until 6b.3 wires per-client baselines
+	# baseline_tick = the prior keyframe tick this delta is anchored against;
+	# 0 on a keyframe itself. Phase 6b.4 may use it for per-client baseline
+	# selection once we send per-peer instead of broadcast.
+	packet.baseline_tick = 0 if is_keyframe_now else (NetworkServer.server_tick - _ticks_since_keyframe)
 	packet.new_tick = NetworkServer.server_tick
-	packet.payload = snapshot_payload()
+	packet.payload = snapshot_payload(is_keyframe_now)
 	NetworkTransport.broadcast_packet(packet.to_payload())
+	# duplicate() snapshots shadow_state so subsequent in-place mutation by the
+	# sim doesn't poison the baseline mid-tick.
+	_last_broadcasted_state = shadow_state.duplicate()
+	if is_keyframe_now:
+		_ticks_since_keyframe = 1
+	else:
+		_ticks_since_keyframe += 1
 
 
 ## Framerate-independent correction alpha:

@@ -63,6 +63,56 @@ func test_decode_payload_into_mutates_in_place() -> void:
 	assert_eq(dst_ref.movement_state, src.movement_state)
 
 
+func test_delta_only_carries_changed_fields() -> void:
+	# Phase 6b.3: first snapshot is a keyframe; second is a delta against the
+	# baseline. The delta must omit unchanged fields (smaller payload) and
+	# decoding into a fresh state mutates only the dirty ones.
+	var sender: NetPredictor = _make_predictor()
+	var src: PlayerState = sender.shadow_state
+	src.pos = Vector3(1.0, 2.0, 3.0)
+	src.velocity = Vector3(4.0, 5.0, 6.0)
+	src.movement_state = 2
+
+	# Keyframe.
+	var keyframe_payload: PackedByteArray = sender.snapshot_payload()
+	sender._last_broadcasted_state = src.duplicate()
+	sender._ticks_since_keyframe = 1
+
+	# Only change movement_state. velocity / pos / etc. should be omitted.
+	src.movement_state = 4
+	var delta_payload: PackedByteArray = sender.snapshot_payload()
+
+	# Delta should be strictly smaller than the full keyframe.
+	assert_true(delta_payload.size() < keyframe_payload.size(),
+			"delta (%d) not smaller than keyframe (%d)" % [delta_payload.size(), keyframe_payload.size()])
+
+	# Apply keyframe then delta to a fresh receiver and confirm result.
+	var receiver: NetPredictor = _make_predictor()
+	receiver.decode_payload_into(receiver.shadow_state, keyframe_payload)
+	receiver.decode_payload_into(receiver.shadow_state, delta_payload)
+	var dst: PlayerState = receiver.shadow_state
+	assert_eq(dst.movement_state, 4, "movement_state delta not applied")
+	assert_vec3_approx(dst.pos, Vector3(1.0, 2.0, 3.0), 0.0001, "pos clobbered")
+	assert_vec3_approx(dst.velocity, Vector3(4.0, 5.0, 6.0), 0.0001, "velocity clobbered")
+
+
+func test_keyframe_interval_forces_full_snapshot() -> void:
+	# After KEYFRAME_INTERVAL ticks the encoder must emit a keyframe again so
+	# clients that missed a delta can resync.
+	var sender: NetPredictor = _make_predictor()
+	sender.shadow_state.pos = Vector3(10.0, 0.0, 0.0)
+	var first: PackedByteArray = sender.snapshot_payload()
+	assert_eq(first[0], 1, "first packet should be keyframe")
+
+	# Simulate broadcasting: stash baseline + advance tick counter.
+	sender._last_broadcasted_state = sender.shadow_state.duplicate()
+	sender._ticks_since_keyframe = NetPredictor.KEYFRAME_INTERVAL
+
+	# Even with shadow_state unchanged, the interval should trigger a keyframe.
+	var forced: PackedByteArray = sender.snapshot_payload()
+	assert_eq(forced[0], 1, "expected keyframe at interval boundary")
+
+
 func test_handle_net_state_packet_updates_predictor_state() -> void:
 	# End-to-end: build a NetStatePacket from a source predictor's snapshot
 	# and hand it to a destination predictor. shadow_state, last_received_tick,
@@ -105,8 +155,12 @@ func _make_predictor() -> NetPredictor:
 
 
 func _decode(payload: PackedByteArray, field_names: PackedStringArray) -> PlayerState:
+	# First byte is the keyframe flag; we only invoke this helper on payloads
+	# we know are keyframes (no baseline established), so always-1 is asserted
+	# implicitly. After the byte, fields follow in order as Variants.
 	var sp := StreamPeerBuffer.new()
 	sp.data_array = payload
+	var _is_keyframe := sp.get_u8()
 	var out := PlayerState.new()
 	for fname in field_names:
 		out.set(fname, sp.get_var())
