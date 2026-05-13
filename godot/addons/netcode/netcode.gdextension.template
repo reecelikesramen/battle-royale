@@ -1,0 +1,17 @@
+; Template for the distributable netcode.gdextension. During dev the project
+; loads addons/rust/rust.gdextension (which points at rust/target/debug/).
+; make-addon.sh renders this template into a real .gdextension that ships
+; alongside platform-suffixed binaries in addons/netcode/bin/.
+
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.1
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 =     "res://addons/netcode/bin/libnetcode.linux.x86_64.so"
+linux.release.x86_64 =   "res://addons/netcode/bin/libnetcode.linux.x86_64.so"
+windows.debug.x86_64 =   "res://addons/netcode/bin/libnetcode.windows.x86_64.dll"
+windows.release.x86_64 = "res://addons/netcode/bin/libnetcode.windows.x86_64.dll"
+macos.debug =            "res://addons/netcode/bin/libnetcode.macos.universal.dylib"
+macos.release =          "res://addons/netcode/bin/libnetcode.macos.universal.dylib"
