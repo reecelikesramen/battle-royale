@@ -80,8 +80,7 @@ var _is_toggle_peeked_right := false
 func _enter_tree() -> void:
 	if _net.get_parent() == null:
 		_net.name = "NetPredictor"
-		_net.state_class = PlayerState
-		_net.command_class = PlayerInput
+		_net.schema = PlayerSchema.build()
 		add_child(_net)
 
 	NetworkServer.handle_player_input.connect(server_handle_player_input)
@@ -338,40 +337,43 @@ func _client_authority_reconcile_visual_state(delta: float) -> void:
 	var horizontal_err := Vector2(delta_pos.x, delta_pos.z)
 	var horizontal_err_mag := horizontal_err.length()
 	var vertical_err := absf(delta_pos.y)
-	
+
 	var delta_vel := game_velocity - velocity
 	var horizontal_vel_err := Vector2(delta_vel.x, delta_vel.z)
 	var horizontal_vel_err_mag := horizontal_vel_err.length()
-	
+
 	reconcile_network_debug.emit(delta_pos, delta_vel, _net.unacked_inputs)
-	
-	# TODO: maybe even give snap to game state a lerp so its not instant
+
+	var horiz := _net.schema.find_correction(&"horizontal")
+	var vert := _net.schema.find_correction(&"vertical")
+	var vel_h := _net.schema.find_correction(&"velocity_horizontal")
+
 	# Snap or lerp to horizontal game position
-	if horizontal_err_mag > _net.SNAP_THRESHOLD_HORIZONTAL:
+	if horizontal_err_mag > horiz.snap_threshold:
 		global_position.x = game_position.x
 		global_position.z = game_position.z
 	else:
 		var pos_alpha := _net.correction_alpha(
 			delta,
 			horizontal_err_mag,
-			_net.SNAP_THRESHOLD_HORIZONTAL,
-			_net.CORRECTION_RATE_HORIZONTAL,
-			_net.POSITION_CORRECTION_DEADBAND_HORIZONTAL
+			horiz.snap_threshold,
+			horiz.smooth_rate,
+			horiz.deadband,
 		)
 		global_position.x = lerp(global_position.x, game_position.x, pos_alpha)
 		global_position.z = lerp(global_position.z, game_position.z, pos_alpha)
 
 	# Snap or lerp to vertical game position
-	if vertical_err > _net.SNAP_THRESHOLD_VERTICAL:
+	if vertical_err > vert.snap_threshold:
 		global_position.y = game_position.y
 		velocity.y = game_velocity.y
 	else:
 		var vert_alpha := _net.correction_alpha(
 			delta,
 			vertical_err,
-			_net.SNAP_THRESHOLD_VERTICAL,
-			_net.CORRECTION_RATE_VERTICAL,
-			_net.POSITION_CORRECTION_DEADBAND_VERTICAL
+			vert.snap_threshold,
+			vert.smooth_rate,
+			vert.deadband,
 		)
 		global_position.y = lerp(global_position.y, game_position.y, vert_alpha)
 		velocity.y = lerp(velocity.y, game_velocity.y, vert_alpha)
@@ -380,9 +382,9 @@ func _client_authority_reconcile_visual_state(delta: float) -> void:
 	var vel_alpha := _net.correction_alpha(
 		delta,
 		horizontal_vel_err_mag,
-		_net.VELOCITY_CORRECTION_THRESHOLD,
-		_net.VELOCITY_CORRECTION_RATE,
-		_net.VELOCITY_CORRECTION_DEADBAND,
+		vel_h.snap_threshold,
+		vel_h.smooth_rate,
+		vel_h.deadband,
 	)
 	velocity.x = lerp(velocity.x, game_velocity.x, vel_alpha)
 	velocity.z = lerp(velocity.z, game_velocity.z, vel_alpha)

@@ -11,12 +11,16 @@ var owner_id: int = -1
 # Authority + replay flags read by states & systems.
 var is_replaying_inputs: bool = false
 
-# Typed Resource classes for state + command. Set externally before _ready
-# (e.g. by the owning controller in _enter_tree). Phase 4 introduces these
-# but the controller still drives the game_* fields directly; Phase 5/6 swap
-# the source of truth onto shadow_state.
-@export var state_class: Script
-@export var command_class: Script
+# Inspector-authored schema describing this entity's state + command shape,
+# tick rates, codec metadata, and reconcile channels. Set externally before
+# _ready. state_class and command_class accessors below pull from the schema.
+@export var schema: NetSchema
+
+var state_class: Script:
+	get: return schema.state_class if schema else null
+
+var command_class: Script:
+	get: return schema.command_class if schema else null
 
 var shadow_state: NetState
 var render_state: NetState
@@ -80,18 +84,6 @@ var game_position: Vector3:
 var game_velocity := Vector3.ZERO
 var game_movement_state_id: int = 0
 var game_sequence_id: int = 65535
-
-# Reconciliation tunables. Phase 5 will move these to a NetSchema .tres.
-var SNAP_THRESHOLD_HORIZONTAL: float = 1.5
-var SNAP_THRESHOLD_VERTICAL: float = 2.5
-var CORRECTION_RATE_HORIZONTAL: float = 8.0
-var CORRECTION_RATE_VERTICAL: float = 4.0
-var POSITION_CORRECTION_DEADBAND_HORIZONTAL: float = 0.07
-var POSITION_CORRECTION_DEADBAND_VERTICAL: float = 0.15
-var VELOCITY_CORRECTION_THRESHOLD: float = 1.5
-var VELOCITY_CORRECTION_RATE: float = 12.0
-var VELOCITY_CORRECTION_DEADBAND: float = 0.2
-
 
 ## Framerate-independent correction alpha:
 ## error scaled to [0, 1] within (deadband, snap_threshold], then run through
