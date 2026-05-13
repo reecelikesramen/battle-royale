@@ -83,15 +83,14 @@ func _enter_tree() -> void:
 		_net.schema = PlayerSchema.build()
 		_net.owner_id = _owner_id
 		_net.entity_id = _owner_id
+		_net.state_snapshot_received.connect(_on_state_snapshot_received)
 		add_child(_net)
 
 	NetworkServer.handle_player_input.connect(server_handle_player_input)
-	NetworkClient.handle_player_state.connect(client_handle_player_state)
 
 
 func _exit_tree() -> void:
 	NetworkServer.handle_player_input.disconnect(server_handle_player_input)
-	NetworkClient.handle_player_state.disconnect(client_handle_player_state)
 
 
 func _ready():
@@ -172,42 +171,27 @@ func _server_physics_step(delta: float) -> void:
 		global_position = game_position
 		velocity = game_velocity
 
-	# if server broadcast player state
-	var player_state := PlayerStatePacket.new()
-	player_state.player_id = _owner_id
-	player_state.last_input_sequence_id = frames[-1].packet.sequence_id
-	player_state.timestamp_us = Time.get_ticks_usec()
-	player_state.position = game_position
-	player_state.look_abs = input.input_packet.look_abs
-	player_state.velocity = game_velocity
-	player_state.movement_state = %MovementStateMachine.get_logic_state_id()
-	player_state.crouch_progress = %MovementStateMachine.crouch_progress
-	player_state.prone_progress = %MovementStateMachine.prone_progress
-	player_state.peek_state = %PeekStateMachine.get_logic_state_id()
-	player_state.peek_progress = %PeekStateMachine.peek_progress
-	NetworkTransport.broadcast_packet(player_state.to_payload())
-
-	# Phase 6b parallel path: schema-driven snapshot.
-	_seed_shadow_from_player_state(player_state)
+	# Sync sim output into shadow_state, then broadcast the schema-driven
+	# NetStatePacket. PlayerStatePacket retired in phase 6b.4.
+	_sync_shadow_from_sim()
 	_net.server_broadcast_snapshot(frames[-1].packet.sequence_id)
 
 
-# Phase 6b helper: mirror the fields the server just packed into PlayerStatePacket
-# into the predictor's shadow_state Resource so NetStatePacket carries the same
-# values. Phase 6b.2 inverts this: state lives on shadow_state first and
-# PlayerStatePacket goes away.
-func _seed_shadow_from_player_state(p: PlayerStatePacket) -> void:
+# After server-side sim writes into game_*/state-machines, mirror those into
+# shadow_state so the NetStatePacket encoder reads from one place. shadow_state
+# is now the authoritative server view of the entity.
+func _sync_shadow_from_sim() -> void:
 	var s: PlayerState = _net.shadow_state
 	if s == null:
 		return
-	s.pos = p.position
-	s.velocity = p.velocity
-	s.look = p.look_abs
-	s.movement_state = p.movement_state
-	s.peek_state = p.peek_state
-	s.crouch_progress = p.crouch_progress
-	s.prone_progress = p.prone_progress
-	s.peek_progress = p.peek_progress
+	s.pos = game_position
+	s.velocity = game_velocity
+	s.look = input.input_packet.look_abs
+	s.movement_state = %MovementStateMachine.get_logic_state_id()
+	s.crouch_progress = %MovementStateMachine.crouch_progress
+	s.prone_progress = %MovementStateMachine.prone_progress
+	s.peek_state = %PeekStateMachine.get_logic_state_id()
+	s.peek_progress = %PeekStateMachine.peek_progress
 
 
 var _prev_client_input: PlayerInputPacket = null
@@ -289,58 +273,72 @@ func _client_remote_physics_step(delta: float) -> void:
 		return
 
 	if interpolation_pair.to == null:
-		var packet := interpolation_pair.from as PlayerStatePacket
-		global_position = packet.position
-		velocity = packet.velocity
-		update_camera(packet.look_abs)
-		%MovementStateMachine.set_visual_state_by_id(packet.movement_state)
-		assert(not (packet.crouch_progress > 0.0 and packet.prone_progress > 0.0), "Player state packet should not have non-zero crouch AND prone progress")
-		# TODO: assert crouch progress and not crouch state, equiv prone
-		if packet.crouch_progress > 0.0:
-			%MovementStateMachine._visual_state.progress = packet.crouch_progress
-		elif packet.prone_progress > 0.0:
-			%MovementStateMachine._visual_state.progress = packet.prone_progress
+		var s: PlayerState = interpolation_pair.from as PlayerState
+		global_position = s.pos
+		velocity = s.velocity
+		update_camera(s.look)
+		%MovementStateMachine.set_visual_state_by_id(s.movement_state)
+		assert(not (s.crouch_progress > 0.0 and s.prone_progress > 0.0), "shadow state should not have non-zero crouch AND prone progress")
+		if s.crouch_progress > 0.0:
+			%MovementStateMachine._visual_state.progress = s.crouch_progress
+		elif s.prone_progress > 0.0:
+			%MovementStateMachine._visual_state.progress = s.prone_progress
 		%MovementStateMachine.run_visual(delta)
-		%PeekStateMachine.set_visual_state_by_id(packet.peek_state)
-		# TODO: assert peek progress and not peek state
-		if packet.peek_progress != 0.0:
-			%PeekStateMachine._visual_state.progress = packet.peek_progress
+		%PeekStateMachine.set_visual_state_by_id(s.peek_state)
+		if s.peek_progress != 0.0:
+			%PeekStateMachine._visual_state.progress = s.peek_progress
 		%PeekStateMachine.run_visual(delta)
 	else:
-		var from: PlayerStatePacket = interpolation_pair.from as PlayerStatePacket
-		var to: PlayerStatePacket = interpolation_pair.to as PlayerStatePacket
+		var from_s: PlayerState = interpolation_pair.from as PlayerState
+		var to_s: PlayerState = interpolation_pair.to as PlayerState
 		var alpha := interpolation_pair.alpha
-		var blended_pos := from.position.lerp(to.position, alpha)
-		var blended_vel := from.velocity.lerp(to.velocity, alpha)
-		var blended_look_abs := from.look_abs.lerp(to.look_abs, alpha)
+		var blended_pos := from_s.pos.lerp(to_s.pos, alpha)
+		var blended_vel := from_s.velocity.lerp(to_s.velocity, alpha)
+		var blended_look := from_s.look.lerp(to_s.look, alpha)
 		if interpolation_pair.extrapolation_s > 0.0:
 			blended_pos += blended_vel * interpolation_pair.extrapolation_s
 		global_position = blended_pos
 		velocity = blended_vel
-		update_camera(blended_look_abs)
-		%MovementStateMachine.set_visual_state_by_id(from.movement_state if alpha < 0.5 else to.movement_state)
+		update_camera(blended_look)
+		%MovementStateMachine.set_visual_state_by_id(from_s.movement_state if alpha < 0.5 else to_s.movement_state)
 		if %MovementStateMachine._visual_state.name == &"CrouchMovementState":
-			%MovementStateMachine._visual_state.progress = lerp(from.crouch_progress, to.crouch_progress, alpha)
+			%MovementStateMachine._visual_state.progress = lerp(from_s.crouch_progress, to_s.crouch_progress, alpha)
 		elif %MovementStateMachine._visual_state.name == &"ProneMovementState":
-			%MovementStateMachine._visual_state.progress = lerp(from.prone_progress, to.prone_progress, alpha)
+			%MovementStateMachine._visual_state.progress = lerp(from_s.prone_progress, to_s.prone_progress, alpha)
 		%MovementStateMachine.run_visual(delta)
-		%PeekStateMachine.set_visual_state_by_id(from.peek_state if alpha < 0.5 else to.peek_state)
+		%PeekStateMachine.set_visual_state_by_id(from_s.peek_state if alpha < 0.5 else to_s.peek_state)
 		if %PeekStateMachine._visual_state.name == &"PeekState":
-			%PeekStateMachine._visual_state.progress = lerp(from.peek_progress, to.peek_progress, alpha)
+			%PeekStateMachine._visual_state.progress = lerp(from_s.peek_progress, to_s.peek_progress, alpha)
 		%PeekStateMachine.run_visual(delta)
 
 
-func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
+# NetPredictor fires this after decoding an inbound NetStatePacket. is_authority
+# clients ack inputs + replay; remote-proxy clients buffer a duplicate of the
+# state for interpolation. Server is_authority is false and is_server is true,
+# so neither branch runs server-side.
+func _on_state_snapshot_received(state: PlayerState, last_input_seq: int, _new_tick: int) -> void:
+	if is_authority:
+		_net.last_received_tick = _new_tick
+		_net.unacked_inputs.prune_up_to(last_input_seq)
+		if PacketSequence.is_newer(last_input_seq, game_sequence_id):
+			_client_authority_update_game_state(state, last_input_seq)
+	elif not NetworkTransport.is_server:
+		# duplicate() so the buffer doesn't share storage with the in-place
+		# decoded shadow_state (next packet would clobber buffered entries).
+		_net.player_state_buffer.insert(last_input_seq, Time.get_ticks_usec(), NetTimeline.server_now_us(), state.duplicate())
+
+
+func _client_authority_update_game_state(state: PlayerState, last_input_seq: int) -> void:
 	var delta := NetTimeline.tick_delta()
-	game_sequence_id = game_state.last_input_sequence_id
-	game_transform.origin = game_state.position
-	game_transform.basis = Basis.from_euler(Vector3(0, game_state.look_abs.y, 0))
-	game_velocity = game_state.velocity
-	game_movement_state_id = game_state.movement_state
+	game_sequence_id = last_input_seq
+	game_transform.origin = state.pos
+	game_transform.basis = Basis.from_euler(Vector3(0, state.look.y, 0))
+	game_velocity = state.velocity
+	game_movement_state_id = state.movement_state
 
 	context = Enums.IntegrationContext.GAME
-	%MovementStateMachine.set_logic_state_by_id(game_state.movement_state)
-	%PeekStateMachine.set_logic_state_by_id(game_state.peek_state)
+	%MovementStateMachine.set_logic_state_by_id(state.movement_state)
+	%PeekStateMachine.set_logic_state_by_id(state.peek_state)
 
 	_net.is_replaying_inputs = true
 	var inputs := _net.unacked_inputs.get_starting_at(game_sequence_id)
@@ -351,7 +349,7 @@ func _client_authority_update_game_state(game_state: PlayerStatePacket) -> void:
 		%MovementStateMachine.run_logic(delta)
 		%PeekStateMachine.run_logic(delta)
 	_net.is_replaying_inputs = false
-	
+
 	context = Enums.IntegrationContext.VISUAL
 	_client_authority_reconcile_visual_state(delta)
 
@@ -534,27 +532,6 @@ func server_handle_player_input(peer_id: int, input_packet: PlayerInputPacket) -
 		return
 
 	_net.server_input_queue.enqueue(input_packet.sequence_id, input_packet.timestamp_us, input_packet)
-
-
-func client_handle_player_state(player_state: PlayerStatePacket) -> void:
-	# client only
-	assert(!NetworkTransport.is_server)
-
-	# not owner
-	if _owner_id != player_state.player_id:
-		return
-
-	_net.last_received_tick = NetTimeline.server_tick
-
-	if is_authority:
-		var ack_sequence := player_state.last_input_sequence_id
-		_net.unacked_inputs.prune_up_to(ack_sequence)
-		if PacketSequence.is_newer(ack_sequence, game_sequence_id):
-			_client_authority_update_game_state(player_state)
-	else:
-		#if _owner_id == 0:
-			#print("Size: %d | Oldest: %d | Newest: %d | Delay US: %d" % [_net.player_state_buffer.size(), _net.player_state_buffer.oldest_sequence_id(), _net.player_state_buffer.newest_sequence_id(), _net.player_state_buffer.buffer_delay_us()])
-		_net.player_state_buffer.insert(player_state.last_input_sequence_id, Time.get_ticks_usec(), player_state.timestamp_us, player_state)
 
 
 func despawn() -> void:
