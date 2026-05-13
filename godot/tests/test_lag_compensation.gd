@@ -42,6 +42,68 @@ func test_oldest_history_tick_empty() -> void:
 	assert_eq(p.oldest_history_tick(), -1)
 
 
+func test_lag_compensator_rewinds_and_restores() -> void:
+	# Build a predictor with one historical state, one live state. Register
+	# with NetReplication so the compensator's iter_entities loop finds it.
+	var p: NetPredictor = _make_predictor()
+	var history := PlayerState.new()
+	history.pos = Vector3(5.0, 0.0, 0.0)
+	p._record_history(10, history)
+	(p.shadow_state as PlayerState).pos = Vector3(1.0, 2.0, 3.0)
+	NetReplication.register_entity(p.schema.id, 4242, p)
+
+	var comp := NetLagCompensator.new()
+	comp.max_rewind_ticks = 1000
+	comp.set_current_tick(15)
+
+	assert_eq(comp.rewind_to(10), 1, "expected 1 entity rewound")
+	assert_vec3_approx((p.shadow_state as PlayerState).pos, Vector3(5.0, 0.0, 0.0),
+			0.0001, "shadow not rewound to history")
+
+	comp.restore()
+	assert_vec3_approx((p.shadow_state as PlayerState).pos, Vector3(1.0, 2.0, 3.0),
+			0.0001, "shadow not restored to live")
+
+	NetReplication.unregister_entity(p.schema.id, 4242)
+
+
+func test_lag_compensator_refuses_out_of_window() -> void:
+	var p: NetPredictor = _make_predictor()
+	var history := PlayerState.new()
+	p._record_history(2, history)
+	NetReplication.register_entity(p.schema.id, 4243, p)
+
+	var comp := NetLagCompensator.new()
+	comp.max_rewind_ticks = 5
+	comp.set_current_tick(100)
+
+	# tick 2 vs current 100 => age 98, max 5 => refused.
+	assert_eq(comp.rewind_to(2), 0, "out-of-window rewind should refuse")
+
+	NetReplication.unregister_entity(p.schema.id, 4243)
+
+
+func test_with_rewind_returns_callback_result() -> void:
+	var p: NetPredictor = _make_predictor()
+	var history := PlayerState.new()
+	history.pos = Vector3(9.0, 0.0, 0.0)
+	p._record_history(7, history)
+	(p.shadow_state as PlayerState).pos = Vector3(0.0, 0.0, 0.0)
+	NetReplication.register_entity(p.schema.id, 4244, p)
+
+	var comp := NetLagCompensator.new()
+	comp.max_rewind_ticks = 1000
+	comp.set_current_tick(20)
+
+	# Closure reads shadow_state.pos.x mid-rewind; should see 9.0 from history.
+	var probed: float = comp.with_rewind(7, func(): return (p.shadow_state as PlayerState).pos.x)
+	assert_approx(probed, 9.0, 0.001)
+	# After with_rewind returns, restore() ran so live state is back.
+	assert_vec3_approx((p.shadow_state as PlayerState).pos, Vector3(0.0, 0.0, 0.0))
+
+	NetReplication.unregister_entity(p.schema.id, 4244)
+
+
 func _make_predictor() -> NetPredictor:
 	# Construct without entering tree to skip NetReplication autoload coupling.
 	var n := NetPredictor.new()
