@@ -18,6 +18,11 @@ class_name NetSchema extends Resource
 @export var state_fields: Array[NetFieldConfig] = []
 @export var corrections: Array[NetCorrection] = []
 
+# Phase 8: additional nodes whose @export-able properties replicate alongside
+# state_fields. Encoded after the state_fields block on the wire; not yet in
+# the dirty mask (Phase 8c).
+@export var child_refs: Array[NetChildRef] = []
+
 
 func find_correction(correction_name: StringName) -> NetCorrection:
 	for c in corrections:

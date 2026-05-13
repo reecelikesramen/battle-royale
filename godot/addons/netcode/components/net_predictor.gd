@@ -50,6 +50,12 @@ var render_state: NetState
 var state_field_names: PackedStringArray = PackedStringArray()
 var command_field_names: PackedStringArray = PackedStringArray()
 
+# Phase 8: child nodes the schema asked us to replicate alongside shadow_state.
+# Each entry is [Node, PackedStringArray fields]; resolved at _ready from the
+# schema's child_refs against the predictor's parent. Encode/decode iterates
+# this list after the state_fields block.
+var _resolved_children: Array = []
+
 
 func _ready() -> void:
 	if state_class:
@@ -64,6 +70,23 @@ func _ready() -> void:
 		NetReplication.register_schema(schema.id, schema)
 		if entity_id >= 0:
 			NetReplication.register_entity(schema.id, entity_id, self)
+		_resolve_children()
+
+
+# Walks schema.child_refs, resolves each NodePath relative to the predictor's
+# parent (the entity root), and caches (node, fields). Paths that don't
+# resolve emit a warning and are skipped — the framework continues with the
+# rest so a broken NetChildRef doesn't take the whole entity offline.
+func _resolve_children() -> void:
+	_resolved_children.clear()
+	if schema == null or get_parent() == null:
+		return
+	for cref in schema.child_refs:
+		var node := get_parent().get_node_or_null(cref.path)
+		if node == null:
+			push_warning("NetChildRef '%s' path '%s' did not resolve" % [cref.name, cref.path])
+			continue
+		_resolved_children.append([node, cref.fields])
 
 
 func _exit_tree() -> void:
@@ -167,6 +190,13 @@ func snapshot_payload(force_keyframe: bool = false) -> PackedByteArray:
 		for i in n:
 			if mask[i / 8] & (1 << (i % 8)):
 				sp.put_var(shadow_state.get(state_field_names[i]))
+	# Phase 8a: child-ref fields are written unconditionally after state block.
+	# Phase 8c will fold them into the dirty mask for proper delta savings.
+	for entry in _resolved_children:
+		var node: Node = entry[0]
+		var fields: PackedStringArray = entry[1]
+		for f in fields:
+			sp.put_var(node.get(f))
 	return sp.data_array
 
 
@@ -182,14 +212,22 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 	if is_keyframe:
 		for fname in state_field_names:
 			state.set(fname, sp.get_var())
-		return
-	var n := state_field_names.size()
-	var mask_bytes := (n + 7) / 8
-	var mask_pair: Array = sp.get_data(mask_bytes)
-	var mask: PackedByteArray = mask_pair[1]
-	for i in n:
-		if mask[i / 8] & (1 << (i % 8)):
-			state.set(state_field_names[i], sp.get_var())
+	else:
+		var n := state_field_names.size()
+		var mask_bytes := (n + 7) / 8
+		var mask_pair: Array = sp.get_data(mask_bytes)
+		var mask: PackedByteArray = mask_pair[1]
+		for i in n:
+			if mask[i / 8] & (1 << (i % 8)):
+				state.set(state_field_names[i], sp.get_var())
+	# Phase 8a: matching read of child-ref fields appended by the encoder in
+	# both keyframe and delta modes. Child decode runs unconditionally after
+	# the state block.
+	for entry in _resolved_children:
+		var node: Node = entry[0]
+		var fields: PackedStringArray = entry[1]
+		for f in fields:
+			node.set(f, sp.get_var())
 
 
 # Decode an inbound NetStatePacket directly into shadow_state, update tick +

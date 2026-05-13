@@ -143,6 +143,32 @@ func test_handle_net_state_packet_updates_predictor_state() -> void:
 # Helper: build a NetPredictor without registering against the NetReplication
 # autoload (we don't want test side-effects). Allocates shadow_state via the
 # schema's state_class and populates state_field_names.
+func test_child_ref_round_trip() -> void:
+	# Phase 8a: schema.child_refs lets the predictor sync arbitrary properties
+	# on sibling nodes alongside shadow_state. Bypass _resolve_children() by
+	# poking _resolved_children directly so the test doesn't need a SceneTree.
+	var src_probe := Node3D.new()
+	src_probe.position = Vector3(7.0, 8.0, 9.0)
+
+	var sender: NetPredictor = _make_predictor()
+	var payload_without_child: PackedByteArray = sender.snapshot_payload()
+	sender._resolved_children.append([src_probe, PackedStringArray(["position"])])
+	var payload_with_child: PackedByteArray = sender.snapshot_payload()
+	assert_true(payload_with_child.size() > payload_without_child.size(),
+			"child field should add bytes; without=%d with=%d" % [payload_without_child.size(), payload_with_child.size()])
+
+	var dst_probe := Node3D.new()
+	var receiver: NetPredictor = _make_predictor()
+	receiver._resolved_children.append([dst_probe, PackedStringArray(["position"])])
+
+	receiver.decode_payload_into(receiver.shadow_state, payload_with_child)
+
+	assert_vec3_approx(dst_probe.position, Vector3(7.0, 8.0, 9.0))
+
+	src_probe.free()
+	dst_probe.free()
+
+
 func _make_predictor() -> NetPredictor:
 	var p := NetPredictor.new()
 	p.schema = PlayerSchema.build()
