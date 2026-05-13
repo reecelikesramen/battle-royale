@@ -10,5 +10,6 @@ mod id_assignment;
 mod player_disconnected;
 mod player_input;
 mod net_state;
+mod net_reliable;
 mod server_tick;
 pub(crate) mod prelude;
