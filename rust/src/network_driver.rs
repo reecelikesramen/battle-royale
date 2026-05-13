@@ -286,6 +286,46 @@ impl NetworkDriver {
         self._broadcast_packet(&packet.bind().packet);
     }
 
+    fn _send_packet_to_peer(&self, peer_id: u8, packet: &Packet) {
+        if !self.is_server {
+            return;
+        }
+
+        let server = self.server.as_ref().unwrap_or_else(|| {
+            godot_print!("ERROR: Server not initialized");
+            panic!("Server socket not initialized");
+        });
+
+        // Phase 11: targeted send used by interest management. Linear scan of
+        // connected_clients to find the matching connection. PLAYER_COUNT=100
+        // so this stays cheap; if it grows we add a reverse map.
+        let connection = self
+            .connected_clients
+            .iter()
+            .find_map(|(conn, pid)| if *pid == peer_id { Some(*conn) } else { None });
+
+        if let Some(conn) = connection {
+            server.send_messages(vec![self.gns_global.utils().allocate_message(
+                conn,
+                if packet.is_reliable() {
+                    k_nSteamNetworkingSend_Reliable
+                } else {
+                    k_nSteamNetworkingSend_Unreliable
+                },
+                packet.encode().as_slice(),
+            )]);
+        }
+    }
+
+    #[func]
+    fn send_packet_to_peer(&self, peer_id: i64, packet: Gd<GdPacket>) {
+        if peer_id < 0 || peer_id > u8::MAX as i64 {
+            godot_print!("send_packet_to_peer: out-of-range peer_id {}", peer_id);
+            return;
+        }
+        self._send_packet_to_peer(peer_id as u8, &packet.bind().packet);
+    }
+
     fn process_debug_messages(&mut self) {
         if let Ok(mut queue) = self.debug_messages.lock() {
             // Process up to 10 messages per frame to avoid blocking

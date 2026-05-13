@@ -16,6 +16,7 @@ const TEST_SCRIPTS := [
 	"res://tests/test_lag_compensation.gd",
 	"res://tests/test_net_reliable_hub.gd",
 	"res://tests/test_net_state_machine.gd",
+	"res://tests/test_interest_filter.gd",
 	"res://tests/test_player_state_packet.gd",
 ]
 

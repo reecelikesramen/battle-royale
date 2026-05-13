@@ -58,6 +58,24 @@ var render_state: NetState
 var state_field_names: PackedStringArray = PackedStringArray()
 var command_field_names: PackedStringArray = PackedStringArray()
 
+# Phase 11: optional Callable(peer_id: int, predictor: NetPredictor) -> bool.
+# When set, server_broadcast_snapshot iterates connected peers and sends only
+# to those the filter accepts. Default (empty Callable) keeps the broadcast-
+# to-all behavior. Filters typically range-check the receiving player's
+# position against the entity's pos / AOI radius, or apply role-based rules
+# (don't send team-A inventory to team-B clients, etc).
+var interest_filter: Callable = Callable()
+
+
+# Phase 11: convenience predicate exposed for tests / debug overlays. Returns
+# true if the next snapshot should reach `peer_id`. Internally consulted by
+# server_broadcast_snapshot when a filter is installed.
+func should_replicate_to(peer_id: int) -> bool:
+	if interest_filter.is_null():
+		return true
+	return interest_filter.call(peer_id, self)
+
+
 # Phase 8: child nodes the schema asked us to replicate alongside shadow_state.
 # Each entry is [Node, PackedStringArray fields]; resolved at _ready from the
 # schema's child_refs against the predictor's parent. Encode/decode iterates
@@ -303,7 +321,16 @@ func server_broadcast_snapshot(last_input_seq: int) -> void:
 	packet.baseline_tick = 0 if is_keyframe_now else (NetworkServer.server_tick - _ticks_since_keyframe)
 	packet.new_tick = NetworkServer.server_tick
 	packet.payload = snapshot_payload(is_keyframe_now)
-	NetworkTransport.broadcast_packet(packet.to_payload())
+	# Phase 11: when an interest_filter is installed, switch from broadcast to
+	# targeted per-peer send. Same encoded payload is reused across recipients
+	# (per-peer deltas / per-peer baselines remain a follow-up optimization).
+	var gd_packet := packet.to_payload()
+	if interest_filter.is_null():
+		NetworkTransport.broadcast_packet(gd_packet)
+	else:
+		for peer_id in NetworkServer.peer_ids:
+			if interest_filter.call(peer_id, self):
+				NetworkTransport.send_packet_to_peer(peer_id, gd_packet)
 	# duplicate() snapshots shadow_state so subsequent in-place mutation by the
 	# sim doesn't poison the baseline mid-tick.
 	_last_broadcasted_state = shadow_state.duplicate()
