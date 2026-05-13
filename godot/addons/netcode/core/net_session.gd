@@ -221,9 +221,16 @@ func _apply_load_testing_preset(preset: LoadTestingPreset) -> void:
 var is_dedicated_server: bool:
 	get: return "--server" in OS.get_cmdline_user_args() or DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")
 
+# Test runner sets NETCODE_TEST_MODE=1 so headless startup doesn't bind the
+# server port; tests instantiate their own minimal scaffolding.
+var is_test_mode: bool:
+	get: return OS.has_environment("NETCODE_TEST_MODE")
+
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
+	if is_test_mode:
+		return
 	if is_dedicated_server:
 		start_server_default()
 		set_fake_ping_lag_send(fake_ping_lag_send)

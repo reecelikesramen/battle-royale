@@ -84,7 +84,57 @@ impl PacketSequence {
         let Some((a, b)) = Self::valid_sequences(a, b) else {
             return false;
         };
-        
+
         seq_is_newer(a, b) || a == b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_simple_forward() {
+        assert_eq!(seq_diff(10, 5), 5);
+        assert_eq!(seq_diff(0, 0), 0);
+    }
+
+    #[test]
+    fn diff_simple_backward() {
+        assert_eq!(seq_diff(5, 10), -5);
+    }
+
+    #[test]
+    fn diff_wraparound_forward() {
+        // 5 is "newer" than 65530 across the wrap boundary
+        assert!(seq_diff(5, 65530) > 0);
+        assert_eq!(seq_diff(5, 65530), 11);
+    }
+
+    #[test]
+    fn diff_wraparound_backward() {
+        // 65530 is "older" than 5 across the wrap boundary
+        assert!(seq_diff(65530, 5) < 0);
+        assert_eq!(seq_diff(65530, 5), -11);
+    }
+
+    #[test]
+    fn is_newer_around_wrap() {
+        assert!(seq_is_newer(5, 65530));
+        assert!(!seq_is_newer(65530, 5));
+    }
+
+    #[test]
+    fn is_newer_equal_returns_false() {
+        assert!(!seq_is_newer(42, 42));
+    }
+
+    #[test]
+    fn diff_max_half_range_split() {
+        // At exactly half-range, behavior should be symmetric (one is positive,
+        // the other negative); we just guard the wraparound branches don't
+        // double-fire.
+        let d = seq_diff(0, SEQUENCE_HALF_RANGE as u16);
+        assert!(d == -SEQUENCE_HALF_RANGE || d == SEQUENCE_HALF_RANGE);
     }
 }

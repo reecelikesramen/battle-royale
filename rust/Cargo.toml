@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["cdylib"]
+# rlib alongside cdylib lets `cargo test --lib` link the crate for unit tests.
+# Godot still loads the cdylib via netcode.gdextension / rust.gdextension.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 #game-networking-sockets = { git = "https://github.com/reecelikesramen/gns-rs.git" }
