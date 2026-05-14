@@ -665,11 +665,17 @@ func handle_net_state_packet(packet) -> void:
 # resumes from the authoritative tick instead of the last predicted tick.
 # previous_cmd is anchored to inputs[0] (the acked input) so the first replay
 # step sees the correct predecessor for edge detection.
+#
+# is_replaying_inputs is flipped *before* _load_simulation_state so that any
+# logic_enter callbacks fired by set_logic_state_by_id (inside _load) see the
+# replay flag set. Otherwise stateful states like Crouch/Prone whose
+# logic_enter does `if not is_replaying_inputs: progress = 0` would reset
+# their animation progress on every snapshot ack, causing a visible snap-back.
 func _reconcile_replay(new_sequence_id: int) -> void:
 	game_sequence_id = new_sequence_id
+	is_replaying_inputs = true
 	if host and host.has_method(&"_load_simulation_state"):
 		host._load_simulation_state(shadow_state)
-	is_replaying_inputs = true
 	var inputs := unacked_inputs.get_starting_at(game_sequence_id)
 	if not inputs.is_empty():
 		previous_cmd = inputs[0]

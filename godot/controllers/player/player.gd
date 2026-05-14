@@ -242,8 +242,22 @@ func _apply_state(state: PlayerState) -> void:
 	if NetSession.is_server:
 		global_position = state.pos
 		velocity = state.velocity
+		# Server debug camera view: rotate the player body from look yaw so the
+		# spectator sees players facing the right direction. Pitch lives on the
+		# camera node which the server doesn't render through; only yaw matters
+		# for body orientation.
+		global_transform.basis = Basis.from_euler(Vector3(0, state.look.y, 0))
+		# Sync visual SMs so AnimationTree transitions fire (crouch/prone/peek
+		# pose visible on server-side render). _visualize is gated off on the
+		# server so visual_physics doesn't run; we drive the AnimationTree
+		# seek_requests from shadow directly here instead.
 		%MovementStateMachine.sync_visual()
 		%PeekStateMachine.sync_visual()
+		animation_tree.set("parameters/CrouchTimeSeek/seek_request", state.crouch_progress)
+		animation_tree.set("parameters/ProneTimeSeek/seek_request", state.prone_progress)
+		animation_tree.set("parameters/PeekTimeSeek/seek_request", absf(state.peek_progress))
+		animation_tree.set("parameters/Add Peek/add_amount",
+				-1.0 if state.peek_progress < 0.0 else 1.0)
 		return
 	context = Enums.IntegrationContext.VISUAL
 	update_camera(state.look)
@@ -368,9 +382,14 @@ var _camera_rotation: Vector3 = Vector3.ZERO
 func update_camera(look_abs: Vector2) -> void:
 	_player_rotation.y = look_abs.y
 	_camera_rotation.x = look_abs.x
-	if is_authority:
+	# Only drive $CameraController.basis from free_look when free_look is
+	# actively engaged or still decaying. When neither, the AnimationTree's
+	# peek animation owns CameraController:rotation (lean transform) — writing
+	# basis here unconditionally would nuke that animation each tick, killing
+	# first-person peek visuals.
+	if is_authority and (Input.is_action_pressed("free_look") \
+			or _free_look_abs.length_squared() > 0.0001):
 		var free_look := Vector3(_free_look_abs.x, _free_look_abs.y, 0.0)
-		print(free_look)
 		$CameraController.basis = Basis.from_euler(free_look)
 
 	camera.transform.basis = Basis.from_euler(_camera_rotation)
