@@ -73,13 +73,13 @@ func with_rewind(tick: int, callback: Callable) -> Variant:
 
 
 func _is_tick_in_window(tick: int) -> bool:
-	var current_tick: int = _current_server_tick if _current_server_tick >= 0 else NetworkServer.server_tick
+	var current_tick: int = _current_server_tick if _current_server_tick >= 0 else NetServer.server_tick
 	var age: int = current_tick - tick
 	return age >= 0 and age <= max_rewind_ticks
 
 
 # Optional injection for tests + deterministic replays: when >= 0, used as
-# "now" instead of NetworkServer.server_tick. Set via set_current_tick().
+# "now" instead of NetServer.server_tick. Set via set_current_tick().
 var _current_server_tick: int = -1
 
 func set_current_tick(tick: int) -> void:

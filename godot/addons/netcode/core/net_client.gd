@@ -22,8 +22,8 @@ var remote_ids: Array[int]
 var _disconnected_message: String = ""
 
 func _ready() -> void:
-	NetworkTransport.on_client_packet.connect(on_client_packet)
-	NetworkTransport.on_disconnect_from_server.connect(on_disconnect_from_server)
+	NetSession.on_client_packet.connect(on_client_packet)
+	NetSession.on_disconnect_from_server.connect(on_disconnect_from_server)
 
 
 func on_client_packet(data) -> void:

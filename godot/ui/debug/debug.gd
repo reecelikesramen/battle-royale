@@ -6,7 +6,7 @@ extends PanelContainer
 var props = {}
 
 var player: PlayerController:
-	get: return NetworkClient.player
+	get: return NetClient.player
 
 func _enter_tree() -> void:
 	# Phase 9b: chat now travels over NetReliableHub instead of a dedicated
@@ -22,13 +22,13 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	visible = false
 	
-	if NetworkTransport.is_server:
+	if NetSession.is_server:
 		return
 	
 	if not player or not player.is_authority:
 		return
 	
-	NetworkClient.debug = self
+	NetClient.debug = self
 	%ScrollContainer.visible = false
 
 	# Timer to auto-hide chat when debug overlay is off
@@ -41,7 +41,7 @@ func _ready() -> void:
 
 func _process(_delta) -> void:
 	set_debug_property("FPS", Engine.get_frames_per_second())
-	set_debug_property("Ping", "%d ms" % NetworkTransport.client_ping)
+	set_debug_property("Ping", "%d ms" % NetSession.client_ping)
 
 
 func _input(event):
@@ -67,7 +67,7 @@ func set_debug_property(title: String, value):
 
 
 func _on_exit_to_menu_button_pressed() -> void:
-	NetworkTransport.disconnect_client()
+	NetSession.disconnect_client()
 
 
 func _on_quit_button_pressed() -> void:
@@ -76,7 +76,7 @@ func _on_quit_button_pressed() -> void:
 
 func _on_chat_edit_text_submitted(new_text: String) -> void:
 	%ChatEdit.text = ""
-	var payload := _encode_chat_payload(NetworkClient.username, new_text)
+	var payload := _encode_chat_payload(NetClient.username, new_text)
 	NetReliableHub.send(Enums.ReliableTopic.CHAT, payload)
 
 

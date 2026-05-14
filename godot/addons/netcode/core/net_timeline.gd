@@ -24,8 +24,8 @@ const _EMA_ALPHA: float = 0.1
 
 
 func _ready() -> void:
-	if NetworkClient.has_signal("handle_server_tick"):
-		NetworkClient.handle_server_tick.connect(_on_server_tick)
+	if NetClient.has_signal("handle_server_tick"):
+		NetClient.handle_server_tick.connect(_on_server_tick)
 
 
 func _on_server_tick(packet) -> void:

@@ -13,4 +13,4 @@ var animation_tree: AnimationTree:
 var ctx: Enums.IntegrationContext:
 	get: return player.context
 var is_remote_player: bool:
-	get: return !player.is_authority and !NetworkTransport.is_server
+	get: return !player.is_authority and !NetSession.is_server

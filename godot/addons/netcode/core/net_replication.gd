@@ -22,8 +22,8 @@ var _pending_packets: Dictionary = {}     # Vector2i -> Array[NetStatePacket]
 
 
 func _ready() -> void:
-	if NetworkClient.has_signal("handle_net_state"):
-		NetworkClient.handle_net_state.connect(_on_net_state)
+	if NetClient.has_signal("handle_net_state"):
+		NetClient.handle_net_state.connect(_on_net_state)
 
 
 func register_schema(schema_id: int, schema: NetSchema) -> void:

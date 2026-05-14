@@ -118,6 +118,6 @@ func test_unregister_clears_pending() -> void:
 func _new_registry() -> Node:
 	# Load the NetReplication script and instantiate it. We don't attach to a
 	# scene tree, so its _ready won't run — _ready only wires the
-	# NetworkClient.handle_net_state signal, which tests don't need.
+	# NetClient.handle_net_state signal, which tests don't need.
 	var script: Script = load("res://addons/netcode/core/net_replication.gd")
 	return script.new()

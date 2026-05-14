@@ -56,7 +56,7 @@ var host: Node:
 # True when this peer is the local authority for the entity (owns the input
 # stream + runs prediction). False on the server and on remote-proxy clients.
 var is_local_authority: bool:
-	get: return not NetworkTransport.is_server and owner_id == NetworkClient.id
+	get: return not NetSession.is_server and owner_id == NetClient.id
 
 # Server tick we last received a state snapshot for. Echoed in every outbound
 # input so the server can advance its per-client baseline and delta-encode the
@@ -346,7 +346,7 @@ func handle_net_state_packet(packet) -> void:
 	decode_payload_into(shadow_state, packet.payload)
 	state_snapshot_received.emit(shadow_state, last_input_seq, last_received_tick)
 
-	if NetworkTransport.is_server:
+	if NetSession.is_server:
 		return
 	if is_local_authority:
 		unacked_inputs.prune_up_to(last_input_seq)
@@ -398,19 +398,19 @@ func server_broadcast_snapshot(last_input_seq: int) -> void:
 	# baseline_tick = the prior keyframe tick this delta is anchored against;
 	# 0 on a keyframe itself. Phase 6b.4 may use it for per-client baseline
 	# selection once we send per-peer instead of broadcast.
-	packet.baseline_tick = 0 if is_keyframe_now else (NetworkServer.server_tick - _ticks_since_keyframe)
-	packet.new_tick = NetworkServer.server_tick
+	packet.baseline_tick = 0 if is_keyframe_now else (NetServer.server_tick - _ticks_since_keyframe)
+	packet.new_tick = NetServer.server_tick
 	packet.payload = snapshot_payload(is_keyframe_now)
 	# Phase 11: when an interest_filter is installed, switch from broadcast to
 	# targeted per-peer send. Same encoded payload is reused across recipients
 	# (per-peer deltas / per-peer baselines remain a follow-up optimization).
 	var gd_packet := packet.to_payload()
 	if interest_filter.is_null():
-		NetworkTransport.broadcast_packet(gd_packet)
+		NetSession.broadcast_packet(gd_packet)
 	else:
-		for peer_id in NetworkServer.peer_ids:
+		for peer_id in NetServer.peer_ids:
 			if interest_filter.call(peer_id, self):
-				NetworkTransport.send_packet_to_peer(peer_id, gd_packet)
+				NetSession.send_packet_to_peer(peer_id, gd_packet)
 	# duplicate() snapshots shadow_state so subsequent in-place mutation by the
 	# sim doesn't poison the baseline mid-tick.
 	_last_broadcasted_state = shadow_state.duplicate()
@@ -476,7 +476,7 @@ func apply_shadow_state_to_scene() -> void:
 func _physics_process(delta: float) -> void:
 	if schema == null or shadow_state == null:
 		return
-	if NetworkTransport.is_server:
+	if NetSession.is_server:
 		_server_tick(delta)
 	elif is_local_authority:
 		_authority_tick(delta)
@@ -497,7 +497,7 @@ func _authority_tick(delta: float) -> void:
 	while input_redundancy_ring.size() > INPUT_REDUNDANCY:
 		input_redundancy_ring.pop_front()
 	for redundant in input_redundancy_ring:
-		NetworkTransport.send_packet(redundant.to_payload())
+		NetSession.send_packet(redundant.to_payload())
 
 	if host.has_method(&"_simulate"):
 		host._simulate(shadow_state, cmd, delta)

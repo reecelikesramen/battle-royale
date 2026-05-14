@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Bundle godot/addons/netcode/ into a distributable addon by copying the
-# Rust release binary into bin/ with the platform-suffixed name the template
-# .gdextension expects, then materializing the .gdextension from the template.
+# Bundle godot/addons/netcode/ into a distributable copy of the addon. The
+# in-tree addons/netcode/netcode.gdextension uses mixed dev paths (debug ->
+# rust/target/debug/, release -> addons/netcode/bin/) so editor + release
+# builds both work locally; for shipping, this script copies the addon to
+# dist/netcode-addon/ and renders netcode.gdextension.template into the
+# dist's .gdextension — distribution paths target only addons/netcode/bin/.
 #
 # Usage:
 #   scripts/make-addon.sh                 # builds + copies for host platform
 #   scripts/make-addon.sh --skip-build    # use existing rust/target/release
 #
-# CI builds the three platforms in parallel and runs this script in --skip-build
-# mode after dropping the cross-built libs into rust/target/release/<triple>/.
-# Right now only host-platform packaging is wired up; cross-platform plumbing
-# lands when CI is updated.
+# CI invokes this with --skip-build after gathering the three cross-built
+# libs into addons/netcode/bin/ from artifact uploads.
 
 set -euo pipefail
 
@@ -19,7 +20,7 @@ RUST_DIR="$REPO_ROOT/rust"
 ADDON_DIR="$REPO_ROOT/godot/addons/netcode"
 BIN_DIR="$ADDON_DIR/bin"
 TEMPLATE="$ADDON_DIR/netcode.gdextension.template"
-GDEXT_OUT="$ADDON_DIR/netcode.gdextension"
+DIST_DIR="$REPO_ROOT/dist/netcode-addon"
 
 SKIP_BUILD=0
 for arg in "$@"; do
@@ -37,7 +38,6 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
 fi
 
 HOST_OS="$(uname -s)"
-HOST_ARCH="$(uname -m)"
 
 case "$HOST_OS" in
     Darwin)
@@ -66,7 +66,13 @@ fi
 echo "==> copy $SRC -> $DST"
 cp "$SRC" "$DST"
 
-echo "==> render $GDEXT_OUT from template"
-cp "$TEMPLATE" "$GDEXT_OUT"
+echo "==> assemble dist tree at $DIST_DIR"
+rm -rf "$DIST_DIR"
+mkdir -p "$DIST_DIR"
+# Replicate the addon dir but swap the dev .gdextension for the rendered
+# distribution one. .uid sidecar files come along so cross-scene refs stay
+# valid in the target project.
+(cd "$ADDON_DIR" && tar --exclude netcode.gdextension --exclude netcode.gdextension.template -cf - .) | (cd "$DIST_DIR" && tar -xf -)
+cp "$TEMPLATE" "$DIST_DIR/netcode.gdextension"
 
-echo "done. Distribute: $ADDON_DIR"
+echo "done. Distribute: $DIST_DIR"

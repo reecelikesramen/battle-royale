@@ -31,10 +31,10 @@ var _idem_counter: int = 0
 
 
 func _ready() -> void:
-	if NetworkClient.has_signal("handle_net_reliable"):
-		NetworkClient.handle_net_reliable.connect(_on_client_reliable_packet)
-	if NetworkServer.has_signal("handle_net_reliable"):
-		NetworkServer.handle_net_reliable.connect(_on_server_reliable_packet)
+	if NetClient.has_signal("handle_net_reliable"):
+		NetClient.handle_net_reliable.connect(_on_client_reliable_packet)
+	if NetServer.has_signal("handle_net_reliable"):
+		NetServer.handle_net_reliable.connect(_on_server_reliable_packet)
 
 
 # Adds a callback for a topic. Server-side callbacks receive
@@ -60,7 +60,7 @@ func send(topic: int, payload: PackedByteArray, idempotency_key: int = -1) -> in
 	packet.topic = topic
 	packet.idempotency_key = key
 	packet.payload = payload
-	NetworkTransport.send_packet(packet.to_payload())
+	NetSession.send_packet(packet.to_payload())
 	return key
 
 
@@ -71,7 +71,7 @@ func broadcast(topic: int, payload: PackedByteArray, idempotency_key: int = -1) 
 	packet.topic = topic
 	packet.idempotency_key = key
 	packet.payload = payload
-	NetworkTransport.broadcast_packet(packet.to_payload())
+	NetSession.broadcast_packet(packet.to_payload())
 	return key
 
 

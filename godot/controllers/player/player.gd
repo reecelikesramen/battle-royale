@@ -33,7 +33,7 @@ const TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
 @onready var crouch_shapecast: ShapeCast3D = %CrouchShapeCast3D
 
 var is_authority: bool:
-	get: return !NetworkTransport.is_server && _owner_id == NetworkClient.id
+	get: return !NetSession.is_server && _owner_id == NetClient.id
 
 var is_replaying_inputs: bool:
 	get: return _net.is_replaying_inputs
@@ -93,11 +93,11 @@ func _enter_tree() -> void:
 		_net.entity_id = _owner_id
 		add_child(_net)
 
-	NetworkServer.handle_player_input.connect(server_handle_player_input)
+	NetServer.handle_player_input.connect(server_handle_player_input)
 
 
 func _exit_tree() -> void:
-	NetworkServer.handle_player_input.disconnect(server_handle_player_input)
+	NetServer.handle_player_input.disconnect(server_handle_player_input)
 
 
 func _ready():
@@ -118,7 +118,7 @@ func _ready():
 		call_deferred("remove_child", %GUI)
 		call_deferred("remove_child", $EscapeMenu)
 		camera.call_deferred("remove_child", $CameraController/Camera3D/ReflectionProbe)
-		if not NetworkTransport.is_server:
+		if not NetSession.is_server:
 			call_deferred("remove_child", $GameController)
 
 
@@ -237,7 +237,7 @@ func _load_simulation_state(state: PlayerState) -> void:
 # from state.look, visual SM ids sync via sync_visual. Position / velocity are
 # left to _apply_corrections so they smooth across frames.
 func _apply_state(state: PlayerState) -> void:
-	if NetworkTransport.is_server:
+	if NetSession.is_server:
 		# No visual on the server, but keep the player CharacterBody aligned to
 		# shadow for the editor's inspector / for game-body collision exception.
 		global_position = state.pos
@@ -252,7 +252,7 @@ func _apply_state(state: PlayerState) -> void:
 # Animation / visual SM physics. Runs after _apply_state; reads input bound by
 # _simulate. Skipped on the server (headless).
 func _visualize(delta: float, _state: PlayerState) -> void:
-	if NetworkTransport.is_server:
+	if NetSession.is_server:
 		return
 	context = Enums.IntegrationContext.VISUAL
 	%MovementStateMachine.run_visual(delta)
@@ -461,7 +461,7 @@ func update_velocity(ctx: Enums.IntegrationContext) -> void:
 
 func server_handle_player_input(peer_id: int, input_packet: PlayerInputPacket) -> void:
 	# server only
-	assert(NetworkTransport.is_server)
+	assert(NetSession.is_server)
 
 	# not owner
 	if peer_id != _owner_id:

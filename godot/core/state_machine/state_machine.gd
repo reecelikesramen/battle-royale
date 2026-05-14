@@ -18,8 +18,8 @@ var _pending_transition: StringName = &""
 var _show_in_debug: bool:
 	get:
 		if !SHOW_IN_DEBUG: return false
-		if NetworkTransport.is_server: return false
-		if not NetworkClient.debug: return false
+		if NetSession.is_server: return false
+		if not NetClient.debug: return false
 		var player: PlayerController = owner
 		return player.is_authority
 
@@ -118,4 +118,4 @@ func _switch_logic(new_state_name: StringName) -> void:
 
 func _process(_delta: float) -> void:
 	if _show_in_debug:
-		NetworkClient.debug.set_debug_property(DEBUG_NAME, _logic_state.name)
+		NetClient.debug.set_debug_property(DEBUG_NAME, _logic_state.name)

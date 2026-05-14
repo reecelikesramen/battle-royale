@@ -10,13 +10,13 @@ var peer_ids: Array[int]
 var server_tick: int = 0
 
 func _ready() -> void:
-	NetworkTransport.on_peer_connect.connect(on_peer_connected)
-	NetworkTransport.on_peer_disconnect.connect(on_peer_disconnected)
-	NetworkTransport.on_server_packet.connect(on_server_packet)
+	NetSession.on_peer_connect.connect(on_peer_connected)
+	NetSession.on_peer_disconnect.connect(on_peer_disconnected)
+	NetSession.on_server_packet.connect(on_server_packet)
 
 
 func _physics_process(_delta: float) -> void:
-	if not NetworkTransport.is_server:
+	if not NetSession.is_server:
 		return
 	if peer_ids.is_empty():
 		return
@@ -26,7 +26,7 @@ func _physics_process(_delta: float) -> void:
 	var packet := ServerTickPacket.new()
 	packet.server_tick = server_tick
 	packet.server_tick_us = Time.get_ticks_usec() & 0xFFFFFFFF
-	NetworkTransport.broadcast_packet(packet.to_payload())
+	NetSession.broadcast_packet(packet.to_payload())
 
 func on_peer_connected(peer_id: int) -> void:
 	peer_ids.append(peer_id)
@@ -34,7 +34,7 @@ func on_peer_connected(peer_id: int) -> void:
 	var id_assignment := IdAssignmentPacket.new()
 	id_assignment.id = peer_id
 	id_assignment.remote_ids = peer_ids.duplicate()
-	NetworkTransport.broadcast_packet(id_assignment.to_payload())
+	NetSession.broadcast_packet(id_assignment.to_payload())
 
 
 func on_peer_disconnected(peer_id: int) -> void:
