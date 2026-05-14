@@ -24,6 +24,8 @@ const TEST_SCRIPTS := [
 	"res://tests/test_state_id_stability.gd",
 	"res://tests/test_schema_hash.gd",
 	"res://tests/test_spawn_dispatch.gd",
+	"res://tests/test_proxy_only_child_ref.gd",
+	"res://tests/test_player_schema_resource.gd",
 ]
 
 

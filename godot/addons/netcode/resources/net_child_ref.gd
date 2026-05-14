@@ -15,3 +15,9 @@ class_name NetChildRef extends Resource
 @export var name: StringName
 @export var path: NodePath
 @export var fields: PackedStringArray
+
+## Sprint 2: when true, the snapshot decoder writes this child's fields only
+## on proxy clients (not local authority, not server). Lets a controller use
+## NetChildRef to ship cosmetic state (animation blend, peek lerp) to remote
+## viewers without clobbering the locally-driven values on the owner.
+@export var proxy_only: bool = false

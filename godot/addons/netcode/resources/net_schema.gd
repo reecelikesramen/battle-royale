@@ -73,8 +73,9 @@ func compute_hash() -> int:
 				c.deadband,
 				int(c.always_snap)])
 	for cr in child_refs:
-		parts.append("child|%s|%s|%s" % [
+		parts.append("child|%s|%s|%s|%d" % [
 				str(cr.name),
 				str(cr.path),
-				"|".join(cr.fields)])
+				"|".join(cr.fields),
+				int(cr.proxy_only)])
 	return "\n".join(parts).hash()

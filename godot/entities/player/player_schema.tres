@@ -1,0 +1,71 @@
+[gd_resource type="Resource" script_class="NetSchema" load_steps=18 format=3]
+
+[ext_resource type="Script" path="res://addons/netcode/resources/net_child_ref.gd" id="1_k7ufs"]
+[ext_resource type="Script" path="res://controllers/player/player_input.gd" id="2_r06js"]
+[ext_resource type="Script" path="res://addons/netcode/resources/net_correction.gd" id="3_x5rij"]
+[ext_resource type="Script" path="res://addons/netcode/resources/net_schema.gd" id="4_ncpu0"]
+[ext_resource type="Script" path="res://controllers/player/player_state.gd" id="5_5k8u3"]
+[ext_resource type="Script" path="res://addons/netcode/resources/net_field_config.gd" id="6_4w2p4"]
+
+[sub_resource type="Resource" id="Resource_ia2k4"]
+script = ExtResource("3_x5rij")
+name = &"horizontal"
+fields = PackedStringArray("pos.xz")
+snap_threshold = 1.5
+deadband = 0.07
+
+[sub_resource type="Resource" id="Resource_j4kbt"]
+script = ExtResource("3_x5rij")
+name = &"vertical"
+fields = PackedStringArray("pos.y")
+snap_threshold = 2.5
+smooth_rate = 4.0
+deadband = 0.15
+
+[sub_resource type="Resource" id="Resource_dednk"]
+script = ExtResource("3_x5rij")
+name = &"velocity_horizontal"
+fields = PackedStringArray("velocity.xz")
+snap_threshold = 1.5
+smooth_rate = 12.0
+deadband = 0.2
+
+[sub_resource type="Resource" id="Resource_vkgre"]
+script = ExtResource("6_4w2p4")
+name = &"pos"
+
+[sub_resource type="Resource" id="Resource_bg44s"]
+script = ExtResource("6_4w2p4")
+name = &"velocity"
+
+[sub_resource type="Resource" id="Resource_ngq10"]
+script = ExtResource("6_4w2p4")
+name = &"look"
+
+[sub_resource type="Resource" id="Resource_kv0la"]
+script = ExtResource("6_4w2p4")
+name = &"movement_state"
+
+[sub_resource type="Resource" id="Resource_7kikq"]
+script = ExtResource("6_4w2p4")
+name = &"peek_state"
+
+[sub_resource type="Resource" id="Resource_goet2"]
+script = ExtResource("6_4w2p4")
+name = &"crouch_progress"
+
+[sub_resource type="Resource" id="Resource_d7dqj"]
+script = ExtResource("6_4w2p4")
+name = &"prone_progress"
+
+[sub_resource type="Resource" id="Resource_kt55c"]
+script = ExtResource("6_4w2p4")
+name = &"peek_progress"
+
+[resource]
+script = ExtResource("4_ncpu0")
+id = 1
+state_class = ExtResource("5_5k8u3")
+command_class = ExtResource("2_r06js")
+state_fields = Array[ExtResource("6_4w2p4")]([SubResource("Resource_vkgre"), SubResource("Resource_bg44s"), SubResource("Resource_ngq10"), SubResource("Resource_kv0la"), SubResource("Resource_7kikq"), SubResource("Resource_goet2"), SubResource("Resource_d7dqj"), SubResource("Resource_kt55c")])
+corrections = Array[ExtResource("3_x5rij")]([SubResource("Resource_ia2k4"), SubResource("Resource_j4kbt"), SubResource("Resource_dednk")])

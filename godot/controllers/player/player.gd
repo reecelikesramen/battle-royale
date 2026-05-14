@@ -88,7 +88,10 @@ var _is_toggle_peeked_right := false
 func _enter_tree() -> void:
 	if _net.get_parent() == null:
 		_net.name = "NetPredictor"
-		_net.schema = PlayerSchema.build()
+		# Sprint 2: load the inspector-editable .tres when present (lets the
+		# UI drive quant / correction tuning) and fall back to a code-built
+		# schema on fresh checkouts.
+		_net.schema = PlayerSchema.get_schema()
 		_net.owner_id = _owner_id
 		_net.entity_id = _owner_id
 		add_child(_net)

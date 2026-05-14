@@ -179,7 +179,9 @@ func _resolve_children() -> void:
 		if node == null:
 			push_warning("NetChildRef '%s' path '%s' did not resolve" % [cref.name, cref.path])
 			continue
-		_resolved_children.append([node, cref.fields])
+		# Sprint 2: stash the originating NetChildRef so the decoder can consult
+		# its proxy_only flag without re-walking schema.child_refs each packet.
+		_resolved_children.append([node, cref.fields, cref])
 		_last_child_values.append({})
 
 
@@ -358,13 +360,23 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 	var sp := StreamPeerBuffer.new()
 	sp.data_array = payload
 	var is_keyframe := sp.get_u8() == 1
+	# Sprint 2: NetChildRef.proxy_only is honored here. On the local authority
+	# and on the server, bytes for proxy_only refs are still consumed from the
+	# stream (the wire format isn't conditional) but the node.set() is
+	# suppressed so the host's locally-driven values aren't clobbered.
+	var suppress_child_writes: bool = NetSession.is_server or is_local_authority
 	if is_keyframe:
 		for i in state_field_names.size():
 			state.set(state_field_names[i], _decode_state_field(sp, i, state.get(state_field_names[i])))
 		for entry in _resolved_children:
 			var node: Node = entry[0]
-			for f in entry[1]:
-				node.set(f, sp.get_var())
+			var fields: PackedStringArray = entry[1]
+			var cref: NetChildRef = entry[2] if entry.size() > 2 else null
+			var skip: bool = suppress_child_writes and cref != null and cref.proxy_only
+			for f in fields:
+				var v = sp.get_var()
+				if not skip:
+					node.set(f, v)
 	else:
 		var n_state := state_field_names.size()
 		var n_total := n_state
@@ -380,9 +392,13 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 		for entry in _resolved_children:
 			var node: Node = entry[0]
 			var fields: PackedStringArray = entry[1]
+			var cref: NetChildRef = entry[2] if entry.size() > 2 else null
+			var skip: bool = suppress_child_writes and cref != null and cref.proxy_only
 			for f in fields:
 				if mask[bit_idx / 8] & (1 << (bit_idx % 8)):
-					node.set(f, sp.get_var())
+					var v = sp.get_var()
+					if not skip:
+						node.set(f, v)
 				bit_idx += 1
 
 
