@@ -1,5 +1,33 @@
 extends NetworkDriver
 
+# CLI overrides for per-instance lag/loss/jitter simulation.
+#
+# Usage: pass args after `--` when launching Godot, or set per-instance
+# `arguments` in project_metadata.cfg's `run_instances_config` so each
+# launched window gets its own profile.
+#
+# Profile (applied first, then individual overrides on top). Accepts either
+# --net-profile=NAME or --net-preset=NAME (alias for backward compat):
+#   --net-profile=off|broadband|wifi-light|wifi-congested|mobile-average|mobile-bufferbloat
+#
+# Fine-tune (units: ms for lag/jitter/reorder-ms/dup-ms; percent*100 for
+# loss/dup/reorder, matching the inspector knobs' integer scale):
+#   --lag-send=N --lag-recv=N
+#   --jitter-send=N --jitter-recv=N
+#   --loss-send=N --loss-recv=N
+#   --dup-send=N --dup-recv=N --dup-ms=N
+#   --reorder-send=N --reorder-recv=N --reorder-ms=N
+#
+# Example for asymmetric two-client testing (server at 0, c1 ≈25ms RTT,
+# c2 ≈60ms RTT + jitter + 1% loss):
+#   server:   (no args)
+#   client 1: --lag-send=12 --lag-recv=13 --jitter-send=2 --jitter-recv=2
+#   client 2: --lag-send=30 --lag-recv=30 --jitter-send=15 --jitter-recv=15
+#             --loss-send=1 --loss-recv=1
+#
+# CLI parsing runs after inspector defaults are applied, so any unspecified
+# knob keeps whatever the .tscn or a preset configured.
+
 @export_range(0, 1000) var fake_ping_lag_send: int:
 	set(value):
 		print("Setting fake ping lag send to %d" % value)
@@ -233,18 +261,108 @@ func _ready() -> void:
 		return
 	if is_dedicated_server:
 		start_server_default()
-		set_fake_ping_lag_send(fake_ping_lag_send)
-		set_fake_ping_lag_recv(fake_ping_lag_recv)
-		set_fake_loss_send(fake_loss_send)
-		set_fake_loss_recv(fake_loss_recv)
-		set_fake_jitter_send(fake_jitter_send)
-		set_fake_jitter_recv(fake_jitter_recv)
-		set_fake_dup_send(fake_dup_send)
-		set_fake_dup_recv(fake_dup_recv)
-		set_fake_dup_ms_max(fake_dup_ms_max)
-		set_fake_reorder_send(fake_reorder_send)
-		set_fake_reorder_recv(fake_reorder_recv)
-		set_fake_reorder_ms(fake_reorder_ms)
+		# Re-push the inspector defaults: starting the server resets some GNS
+		# internals, so we have to set them again here.
+		_reapply_fake_state()
+	# CLI overrides run last so per-instance flags can override either the
+	# scene defaults or a preset that was applied above.
+	_apply_cli_lag_overrides()
+
+
+# Pushes every fake_* value through its property setter (which proxies into
+# NetworkDriver). Used after start_server_default() resets GNS state and as a
+# helper after preset / CLI overrides change multiple knobs.
+func _reapply_fake_state() -> void:
+	set_fake_ping_lag_send(fake_ping_lag_send)
+	set_fake_ping_lag_recv(fake_ping_lag_recv)
+	set_fake_loss_send(fake_loss_send)
+	set_fake_loss_recv(fake_loss_recv)
+	set_fake_jitter_send(fake_jitter_send)
+	set_fake_jitter_recv(fake_jitter_recv)
+	set_fake_dup_send(fake_dup_send)
+	set_fake_dup_recv(fake_dup_recv)
+	set_fake_dup_ms_max(fake_dup_ms_max)
+	set_fake_reorder_send(fake_reorder_send)
+	set_fake_reorder_recv(fake_reorder_recv)
+	set_fake_reorder_ms(fake_reorder_ms)
+
+
+# Parses --net-preset=NAME and individual --foo=N overrides from
+# OS.get_cmdline_user_args(). Preset (if present) applies first as a baseline;
+# remaining --foo=N flags override individual knobs on top. Unknown args are
+# silently skipped so this is safe to mix with the existing `--server` flag.
+const _PRESET_MAP := {
+	"off": LoadTestingPreset.OFF,
+	"broadband": LoadTestingPreset.BROADBAND,
+	"wifi-light": LoadTestingPreset.WIFI_LIGHT,
+	"wifi-congested": LoadTestingPreset.WIFI_CONGESTED,
+	"mobile-average": LoadTestingPreset.MOBILE_AVERAGE,
+	"mobile-bufferbloat": LoadTestingPreset.MOBILE_BUFFERBLOAT,
+}
+
+const _OVERRIDE_KEYS := {
+	"lag-send": "fake_ping_lag_send",
+	"lag-recv": "fake_ping_lag_recv",
+	"loss-send": "fake_loss_send",
+	"loss-recv": "fake_loss_recv",
+	"jitter-send": "fake_jitter_send",
+	"jitter-recv": "fake_jitter_recv",
+	"dup-send": "fake_dup_send",
+	"dup-recv": "fake_dup_recv",
+	"dup-ms": "fake_dup_ms_max",
+	"reorder-send": "fake_reorder_send",
+	"reorder-recv": "fake_reorder_recv",
+	"reorder-ms": "fake_reorder_ms",
+}
+
+
+func _apply_cli_lag_overrides() -> void:
+	var args: PackedStringArray = OS.get_cmdline_user_args()
+	if args.is_empty():
+		return
+	var applied: Array[String] = []
+	var unknown: Array[String] = []
+	# First pass: profile (so individual overrides can layer on top).
+	for arg in args:
+		var parsed := _parse_kv(arg)
+		if parsed.is_empty():
+			continue
+		if parsed.key != "net-profile" and parsed.key != "net-preset":
+			continue
+		if _PRESET_MAP.has(parsed.value):
+			_apply_load_testing_preset(_PRESET_MAP[parsed.value])
+			applied.append("profile=%s" % parsed.value)
+		else:
+			push_warning("[NetSession] unknown --%s value '%s' (valid: %s)" % [
+					parsed.key, parsed.value, ", ".join(_PRESET_MAP.keys())])
+	# Second pass: individual overrides.
+	for arg in args:
+		var parsed := _parse_kv(arg)
+		if parsed.is_empty():
+			continue
+		if parsed.key == "net-profile" or parsed.key == "net-preset" or parsed.key == "server":
+			continue
+		if not _OVERRIDE_KEYS.has(parsed.key):
+			unknown.append(arg)
+			continue
+		var prop_name: String = _OVERRIDE_KEYS[parsed.key]
+		set(prop_name, int(parsed.value))
+		applied.append("%s=%d" % [parsed.key, int(parsed.value)])
+	# Always log so a typo (no matches) is visible instead of silently ignored.
+	if not applied.is_empty():
+		print("[NetSession] CLI lag overrides applied: %s" % ", ".join(applied))
+	if not unknown.is_empty():
+		push_warning("[NetSession] CLI args unrecognized: %s" % ", ".join(unknown))
+
+
+# "--key=value" -> {key: "key", value: "value"}. Returns {} for anything else.
+static func _parse_kv(arg: String) -> Dictionary:
+	if not arg.begins_with("--"):
+		return {}
+	var eq := arg.find("=")
+	if eq < 0:
+		return {}
+	return {"key": arg.substr(2, eq - 2), "value": arg.substr(eq + 1)}
 
 
 func _notification(what):

@@ -16,19 +16,24 @@ func test_identical_schemas_hash_equal() -> void:
 func test_changing_quant_changes_hash() -> void:
 	var a := _make_schema()
 	var b := _make_schema()
-	(b.state_fields[0] as NetFieldConfig).quant = NetFieldConfig.Quant.FLOAT32
+	b.state_fields[&"pos"].quant = NetStateField.Quant.FLOAT32
 	assert_true(a.compute_hash() != b.compute_hash(),
 			"toggling quant on a field should change the schema hash")
 
 
-func test_reordering_fields_changes_hash() -> void:
+func test_renaming_field_changes_hash() -> void:
+	# After moving to Dictionary[StringName, NetStateField] storage, "order"
+	# isn't a property of the schema (compute_hash sorts keys). What matters
+	# instead is the *set* of keys + their per-field config. Renaming a key
+	# changes the hash; identity content under a different name is a different
+	# wire shape.
 	var a := _make_schema()
 	var b := _make_schema()
-	# Swap the two fields' positions: same fields, different order, different
-	# wire layout, must hash differently.
-	b.state_fields = [b.state_fields[1], b.state_fields[0]]
+	var pos_cfg: NetStateField = b.state_fields[&"pos"]
+	b.state_fields.erase(&"pos")
+	b.state_fields[&"position"] = pos_cfg
 	assert_true(a.compute_hash() != b.compute_hash(),
-			"reordering state_fields should change the hash")
+			"renaming a state_fields key should change the hash")
 
 
 func test_correction_change_changes_hash() -> void:
@@ -59,18 +64,16 @@ func _make_schema() -> NetSchema:
 	# changes to it don't break these tests.
 	var schema := NetSchema.new()
 	schema.id = 4242
-	schema.state_class = NetState
-	schema.command_class = NetCommand
+	schema.state_template = NetState.new()
+	schema.command_template = NetCommand.new()
 	schema.tick_hz = 120
 	schema.snapshot_hz = 30
 
-	var f1 := NetFieldConfig.new()
-	f1.name = &"pos"
-	f1.quant = NetFieldConfig.Quant.AUTO
-	var f2 := NetFieldConfig.new()
-	f2.name = &"velocity"
-	f2.quant = NetFieldConfig.Quant.AUTO
-	schema.state_fields = [f1, f2]
+	var f1 := NetStateField.new()
+	f1.quant = NetStateField.Quant.AUTO
+	var f2 := NetStateField.new()
+	f2.quant = NetStateField.Quant.AUTO
+	schema.state_fields = {&"pos": f1, &"velocity": f2}
 
 	var c := NetCorrection.new()
 	c.name = &"horizontal"

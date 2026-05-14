@@ -56,8 +56,8 @@ func test_pending_packet_buffered_then_flushed_on_register() -> void:
 	# bytes, not garbage.
 	var src := NetPredictor.new()
 	src.schema = schema
-	src.shadow_state = src.state_class.new()
-	src.render_state = src.state_class.new()
+	src.shadow_state = src.state_template.duplicate(true) as NetState
+	src.render_state = src.state_template.duplicate(true) as NetState
 	src.state_field_names = NetPredictor._user_field_names(src.shadow_state)
 	(src.shadow_state as PlayerState).pos = Vector3(11.0, 22.0, 33.0)
 
@@ -76,8 +76,8 @@ func test_pending_packet_buffered_then_flushed_on_register() -> void:
 	# Register the entity. Queue should drain into the predictor.
 	var dst := NetPredictor.new()
 	dst.schema = schema
-	dst.shadow_state = dst.state_class.new()
-	dst.render_state = dst.state_class.new()
+	dst.shadow_state = dst.state_template.duplicate(true) as NetState
+	dst.render_state = dst.state_template.duplicate(true) as NetState
 	dst.state_field_names = NetPredictor._user_field_names(dst.shadow_state)
 	reg.register_entity(schema.id, 555, dst)
 

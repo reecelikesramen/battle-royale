@@ -620,9 +620,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_ping_lag_send(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Send,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -630,12 +627,9 @@ impl NetworkDriver {
             godot_print!("ERROR: Failed to set global config value: {:#?}", e);
         });
     }
-    
+
     #[func]
     fn set_fake_ping_lag_recv(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLag_Recv,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -646,9 +640,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_loss_send(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLoss_Send,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -659,9 +650,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_loss_recv(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketLoss_Recv,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -672,9 +660,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_jitter_send(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketJitter_Send_Avg,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -685,9 +670,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_jitter_recv(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketJitter_Recv_Avg,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -698,9 +680,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_dup_send(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_Send,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -711,9 +690,6 @@ impl NetworkDriver {
     
     #[func]
     fn set_fake_dup_recv(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_Recv,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -724,9 +700,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_dup_ms_max(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketDup_TimeMax,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -737,9 +710,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_reorder_send(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Send,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -750,9 +720,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_reorder_recv(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Recv,
             GnsConfig::Int32(i64_to_u32(value)),
@@ -763,9 +730,6 @@ impl NetworkDriver {
 
     #[func]
     fn set_fake_reorder_ms(&mut self, value: i64) {
-        if !self.is_server {
-            return;
-        }
         self.gns_global.utils().set_global_config_value(
             ESteamNetworkingConfigValue::k_ESteamNetworkingConfig_FakePacketReorder_Time,
             GnsConfig::Int32(i64_to_u32(value)),

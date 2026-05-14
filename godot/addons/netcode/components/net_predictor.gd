@@ -1,4 +1,19 @@
+@tool
 class_name NetPredictor extends Node
+
+
+# Editor-time validation. Called by Godot whenever this node is selected /
+# any of its properties change. Returns a list of warning strings shown on
+# the red triangle in the scene tree. Runtime is a no-op (tool-only).
+func _get_configuration_warnings() -> PackedStringArray:
+	var warnings: PackedStringArray = PackedStringArray()
+	if schema == null:
+		warnings.append("NetPredictor.schema is unset — drag a NetSchema .tres into the Schema slot.")
+		return warnings
+	# Surface ERROR + WARNING; INFO suppressed in scene-tree warnings to keep
+	# the red triangle meaningful.
+	warnings.append_array(schema.validate_strings(ValidationIssue.Severity.WARNING))
+	return warnings
 
 # Sprint 1: hook-driven tick dispatcher. NetPredictor owns _physics_process and
 # routes per-role into host-implemented callbacks defined on its parent (the
@@ -83,16 +98,20 @@ signal state_snapshot_received(state: NetState, last_input_seq: int, new_tick: i
 # lag-comp can ignore the signal.
 signal shadow_state_applied()
 
-# Inspector-authored schema describing this entity's state + command shape,
-# tick rates, codec metadata, and reconcile channels. Set externally before
-# _ready. state_class and command_class accessors below pull from the schema.
+## Schema describing this entity's state + command shape, tick rates, codec
+## metadata, and reconcile channels. Required: drag a NetSchema .tres into
+## this slot. The predictor walks the schema in _ready to allocate
+## shadow_state, register with NetReplication, and resolve child_refs.
 @export var schema: NetSchema
 
-var state_class: Script:
-	get: return schema.state_class if schema else null
+# Template accessors. The actual state/command instances (shadow_state etc.)
+# are constructed in _ready via duplicate(true), so the schema's templates
+# stay pristine for future clones.
+var state_template: NetState:
+	get: return schema.state_template if schema else null
 
-var command_class: Script:
-	get: return schema.command_class if schema else null
+var command_template: NetCommand:
+	get: return schema.command_template if schema else null
 
 var shadow_state: NetState
 var render_state: NetState
@@ -101,11 +120,11 @@ var render_state: NetState
 var state_field_names: PackedStringArray = PackedStringArray()
 var command_field_names: PackedStringArray = PackedStringArray()
 
-# Sprint 6: parallel array of NetFieldConfig entries for each state_field_name.
+# Sprint 6: parallel array of NetStateField entries for each state_field_name.
 # Populated at _ready by walking schema.find_state_field; null entries fall back
 # to AUTO (put_var/get_var) so unconfigured fields keep working. Cached so the
 # encode/decode hot loops don't pay a linear search per field per snapshot.
-var _state_field_cfgs: Array[NetFieldConfig] = []
+var _state_field_cfgs: Array[NetStateField] = []
 
 # Phase 11: optional Callable(peer_id: int, predictor: NetPredictor) -> bool.
 # When set, server_broadcast_snapshot iterates connected peers and sends only
@@ -138,13 +157,17 @@ var _last_child_values: Array = []
 
 
 func _ready() -> void:
-	if state_class:
-		shadow_state = state_class.new()
-		render_state = state_class.new()
+	# @tool causes this script to load in the editor for _get_configuration_warnings;
+	# skip the runtime setup so the editor doesn't try to register schemas
+	# against autoloads that aren't running.
+	if Engine.is_editor_hint():
+		return
+	if state_template:
+		shadow_state = state_template.duplicate(true) as NetState
+		render_state = state_template.duplicate(true) as NetState
 		state_field_names = _user_field_names(shadow_state)
-	if command_class:
-		var probe: NetCommand = command_class.new()
-		command_field_names = _user_field_names(probe)
+	if command_template:
+		command_field_names = _user_field_names(command_template)
 
 	if schema:
 		NetReplication.register_schema(schema.id, schema)
@@ -154,11 +177,11 @@ func _ready() -> void:
 		_cache_state_field_cfgs()
 
 	# Auto-subscribe to the server's input fan-out when this predictor has a
-	# command_class. Server filters incoming PlayerInputPackets by peer_id ==
+	# command_template. Server filters incoming PlayerInputPackets by peer_id ==
 	# owner_id and enqueues them; clients never see the signal so the connect
 	# is a no-op for them. Replaces per-controller boilerplate that previously
 	# wired this up in each entity's _enter_tree.
-	if command_class != null and NetSession.is_server:
+	if command_template != null and NetSession.is_server:
 		NetServer.handle_player_input.connect(_on_server_player_input)
 		_subscribed_to_input = true
 
@@ -195,6 +218,8 @@ func _resolve_children() -> void:
 
 
 func _exit_tree() -> void:
+	if Engine.is_editor_hint():
+		return
 	if schema and entity_id >= 0:
 		NetReplication.unregister_entity(schema.id, entity_id)
 	if _subscribed_to_input:
@@ -202,7 +227,7 @@ func _exit_tree() -> void:
 		_subscribed_to_input = false
 
 
-# Server-side handler installed in _ready when command_class is set. Filters by
+# Server-side handler installed in _ready when command_template is set. Filters by
 # owner_id (only inputs from this entity's owning peer feed the queue) and
 # enqueues into server_input_queue so _server_tick can drain the jitter buffer
 # and replay them in order.
@@ -214,7 +239,7 @@ func _on_server_player_input(peer_id: int, input_packet) -> void:
 
 # True once we've connected NetServer.handle_player_input in _ready. Guards
 # _exit_tree against disconnecting a signal we never bound (test harnesses that
-# skip _ready, predictors without a command_class).
+# skip _ready, predictors without a command_template).
 var _subscribed_to_input: bool = false
 
 
@@ -237,6 +262,11 @@ static func _user_field_names(res: Resource) -> PackedStringArray:
 		if (prop.usage & PROPERTY_USAGE_GROUP) != 0:
 			continue
 		if prop.name in SKIP:
+			continue
+		# Per-Resource metadata storage props (`metadata/_custom_script_type` on
+		# default-init NetState, etc). Always present on a script-less base
+		# Resource; never user state.
+		if (prop.name as String).begins_with("metadata/"):
 			continue
 		out.append(prop.name)
 	return out
@@ -311,7 +341,7 @@ var _history_ticks: Array[int] = []    # insertion order, used for FIFO prune
 # Phase 8c: child-ref fields share the dirty mask with state_fields so unchanged
 # child properties (e.g. an idle AnimationTree blend) cost only a bit per tick.
 #
-# Sprint 6: per-field encoding consults NetFieldConfig.quant to optionally
+# Sprint 6: per-field encoding consults NetStateField.quant to optionally
 # replace put_var/get_var with a tighter scalar codec (u8/u16/float32/quat32).
 # Unconfigured fields and child-ref fields stay on AUTO Variant. Decoders need
 # the receiver's `state` to already have a value of the right type for the
@@ -434,35 +464,35 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 # null/missing cfg or Quant.AUTO falls back to put_var so unconfigured fields
 # keep working byte-for-byte identical to pre-Sprint-6 wire format.
 func _encode_state_field(sp: StreamPeerBuffer, field_idx: int, value: Variant) -> void:
-	var cfg: NetFieldConfig = _state_field_cfgs[field_idx] if field_idx < _state_field_cfgs.size() else null
-	if cfg == null or cfg.quant == NetFieldConfig.Quant.AUTO:
+	var cfg: NetStateField = _state_field_cfgs[field_idx] if field_idx < _state_field_cfgs.size() else null
+	if cfg == null or cfg.quant == NetStateField.Quant.AUTO:
 		sp.put_var(value)
 		return
 	match cfg.quant:
-		NetFieldConfig.Quant.FLOAT32:
+		NetStateField.Quant.FLOAT32:
 			_put_float32(sp, value)
-		NetFieldConfig.Quant.QUANT8:
+		NetStateField.Quant.QUANT8:
 			_put_quantized(sp, value, cfg.min_value, cfg.max_value, 255)
-		NetFieldConfig.Quant.QUANT16:
+		NetStateField.Quant.QUANT16:
 			_put_quantized(sp, value, cfg.min_value, cfg.max_value, 65535)
-		NetFieldConfig.Quant.QUAT32:
+		NetStateField.Quant.QUAT32:
 			_put_quat32(sp, value)
 		_:
 			sp.put_var(value)
 
 
 func _decode_state_field(sp: StreamPeerBuffer, field_idx: int, type_hint: Variant) -> Variant:
-	var cfg: NetFieldConfig = _state_field_cfgs[field_idx] if field_idx < _state_field_cfgs.size() else null
-	if cfg == null or cfg.quant == NetFieldConfig.Quant.AUTO:
+	var cfg: NetStateField = _state_field_cfgs[field_idx] if field_idx < _state_field_cfgs.size() else null
+	if cfg == null or cfg.quant == NetStateField.Quant.AUTO:
 		return sp.get_var()
 	match cfg.quant:
-		NetFieldConfig.Quant.FLOAT32:
+		NetStateField.Quant.FLOAT32:
 			return _get_float32(sp, type_hint)
-		NetFieldConfig.Quant.QUANT8:
+		NetStateField.Quant.QUANT8:
 			return _get_quantized(sp, type_hint, cfg.min_value, cfg.max_value, 255)
-		NetFieldConfig.Quant.QUANT16:
+		NetStateField.Quant.QUANT16:
 			return _get_quantized(sp, type_hint, cfg.min_value, cfg.max_value, 65535)
-		NetFieldConfig.Quant.QUAT32:
+		NetStateField.Quant.QUAT32:
 			return _get_quat32(sp)
 		_:
 			return sp.get_var()
@@ -685,6 +715,14 @@ func _reconcile_replay(new_sequence_id: int) -> void:
 			host._simulate(shadow_state, inputs[i], dt)
 			previous_cmd = inputs[i]
 	is_replaying_inputs = false
+	#if is_local_authority:
+		#var dbg_shadow_crouch_post: float = shadow_state.get(&"crouch_progress") if &"crouch_progress" in state_field_names else -1.0
+		#var dbg_shadow_move_post: int = shadow_state.get(&"movement_state") if &"movement_state" in state_field_names else -1
+		#if dbg_shadow_move_pre != dbg_shadow_move_post or absf(dbg_shadow_crouch_pre - dbg_shadow_crouch_post) > 0.01:
+			#print("[RECON f=%d] seq=%d replays=%d shadow.move=%d->%d shadow.crouch=%.4f->%.4f" % [
+					#Engine.get_physics_frames(), new_sequence_id, maxi(inputs.size() - 1, 0),
+					#dbg_shadow_move_pre, dbg_shadow_move_post,
+					#dbg_shadow_crouch_pre, dbg_shadow_crouch_post])
 
 
 # Broadcast this entity's current shadow state. Server-side; called from the

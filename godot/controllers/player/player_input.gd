@@ -1,3 +1,4 @@
+@tool
 class_name PlayerInput extends NetCommand
 
 # Per-tick player input. Mirrors the field shape of PlayerInputPacket so Phase

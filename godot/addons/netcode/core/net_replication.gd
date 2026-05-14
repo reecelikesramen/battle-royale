@@ -67,6 +67,22 @@ func register_schema(schema_id: int, schema: NetSchema) -> void:
 	else:
 		_schema_hashes[schema_id] = h
 	_schemas[schema_id] = schema
+	# Surface schema.validate() issues at startup so drift between the script
+	# (state_template @export vars) and codec config (state_fields entries)
+	# doesn't pass silently. Editor-time NetPredictor._get_configuration_warnings
+	# shows the same list while authoring; this catches the case where the
+	# schema is loaded into a build without editor inspection.
+	# ERRORs hit push_error so they surface in the GUT/test output too;
+	# WARNINGs go to push_warning. INFOs are suppressed at register time.
+	for issue in schema.validate():
+		var line: String = "NetReplication: schema_id %d %s" % [schema_id, issue.to_string_line()]
+		match issue.severity:
+			ValidationIssue.Severity.ERROR:
+				push_error(line)
+			ValidationIssue.Severity.WARNING:
+				push_warning(line)
+			_:
+				pass
 
 
 # Sprint 7: exposes the hash pinned by the first registrant for a schema_id.

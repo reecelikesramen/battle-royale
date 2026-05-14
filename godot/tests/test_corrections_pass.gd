@@ -21,7 +21,7 @@ class _CorrState extends NetState:
 func _make_predictor(channels: Array) -> NetPredictor:
 	var schema := NetSchema.new()
 	schema.id = 9001
-	schema.state_class = _CorrState
+	schema.state_template = _CorrState.new()
 	for c in channels:
 		schema.corrections.append(c)
 	var p := NetPredictor.new()

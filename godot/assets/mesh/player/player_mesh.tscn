@@ -1,7 +1,7 @@
-[gd_scene load_steps=11 format=3 uid="uid://0khchil1lxqs"]
+[gd_scene format=3 uid="uid://0khchil1lxqs"]
 
 [ext_resource type="PackedScene" uid="uid://ck8n8agsopnyn" path="res://assets/mesh/player/Meshy_Merged_Animations.glb" id="1_iy2bd"]
-[ext_resource type="Animation" uid="uid://c21v80w8eq60j" path="res://assets/mesh/player/test.res" id="2_v0lcj"]
+[ext_resource type="Animation" uid="uid://tmvndxjxkwr6" path="res://assets/mesh/player/test.res" id="2_v0lcj"]
 
 [sub_resource type="Animation" id="Animation_20u0u"]
 resource_name = "Running"
@@ -541,37 +541,16 @@ states/Start/position = Vector2(280, 83.5)
 states/Walking/node = SubResource("AnimationNodeAnimation_v0lcj")
 states/Walking/position = Vector2(551.5, 75.50003)
 transitions = ["Start", "Walking", SubResource("AnimationNodeStateMachineTransition_nl6ex"), "Walking", "End", SubResource("AnimationNodeStateMachineTransition_iy2bd")]
-graph_offset = Vector2(65.2875, -42.487473)
+graph_offset = Vector2(39.24721, 112.18496)
 
-[node name="Meshy_Merged_Animations" instance=ExtResource("1_iy2bd")]
+[node name="Meshy_Merged_Animations" unique_id=93218234 instance=ExtResource("1_iy2bd")]
 transform = Transform3D(1, 0, 0, 0, -4.371139e-08, 1, 0, -1, -4.371139e-08, 0, 0, 0)
 
-[node name="Skeleton3D" parent="Armature" index="0"]
-bones/0/position = Vector3(-0.00054986775, -0.0020980835, 0.934124)
-bones/0/rotation = Quaternion(0.76138526, -0.5996181, -0.11511075, -0.21794543)
-bones/1/rotation = Quaternion(0.09514508, -0.28567147, -0.612931, 0.73051685)
-bones/2/rotation = Quaternion(0.3634441, 0.061083738, -0.002339575, 0.92960835)
-bones/3/rotation = Quaternion(-0.5386148, -0.012603744, -0.05282421, 0.8408002)
-bones/5/rotation = Quaternion(0.39829907, -0.27722022, -0.41677973, 0.76863617)
-bones/6/rotation = Quaternion(0.4534534, -0.02464052, 0.034666087, 0.8902647)
-bones/7/rotation = Quaternion(-0.2440608, -0.043188047, 0.10262428, 0.9633471)
-bones/9/rotation = Quaternion(0.70177877, -0.50748515, 0.36039716, -0.34652472)
-bones/11/rotation = Quaternion(-0.07089594, 0.03995267, -0.016831554, 0.99654114)
-bones/12/rotation = Quaternion(0.623587, 0.4720114, -0.45636725, 0.42435083)
-bones/13/rotation = Quaternion(0.5645232, 0.43774742, 0.10200667, 0.69230443)
-bones/14/rotation = Quaternion(-0.21097945, 0.057551824, 0.1982337, 0.955447)
-bones/16/rotation = Quaternion(-0.58094215, 0.52447546, -0.41869992, -0.46056718)
-bones/17/rotation = Quaternion(0.51382387, -0.4254861, -0.31095612, 0.6769439)
-bones/18/rotation = Quaternion(-0.36955434, -0.006292426, -0.20945318, 0.9052732)
-bones/21/rotation = Quaternion(0.3399244, 0.01617096, 0.027735513, 0.93990463)
-
 [node name="AnimationPlayer" parent="." index="1"]
-libraries = {
-&"": SubResource("AnimationLibrary_ujuij"),
-&"Test": SubResource("AnimationLibrary_nl6ex")
-}
+libraries/ = SubResource("AnimationLibrary_ujuij")
+libraries/Test = SubResource("AnimationLibrary_nl6ex")
 
-[node name="AnimationTree" type="AnimationTree" parent="." index="2"]
+[node name="AnimationTree" type="AnimationTree" parent="." index="2" unique_id=166966130]
 root_motion_track = NodePath("Armature/Skeleton3D:Hips")
 tree_root = SubResource("AnimationNodeStateMachine_0ab20")
 anim_player = NodePath("../AnimationPlayer")

@@ -26,8 +26,12 @@ static func get_schema() -> NetSchema:
 static func build() -> NetSchema:
 	var schema := NetSchema.new()
 	schema.id = SCHEMA_ID
-	schema.state_class = PlayerState
-	schema.command_class = PlayerInput
+	# Templates hold the default values the framework duplicates when
+	# constructing fresh shadow/render/command instances. Calling .new()
+	# here produces the script's defaults; an inspector-authored .tres can
+	# carry edited defaults instead.
+	schema.state_template = PlayerState.new()
+	schema.command_template = PlayerInput.new()
 	schema.tick_hz = 120
 	schema.snapshot_hz = 30
 
@@ -70,26 +74,25 @@ static func build() -> NetSchema:
 	# Per-field codec config. Must match player_schema.tres exactly — the hash
 	# check in NetReplication.register_schema warns on drift. Add new fields in
 	# both places in the same commit.
-	schema.state_fields.append(_field(&"pos", NetFieldConfig.Quant.FLOAT32))
-	schema.state_fields.append(_field(&"velocity", NetFieldConfig.Quant.FLOAT32))
-	schema.state_fields.append(_field(&"look", NetFieldConfig.Quant.FLOAT32))
-	schema.state_fields.append(_field(&"movement_state", NetFieldConfig.Quant.QUANT8, 0.0, 15.0, true))
-	schema.state_fields.append(_field(&"peek_state", NetFieldConfig.Quant.QUANT8, 0.0, 15.0, true))
-	schema.state_fields.append(_field(&"crouch_progress", NetFieldConfig.Quant.QUANT8, 0.0, 1.0))
-	schema.state_fields.append(_field(&"prone_progress", NetFieldConfig.Quant.QUANT8, 0.0, 1.0))
-	schema.state_fields.append(_field(&"peek_progress", NetFieldConfig.Quant.QUANT8, -1.0, 1.0))
+	schema.state_fields[&"pos"] = _field(&"pos", NetStateField.Quant.FLOAT32)
+	schema.state_fields[&"velocity"] = _field(&"velocity", NetStateField.Quant.FLOAT32)
+	schema.state_fields[&"look"] = _field(&"look", NetStateField.Quant.FLOAT32)
+	schema.state_fields[&"movement_state"] = _field(&"movement_state", NetStateField.Quant.QUANT8, 0.0, 15.0, true)
+	schema.state_fields[&"peek_state"] = _field(&"peek_state", NetStateField.Quant.QUANT8, 0.0, 15.0, true)
+	schema.state_fields[&"crouch_progress"] = _field(&"crouch_progress", NetStateField.Quant.QUANT8, 0.0, 1.0)
+	schema.state_fields[&"prone_progress"] = _field(&"prone_progress", NetStateField.Quant.QUANT8, 0.0, 1.0)
+	schema.state_fields[&"peek_progress"] = _field(&"peek_progress", NetStateField.Quant.QUANT8, -1.0, 1.0)
 
 	return schema
 
 
 static func _field(
-		field_name: StringName,
-		quant: NetFieldConfig.Quant,
+		_field_name: StringName,  # kept for call-site readability; key is the binding
+		quant: NetStateField.Quant,
 		lo: float = 0.0,
 		hi: float = 0.0,
-		no_interp: bool = false) -> NetFieldConfig:
-	var cfg := NetFieldConfig.new()
-	cfg.name = field_name
+		no_interp: bool = false) -> NetStateField:
+	var cfg := NetStateField.new()
 	cfg.quant = quant
 	cfg.min_value = lo
 	cfg.max_value = hi

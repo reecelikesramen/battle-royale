@@ -93,8 +93,8 @@ func test_proxy_only_false_writes_everywhere() -> void:
 func _make_predictor() -> NetPredictor:
 	var p := NetPredictor.new()
 	p.schema = PlayerSchema.build()
-	p.shadow_state = p.state_class.new()
-	p.render_state = p.state_class.new()
+	p.shadow_state = p.state_template.duplicate(true) as NetState
+	p.render_state = p.state_template.duplicate(true) as NetState
 	p.state_field_names = NetPredictor._user_field_names(p.shadow_state)
 	return p
 

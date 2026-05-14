@@ -95,8 +95,8 @@ func _make_predictor() -> NetPredictor:
 	# the SceneTree-dependent half of _ready and populate fields by hand.
 	var p := NetPredictor.new()
 	p.schema = PlayerSchema.build()
-	p.shadow_state = p.state_class.new()
-	p.render_state = p.state_class.new()
+	p.shadow_state = p.state_template.duplicate(true) as NetState
+	p.render_state = p.state_template.duplicate(true) as NetState
 	p.state_field_names = NetPredictor._user_field_names(p.shadow_state)
 	p._cache_state_field_cfgs()
 	return p

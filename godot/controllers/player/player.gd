@@ -27,6 +27,8 @@ const TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
 @export_group("Camera Tunables")
 @export var MOUSE_SENSITIVITY: float = 0.5
 
+const THROW_POWER := 12.0
+
 @onready var camera: Camera3D = $CameraController/Camera3D
 @onready var tp_camera: Camera3D = $CameraController/ThirdPersonCamera3D
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
@@ -140,6 +142,20 @@ func _input(event: InputEvent) -> void:
 		else:
 			camera.make_current()
 
+	if event.is_action_pressed("throw_grenade"):
+		_send_grenade_throw()
+
+
+func _send_grenade_throw() -> void:
+	var fwd := -camera.global_basis.z
+	var origin := camera.global_position + fwd * 0.3
+	var velocity := fwd * THROW_POWER
+	var sp := StreamPeerBuffer.new()
+	sp.put_float(origin.x); sp.put_float(origin.y); sp.put_float(origin.z)
+	sp.put_float(velocity.x); sp.put_float(velocity.y); sp.put_float(velocity.z)
+	NetReliableHub.send(Enums.ReliableTopic.THROW_GRENADE, sp.data_array)
+	print("[GRENADE] client sent throw origin=%v vel=%v" % [origin, velocity])
+
 
 # === NetPredictor hooks ===========================================================
 # Each hook is invoked by NetPredictor via has_method() duck-typing. Order
@@ -228,6 +244,18 @@ func _load_simulation_state(state: PlayerState) -> void:
 	game_movement_state_id = state.movement_state
 
 	context = Enums.IntegrationContext.GAME
+	# Restore animation progress BEFORE set_logic_state_by_id. Reconcile
+	# semantics: the replay must start from the *server-confirmed* state, not
+	# the client's stale prediction. Without this restore, replay's first
+	# logic_physics call advances from whatever progress the client had at the
+	# moment reconcile fired, and the K replay steps accumulate on top of that —
+	# producing a "game state bounce" visible 1:1 in the model (camera/skeleton
+	# jitter). Restoring here makes replay deterministic: progress at start of
+	# replay matches the snapshot, replay re-fires the K predicted steps, and
+	# the post-replay value equals the client's prediction.
+	%MovementStateMachine.crouch_progress = state.crouch_progress
+	%MovementStateMachine.prone_progress = state.prone_progress
+	%PeekStateMachine.peek_progress = state.peek_progress
 	%MovementStateMachine.set_logic_state_by_id(state.movement_state)
 	%PeekStateMachine.set_logic_state_by_id(state.peek_state)
 
@@ -304,6 +332,29 @@ func _apply_corrections(state: PlayerState) -> void:
 				shadow.pos - global_position,
 				shadow.velocity - velocity,
 				_net.unacked_inputs)
+	#if is_authority:
+		#var pre_pos := global_position
+		#var pre_vel := velocity
+		#var delta_xz := Vector2(state.pos.x - pre_pos.x, state.pos.z - pre_pos.z).length()
+		#var delta_y := absf(state.pos.y - pre_pos.y)
+		#var delta_v := (state.velocity - pre_vel).length()
+		## CORR-APPLY: ONLY when corrections actually moved the scene. At 0 ping should be silent.
+		#if delta_xz > 0.0005 or delta_y > 0.0005 or delta_v > 0.0005:
+			#print("[CORR-APPLY f=%d] dxz=%.4f dy=%.4f dv=%.4f" % [
+					#Engine.get_physics_frames(), delta_xz, delta_y, delta_v])
+		## Consolidated 2 Hz dump.
+		#if Engine.get_physics_frames() % 30 == 0 and shadow != null:
+			#print("[DUMP f=%d] live_crouch=%.4f render_crouch=%.4f shadow_crouch=%.4f move_st=%d peek=%.4f peek_st=%d shadow.move=%d shadow.pos=%.2f,%.2f,%.2f scene.pos=%.2f,%.2f,%.2f vis_st=%s log_st=%s" % [
+					#Engine.get_physics_frames(),
+					#%MovementStateMachine.crouch_progress,
+					#state.crouch_progress,
+					#shadow.crouch_progress, state.movement_state,
+					#state.peek_progress, state.peek_state,
+					#shadow.movement_state,
+					#shadow.pos.x, shadow.pos.y, shadow.pos.z,
+					#global_position.x, global_position.y, global_position.z,
+					#%MovementStateMachine._visual_state.name,
+					#%MovementStateMachine._logic_state.name])
 	global_position = state.pos
 	velocity = state.velocity
 

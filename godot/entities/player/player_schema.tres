@@ -1,18 +1,21 @@
-[gd_resource type="Resource" script_class="NetSchema" load_steps=18 format=3]
+[gd_resource type="Resource" script_class="NetSchema" format=3 uid="uid://carnketvn7m1v"]
 
-[ext_resource type="Script" path="res://addons/netcode/resources/net_child_ref.gd" id="1_k7ufs"]
-[ext_resource type="Script" path="res://controllers/player/player_input.gd" id="2_r06js"]
-[ext_resource type="Script" path="res://addons/netcode/resources/net_correction.gd" id="3_x5rij"]
-[ext_resource type="Script" path="res://addons/netcode/resources/net_schema.gd" id="4_ncpu0"]
-[ext_resource type="Script" path="res://controllers/player/player_state.gd" id="5_5k8u3"]
-[ext_resource type="Script" path="res://addons/netcode/resources/net_field_config.gd" id="6_4w2p4"]
+[ext_resource type="Script" uid="uid://bkbabr45mnm8d" path="res://addons/netcode/resources/net_child_ref.gd" id="1_k7ufs"]
+[ext_resource type="Script" uid="uid://cft1cl0nousye" path="res://controllers/player/player_input.gd" id="2_r06js"]
+[ext_resource type="Script" uid="uid://dh0tg4ybbnptl" path="res://addons/netcode/resources/net_correction.gd" id="3_x5rij"]
+[ext_resource type="Script" uid="uid://cmp2jhgtkye1t" path="res://addons/netcode/resources/net_schema.gd" id="4_ncpu0"]
+[ext_resource type="Script" uid="uid://nerxe2t21ft7" path="res://addons/netcode/resources/net_state_field.gd" id="6_4w2p4"]
+[ext_resource type="Script" uid="uid://buifrwxokyh4s" path="res://controllers/player/player_state.gd" id="6_k7ufs"]
+
+[sub_resource type="Resource" id="Resource_k7ufs"]
+script = ExtResource("2_r06js")
+metadata/_custom_type_script = "uid://cft1cl0nousye"
 
 [sub_resource type="Resource" id="Resource_ia2k4"]
 script = ExtResource("3_x5rij")
 name = &"horizontal"
 fields = PackedStringArray("pos.xz")
 snap_threshold = 1.5
-smooth_rate = 8.0
 deadband = 0.07
 
 [sub_resource type="Resource" id="Resource_j4kbt"]
@@ -32,62 +35,63 @@ smooth_rate = 12.0
 deadband = 0.2
 always_smooth = true
 
+[sub_resource type="Resource" id="Resource_ngq10"]
+script = ExtResource("6_4w2p4")
+quant = 2
+max_value = 1.0
+
+[sub_resource type="Resource" id="Resource_4w2p4"]
+script = ExtResource("6_4w2p4")
+quant = 3
+
 [sub_resource type="Resource" id="Resource_vkgre"]
 script = ExtResource("6_4w2p4")
-name = &"pos"
-quant = 3
+quant = 1
+no_interp = true
+max_value = 8.0
+
+[sub_resource type="Resource" id="Resource_7kikq"]
+script = ExtResource("6_4w2p4")
+quant = 2
+min_value = -1.0
+max_value = 1.0
 
 [sub_resource type="Resource" id="Resource_bg44s"]
 script = ExtResource("6_4w2p4")
-name = &"velocity"
-quant = 3
+quant = 1
+no_interp = true
+max_value = 2.0
 
-[sub_resource type="Resource" id="Resource_ngq10"]
+[sub_resource type="Resource" id="Resource_ncpu0"]
 script = ExtResource("6_4w2p4")
-name = &"look"
 quant = 3
 
 [sub_resource type="Resource" id="Resource_kv0la"]
 script = ExtResource("6_4w2p4")
-name = &"movement_state"
-quant = 1
-no_interp = true
-min_value = 0.0
-max_value = 15.0
-
-[sub_resource type="Resource" id="Resource_7kikq"]
-script = ExtResource("6_4w2p4")
-name = &"peek_state"
-quant = 1
-no_interp = true
-min_value = 0.0
-max_value = 15.0
-
-[sub_resource type="Resource" id="Resource_goet2"]
-script = ExtResource("6_4w2p4")
-name = &"crouch_progress"
-quant = 1
-min_value = 0.0
+quant = 2
 max_value = 1.0
 
-[sub_resource type="Resource" id="Resource_d7dqj"]
+[sub_resource type="Resource" id="Resource_5k8u3"]
 script = ExtResource("6_4w2p4")
-name = &"prone_progress"
-quant = 1
-min_value = 0.0
-max_value = 1.0
+quant = 3
 
-[sub_resource type="Resource" id="Resource_kt55c"]
-script = ExtResource("6_4w2p4")
-name = &"peek_progress"
-quant = 1
-min_value = -1.0
-max_value = 1.0
+[sub_resource type="Resource" id="Resource_r06js"]
+script = ExtResource("6_k7ufs")
+metadata/_custom_type_script = "uid://buifrwxokyh4s"
 
 [resource]
 script = ExtResource("4_ncpu0")
 id = 1
-state_class = ExtResource("5_5k8u3")
-command_class = ExtResource("2_r06js")
-state_fields = Array[ExtResource("6_4w2p4")]([SubResource("Resource_vkgre"), SubResource("Resource_bg44s"), SubResource("Resource_ngq10"), SubResource("Resource_kv0la"), SubResource("Resource_7kikq"), SubResource("Resource_goet2"), SubResource("Resource_d7dqj"), SubResource("Resource_kt55c")])
+state_template = SubResource("Resource_r06js")
+command_template = SubResource("Resource_k7ufs")
+state_fields = Dictionary[StringName, ExtResource("6_4w2p4")]({
+&"crouch_progress": SubResource("Resource_ngq10"),
+&"look": SubResource("Resource_4w2p4"),
+&"movement_state": SubResource("Resource_vkgre"),
+&"peek_progress": SubResource("Resource_7kikq"),
+&"peek_state": SubResource("Resource_bg44s"),
+&"pos": SubResource("Resource_ncpu0"),
+&"prone_progress": SubResource("Resource_kv0la"),
+&"velocity": SubResource("Resource_5k8u3")
+})
 corrections = Array[ExtResource("3_x5rij")]([SubResource("Resource_ia2k4"), SubResource("Resource_j4kbt"), SubResource("Resource_dednk")])

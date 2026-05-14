@@ -68,6 +68,6 @@ func _make_replicator() -> NetReplicator:
 	# poking the framework's fields directly so we don't need a SceneTree.
 	var r := NetReplicator.new()
 	r.schema = PlayerSchema.build()
-	r.shadow_state = r.state_class.new()
+	r.shadow_state = r.state_template.duplicate(true) as NetState
 	r.state_field_names = NetPredictor._user_field_names(r.shadow_state)
 	return r

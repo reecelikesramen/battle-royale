@@ -142,7 +142,7 @@ func _make_predictor() -> NetPredictor:
 	# Construct without entering tree to skip NetReplication autoload coupling.
 	var n := NetPredictor.new()
 	n.schema = PlayerSchema.build()
-	n.shadow_state = n.state_class.new()
-	n.render_state = n.state_class.new()
+	n.shadow_state = n.state_template.duplicate(true) as NetState
+	n.render_state = n.state_template.duplicate(true) as NetState
 	n.state_field_names = NetPredictor._user_field_names(n.shadow_state)
 	return n

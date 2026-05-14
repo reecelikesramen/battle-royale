@@ -142,7 +142,7 @@ func test_handle_net_state_packet_updates_predictor_state() -> void:
 
 # Helper: build a NetPredictor without registering against the NetReplication
 # autoload (we don't want test side-effects). Allocates shadow_state via the
-# schema's state_class and populates state_field_names.
+# schema's state_template and populates state_field_names.
 func test_child_ref_round_trip() -> void:
 	# Phase 8a: schema.child_refs lets the predictor sync arbitrary properties
 	# on sibling nodes alongside shadow_state. Bypass _resolve_children() by
@@ -218,8 +218,8 @@ func _make_predictor() -> NetPredictor:
 	p.schema = PlayerSchema.build()
 	# Trigger the part of _ready that allocates shadow_state + names. Calling
 	# add_child would register with NetReplication, which we want to avoid.
-	p.shadow_state = p.state_class.new()
-	p.render_state = p.state_class.new()
+	p.shadow_state = p.state_template.duplicate(true) as NetState
+	p.render_state = p.state_template.duplicate(true) as NetState
 	p.state_field_names = NetPredictor._user_field_names(p.shadow_state)
 	return p
 

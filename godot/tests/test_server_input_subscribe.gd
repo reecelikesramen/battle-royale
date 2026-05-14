@@ -1,7 +1,7 @@
 extends TestBase
 
 # NetPredictor auto-subscribes to NetServer.handle_player_input when it has a
-# command_class set, on the server only. Each predictor filters incoming
+# command_template set, on the server only. Each predictor filters incoming
 # packets by peer_id == owner_id and enqueues them. Replaces per-entity
 # boilerplate that previously lived in each controller's _enter_tree.
 
@@ -16,13 +16,13 @@ class _IpkSim:
 func _make_predictor(owner_id: int) -> NetPredictor:
 	var schema := NetSchema.new()
 	schema.id = 9100
-	schema.state_class = NetState
-	schema.command_class = NetCommand
+	schema.state_template = NetState.new()
+	schema.command_template = NetCommand.new()
 	var p := NetPredictor.new()
 	p.schema = schema
 	p.owner_id = owner_id
-	p.shadow_state = schema.state_class.new()
-	p.render_state = schema.state_class.new()
+	p.shadow_state = schema.state_template.duplicate(true) as NetState
+	p.render_state = schema.state_template.duplicate(true) as NetState
 	p.state_field_names = PackedStringArray()
 	return p
 

@@ -20,8 +20,8 @@ class_name NetReplicator extends NetPredictor
 #   _capture_state(state)               write scene -> state (SERVER only)
 #   _proxy_apply(from, to, alpha, ext, dt)  client-side interp + scene write
 #
-# Schemas for replicators omit command_class (no inputs). The parent's _ready
-# already guards that case.
+# Schemas for replicators omit command_template (no inputs). The parent's
+# _ready already guards that case.
 
 # Replicators have no input-side prediction, so authority/replay paths are
 # unreachable. _physics_process branches only on server vs client.

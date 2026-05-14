@@ -1,3 +1,4 @@
+@tool
 class_name NetState extends Resource
 
 # Base class for predicted-entity state snapshots.

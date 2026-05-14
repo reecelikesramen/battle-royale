@@ -1,3 +1,4 @@
+@tool
 class_name NetCommand extends Resource
 
 # Base class for per-tick commands (inputs). Subclass with @export var fields.

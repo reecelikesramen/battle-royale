@@ -1,3 +1,4 @@
+@tool
 class_name PlayerState extends NetState
 
 # Predicted state snapshot for a player. Mirrors the field shape of

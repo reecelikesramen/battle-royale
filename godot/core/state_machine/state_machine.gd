@@ -78,6 +78,9 @@ func run_logic(delta: float) -> void:
 func sync_visual() -> void:
 	if _visual_state == _logic_state:
 		return
+	if DEBUG_NAME == "Move":
+		print("[SM-SYNC f=%d sm=%s] visual: %s -> %s" % [
+				Engine.get_physics_frames(), DEBUG_NAME, _visual_state.name, _logic_state.name])
 	_visual_state.visual_exit()
 	_visual_state = _logic_state
 	_visual_state.visual_enter()
@@ -95,6 +98,9 @@ func set_logic_state_by_id(new_state_id: int) -> void:
 	var target := states[id_to_state[new_state_id]]
 	if target == null or target == _logic_state:
 		return
+	if DEBUG_NAME == "Move":
+		print("[SM-LOG-SET f=%d sm=%s] logic: %s -> %s (id=%d)" % [
+				Engine.get_physics_frames(), DEBUG_NAME, _logic_state.name, target.name, new_state_id])
 	_logic_state.logic_exit()
 	target.previous_state = _logic_state
 	_logic_state = target
@@ -119,6 +125,9 @@ func _switch_logic(new_state_name: StringName) -> void:
 	var target := states[new_state_name]
 	if target == null or target == _logic_state:
 		return
+	if DEBUG_NAME == "Move":
+		print("[SM-LOG-TRANS f=%d sm=%s] logic: %s -> %s" % [
+				Engine.get_physics_frames(), DEBUG_NAME, _logic_state.name, target.name])
 	_logic_state.logic_exit()
 	target.previous_state = _logic_state
 	_logic_state = target

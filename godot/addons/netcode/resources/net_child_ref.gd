@@ -1,3 +1,4 @@
+@tool
 class_name NetChildRef extends Resource
 
 # Phase 8 declarative entry: tells NetPredictor to also replicate fields on a
@@ -12,8 +13,15 @@ class_name NetChildRef extends Resource
 # replicate (current_state_id, active_state.progress) instead of plain
 # property reads; 8c folds child fields into the dirty mask.
 
+## Reference name (for debug + lookup). Unique within the schema. Pure label;
+## not on the wire.
 @export var name: StringName
+## NodePath to the child relative to the NetPredictor's parent (entity root).
+## E.g. "AnimationTree" or "Body/CollisionShape". Resolved at _ready.
 @export var path: NodePath
+## Property paths on the resolved child read via Node.get()/set() each tick.
+## E.g. "parameters/blend_position" for AnimationTree, "shape" for a
+## CollisionShape3D, "visible" for a MeshInstance3D.
 @export var fields: PackedStringArray
 
 ## Sprint 2: when true, the snapshot decoder writes this child's fields only
