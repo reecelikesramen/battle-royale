@@ -36,3 +36,45 @@ func find_state_field(field_name: StringName) -> NetFieldConfig:
 		if f.name == field_name:
 			return f
 	return null
+
+
+# Sprint 7: deterministic content hash of the schema's wire-affecting bits.
+# Two peers that agree on the hash agree on field order, quantization, and
+# correction channels — so the wire codec produces identical bytes for
+# identical inputs. Used by NetReplication.register_schema to detect drift
+# between server + client builds (server with QUANT8 on pos.xz vs client
+# still on AUTO is silent corruption otherwise).
+#
+# Layout: tag-prefixed lines flattened into a String, hashed via String.hash()
+# which is stable across runs in Godot 4.x. Returns an int (32-bit). Add new
+# tag prefixes when extending the schema instead of inserting into existing
+# tags so previously-pinned hashes stay valid for unrelated changes.
+func compute_hash() -> int:
+	var parts: PackedStringArray = PackedStringArray()
+	parts.append("id=%d" % id)
+	parts.append("state_class=%s" % (state_class.resource_path if state_class else ""))
+	parts.append("command_class=%s" % (command_class.resource_path if command_class else ""))
+	parts.append("tick_hz=%d" % tick_hz)
+	parts.append("snapshot_hz=%d" % snapshot_hz)
+	for f in state_fields:
+		parts.append("field|%s|%d|%d|%d|%f|%f" % [
+				str(f.name),
+				int(f.quant),
+				int(f.predict),
+				int(f.no_interp),
+				f.min_value,
+				f.max_value])
+	for c in corrections:
+		parts.append("corr|%s|%s|%f|%f|%f|%d" % [
+				str(c.name),
+				"|".join(c.fields),
+				c.snap_threshold,
+				c.smooth_rate,
+				c.deadband,
+				int(c.always_snap)])
+	for cr in child_refs:
+		parts.append("child|%s|%s|%s" % [
+				str(cr.name),
+				str(cr.path),
+				"|".join(cr.fields)])
+	return "\n".join(parts).hash()

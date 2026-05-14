@@ -25,11 +25,20 @@ var _show_in_debug: bool:
 
 
 func _ready() -> void:
+	# Sprint 7: prefer the State's exported stable_id over its scene-tree
+	# child index so reordering nodes in the editor doesn't reshuffle the
+	# wire ids that NetStatePacket.payload carries. Fall back to child index
+	# when stable_id is unset (-1) so untouched state machines keep their
+	# legacy numbering byte-for-byte.
 	for child in get_children():
 		if child is State:
 			states[child.name] = child
-			state_to_id[child.name] = child.get_index()
-			id_to_state[child.get_index()] = child.name
+			var sid: int = child.stable_id if child.stable_id >= 0 else child.get_index()
+			if id_to_state.has(sid):
+				push_warning("State Machine '%s': duplicate stable_id %d on '%s' (conflicts with '%s'); second registrant wins" \
+						% [name, sid, child.name, id_to_state[sid]])
+			state_to_id[child.name] = sid
+			id_to_state[sid] = child.name
 			child.transition.connect(_on_logic_transition)
 		else:
 			push_warning("State Machine '%s' contains an incompatible child node '%s', type '%s'" % [name, child.name, type_string(typeof(child))])

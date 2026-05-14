@@ -21,6 +21,9 @@ const TEST_SCRIPTS := [
 	"res://tests/test_player_state_packet.gd",
 	"res://tests/test_snapshot_quantization.gd",
 	"res://tests/test_per_peer_baselines.gd",
+	"res://tests/test_state_id_stability.gd",
+	"res://tests/test_schema_hash.gd",
+	"res://tests/test_spawn_dispatch.gd",
 ]
 
 

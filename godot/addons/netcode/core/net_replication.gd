@@ -7,8 +7,31 @@ extends Node
 signal entity_registered(schema_id: int, entity_id: int)
 signal entity_unregistered(schema_id: int, entity_id: int)
 
+# Sprint 7: spawn replication. The server calls spawn_entity() to request that
+# every peer instantiate a networked entity; the receiver emits this signal
+# and the world controller (e.g. a level script) listens, loads the scene at
+# `scene_path`, sets the predictor's owner/entity ids, and adds it to the
+# tree. Snapshot packets that arrived ahead of the spawn are already buffered
+# by _on_net_state -> _pending_packets and drain automatically when the new
+# predictor's _ready calls register_entity. (`min_spawn_seq` from the design
+# doc is implicit: state packets queue until their target exists.)
+signal entity_spawn_requested(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int)
+
+# Reliable-hub topic id reserved for spawn dispatch. Picked from the high end
+# of the int range to avoid colliding with user-defined topics; userspace
+# should start its own topic numbering from 1.
+const SPAWN_TOPIC: int = 65001
+
 var _schemas: Dictionary = {}             # int -> NetSchema
 var _entities: Dictionary = {}            # Vector2i(schema_id, entity_id) -> NetPredictor
+
+# Sprint 7: drift detection. First registrant for a schema_id pins the
+# expected content hash; subsequent registrants with the same id but a
+# different hash emit a hard warning so build mismatch shows up at boot
+# instead of as silent state corruption on the wire. Wire-level handshake
+# enforcement (refuse-to-connect) lands in a follow-up that touches the
+# Rust packet types.
+var _schema_hashes: Dictionary = {}       # int (schema_id) -> int (NetSchema.compute_hash())
 
 # Phase 9c: snapshots for entities not yet registered are queued instead of
 # dropped. When the entity finally registers (typically after a deferred
@@ -24,10 +47,33 @@ var _pending_packets: Dictionary = {}     # Vector2i -> Array[NetStatePacket]
 func _ready() -> void:
 	if NetClient.has_signal("handle_net_state"):
 		NetClient.handle_net_state.connect(_on_net_state)
+	# Sprint 7: only the client subscribes to spawn packets. The server fires
+	# entity_spawn_requested locally inside spawn_entity() so its own world
+	# controller spawns without bouncing through the wire.
+	NetReliableHub.subscribe(SPAWN_TOPIC, _on_spawn_payload)
 
 
 func register_schema(schema_id: int, schema: NetSchema) -> void:
+	# Sprint 7: pin the schema's content hash on first registration; warn if a
+	# later registrant for the same id presents a different hash, which means
+	# either two schemas are colliding on an id or the build is mid-rollout
+	# (server upgraded fields but client still on previous version).
+	var h: int = schema.compute_hash()
+	if _schema_hashes.has(schema_id):
+		var pinned: int = _schema_hashes[schema_id]
+		if pinned != h:
+			push_warning("NetReplication: schema_id %d hash mismatch (pinned=%d new=%d). Likely build skew between peers — wire decode will corrupt state." \
+					% [schema_id, pinned, h])
+	else:
+		_schema_hashes[schema_id] = h
 	_schemas[schema_id] = schema
+
+
+# Sprint 7: exposes the hash pinned by the first registrant for a schema_id.
+# Used by the handshake / drift-detection layer to ship expected hashes to
+# peers; returns 0 if no schema has registered under this id yet.
+func get_schema_hash(schema_id: int) -> int:
+	return _schema_hashes.get(schema_id, 0)
 
 
 func get_schema(schema_id: int) -> NetSchema:
@@ -91,3 +137,41 @@ func _on_net_state(packet) -> void:
 func pending_count(schema_id: int, entity_id: int) -> int:
 	var key := Vector2i(schema_id, entity_id)
 	return _pending_packets.get(key, []).size()
+
+
+# Sprint 7: server-side spawn dispatch. Broadcasts a reliable SPAWN_TOPIC
+# message to every peer carrying (schema_id, entity_id, scene_path, owner_peer_id),
+# then fires entity_spawn_requested locally so the server's own world script
+# spawns alongside. World controllers subscribe to entity_spawn_requested and
+# decide how to actually instantiate (PackedScene load + add_child). The
+# `owner_peer_id` is the peer that owns the entity's input stream (-1 for
+# unowned entities like AI / props).
+func spawn_entity(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int = -1) -> void:
+	if not NetSession.is_server:
+		push_warning("NetReplication.spawn_entity called on a non-server peer; ignored")
+		return
+	var payload: PackedByteArray = _encode_spawn(schema_id, entity_id, scene_path, owner_peer_id)
+	NetReliableHub.broadcast(SPAWN_TOPIC, payload)
+	entity_spawn_requested.emit(schema_id, entity_id, scene_path, owner_peer_id)
+
+
+# Client-side reliable-hub callback. Decodes the wire payload and emits the
+# signal that world scripts listen on. Tests can call this directly with a
+# crafted payload to drive the spawn path without a NetSession.
+func _on_spawn_payload(payload: PackedByteArray) -> void:
+	var sp := StreamPeerBuffer.new()
+	sp.data_array = payload
+	var schema_id: int = sp.get_u32()
+	var entity_id: int = sp.get_u32()
+	var owner_peer_id: int = sp.get_32()
+	var scene_path: String = sp.get_string()
+	entity_spawn_requested.emit(schema_id, entity_id, scene_path, owner_peer_id)
+
+
+func _encode_spawn(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int) -> PackedByteArray:
+	var sp := StreamPeerBuffer.new()
+	sp.put_u32(schema_id)
+	sp.put_u32(entity_id)
+	sp.put_32(owner_peer_id)
+	sp.put_string(scene_path)
+	return sp.data_array
