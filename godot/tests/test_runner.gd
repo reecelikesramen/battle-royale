@@ -26,6 +26,8 @@ const TEST_SCRIPTS := [
 	"res://tests/test_spawn_dispatch.gd",
 	"res://tests/test_proxy_only_child_ref.gd",
 	"res://tests/test_player_schema_resource.gd",
+	"res://tests/test_corrections_pass.gd",
+	"res://tests/test_server_input_subscribe.gd",
 ]
 
 

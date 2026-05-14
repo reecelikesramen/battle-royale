@@ -65,13 +65,14 @@ func compute_hash() -> int:
 				f.min_value,
 				f.max_value])
 	for c in corrections:
-		parts.append("corr|%s|%s|%f|%f|%f|%d" % [
+		parts.append("corr|%s|%s|%f|%f|%f|%d|%d" % [
 				str(c.name),
 				"|".join(c.fields),
 				c.snap_threshold,
 				c.smooth_rate,
 				c.deadband,
-				int(c.always_snap)])
+				int(c.always_snap),
+				int(c.always_smooth)])
 	for cr in child_refs:
 		parts.append("child|%s|%s|%s|%d" % [
 				str(cr.name),

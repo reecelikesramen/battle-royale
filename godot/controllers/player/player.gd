@@ -1,12 +1,15 @@
 class_name PlayerController
 extends CharacterBody3D
 
-# Sprint 1 (netcode design pass): NetPredictor owns _physics_process and the
-# per-role tick dispatch. PlayerController is now a host for NetPredictor's
-# hook callbacks (_gather_command / _simulate / _load_simulation_state /
-# _apply_state / _visualize / _apply_corrections / _proxy_apply). The dual-
-# context state machines, mouse / camera glue, and reconcile math stay here
-# because they're player-specific; the framework just orchestrates them.
+# PlayerController hosts NetPredictor's hook callbacks. The NetPredictor child
+# node (authored in player.tscn) owns the physics tick and per-role dispatch
+# (authority / server / proxy). The framework now also owns:
+#   - correction smoothing (driven by schema.corrections; render_state flows
+#     into _apply_state),
+#   - server-side input fan-out (NetPredictor subscribes to
+#     NetServer.handle_player_input itself and filters by owner_id).
+# What stays here: input gathering, the dual-context (VISUAL/GAME) state
+# machines + their movement helpers, camera glue, and proxy interp wiring.
 
 signal reconcile_network_debug(delta_pos: Vector3, delta_vel: Vector3, unacked_inputs: SequenceRingBuffer)
 
@@ -43,9 +46,10 @@ var last_grounded_height: float = 0.0
 var context := Enums.IntegrationContext.VISUAL
 var input := PlayerInputContext.new()
 
-# NetPredictor child node owns the tick. Hooks below are duck-typed by
-# NetPredictor via has_method().
-var _net := NetPredictor.new()
+# NetPredictor child node owns the tick. Authored in player.tscn so the schema
+# is inspector-set and the framework lifecycle attaches automatically. Hooks
+# below are duck-typed by NetPredictor via has_method().
+@onready var _net: NetPredictor = $NetPredictor
 
 # Proxy properties so state machines and external scripts keep reading
 # `player.game_*` while the data lives on NetPredictor.
@@ -86,21 +90,13 @@ var _is_toggle_peeked_right := false
 
 
 func _enter_tree() -> void:
-	if _net.get_parent() == null:
-		_net.name = "NetPredictor"
-		# Sprint 2: load the inspector-editable .tres when present (lets the
-		# UI drive quant / correction tuning) and fall back to a code-built
-		# schema on fresh checkouts.
-		_net.schema = PlayerSchema.get_schema()
-		_net.owner_id = _owner_id
-		_net.entity_id = _owner_id
-		add_child(_net)
-
-	NetServer.handle_player_input.connect(server_handle_player_input)
-
-
-func _exit_tree() -> void:
-	NetServer.handle_player_input.disconnect(server_handle_player_input)
+	# NetPredictor is a static .tscn child with schema preset; we only fill in
+	# the per-spawn identity. Parent _enter_tree fires before the child's
+	# _ready, so the predictor sees these values when it registers itself with
+	# NetReplication. Spawner sets _owner_id before add_child(player).
+	var net: NetPredictor = $NetPredictor
+	net.owner_id = _owner_id
+	net.entity_id = _owner_id
 
 
 func _ready():
@@ -236,15 +232,18 @@ func _load_simulation_state(state: PlayerState) -> void:
 	%PeekStateMachine.set_logic_state_by_id(state.peek_state)
 
 
-# Write scene-graph values that snap directly to shadow (no smoothing): camera
-# from state.look, visual SM ids sync via sync_visual. Position / velocity are
-# left to _apply_corrections so they smooth across frames.
+# Visual-side alignment from shadow. On the server this is the only scene
+# write (no smoothing, no separate visual physics). On the client authority,
+# we *do not* touch pos/velocity here — visual physics runs in _visualize and
+# corrections in _apply_corrections will pull the scene toward shadow. Camera
+# + state-machine sync_visual fires here so visual_physics sees the updated
+# visual state when it runs next.
 func _apply_state(state: PlayerState) -> void:
 	if NetSession.is_server:
-		# No visual on the server, but keep the player CharacterBody aligned to
-		# shadow for the editor's inspector / for game-body collision exception.
 		global_position = state.pos
 		velocity = state.velocity
+		%MovementStateMachine.sync_visual()
+		%PeekStateMachine.sync_visual()
 		return
 	context = Enums.IntegrationContext.VISUAL
 	update_camera(state.look)
@@ -262,62 +261,37 @@ func _visualize(delta: float, _state: PlayerState) -> void:
 	%PeekStateMachine.run_visual(delta)
 
 
-# Authority-side smoothing: lerp the visual scene-graph toward shadow per
-# schema's correction channels. Runs every authority tick. After Sprint 1 this
-# loop will move into the framework once render_state is a real Resource.
-func _apply_corrections(delta: float) -> void:
-	var delta_pos := game_position - global_position
-	var horizontal_err := Vector2(delta_pos.x, delta_pos.z)
-	var horizontal_err_mag := horizontal_err.length()
-	var vertical_err := absf(delta_pos.y)
+# Bridge scene -> typed Resource for the framework's corrections pass. Called
+# *after* visual physics has mutated global_position / velocity, so render
+# captures the visual-integrated state. The framework then lerps this toward
+# shadow_state per schema.corrections, and we get the smoothed result back via
+# _apply_corrections.
+func _capture_render_state(state: PlayerState) -> void:
+	state.pos = global_position
+	state.velocity = velocity
+	state.look = _look_abs
+	state.movement_state = %MovementStateMachine.get_logic_state_id()
+	state.peek_state = %PeekStateMachine.get_logic_state_id()
+	state.crouch_progress = %MovementStateMachine.crouch_progress
+	state.prone_progress = %MovementStateMachine.prone_progress
+	state.peek_progress = %PeekStateMachine.peek_progress
 
-	var delta_vel := game_velocity - velocity
-	var horizontal_vel_err := Vector2(delta_vel.x, delta_vel.z)
-	var horizontal_vel_err_mag := horizontal_vel_err.length()
 
-	reconcile_network_debug.emit(delta_pos, delta_vel, _net.unacked_inputs)
-
-	var horiz := _net.schema.find_correction(&"horizontal")
-	var vert := _net.schema.find_correction(&"vertical")
-	var vel_h := _net.schema.find_correction(&"velocity_horizontal")
-
-	if horizontal_err_mag > horiz.snap_threshold:
-		global_position.x = game_position.x
-		global_position.z = game_position.z
-	else:
-		var pos_alpha := _net.correction_alpha(
-			delta,
-			horizontal_err_mag,
-			horiz.snap_threshold,
-			horiz.smooth_rate,
-			horiz.deadband,
-		)
-		global_position.x = lerp(global_position.x, game_position.x, pos_alpha)
-		global_position.z = lerp(global_position.z, game_position.z, pos_alpha)
-
-	if vertical_err > vert.snap_threshold:
-		global_position.y = game_position.y
-		velocity.y = game_velocity.y
-	else:
-		var vert_alpha := _net.correction_alpha(
-			delta,
-			vertical_err,
-			vert.snap_threshold,
-			vert.smooth_rate,
-			vert.deadband,
-		)
-		global_position.y = lerp(global_position.y, game_position.y, vert_alpha)
-		velocity.y = lerp(velocity.y, game_velocity.y, vert_alpha)
-
-	var vel_alpha := _net.correction_alpha(
-		delta,
-		horizontal_vel_err_mag,
-		vel_h.snap_threshold,
-		vel_h.smooth_rate,
-		vel_h.deadband,
-	)
-	velocity.x = lerp(velocity.x, game_velocity.x, vel_alpha)
-	velocity.z = lerp(velocity.z, game_velocity.z, vel_alpha)
+# Write the framework-smoothed render_state back to the scene. Symmetric to
+# _capture_render_state. Skipped on the server (no smoothing path there).
+# Emits the debug signal here so subscribers see the same pre/post deltas the
+# old hand-coded loop produced.
+func _apply_corrections(state: PlayerState) -> void:
+	if NetSession.is_server:
+		return
+	var shadow: PlayerState = _net.shadow_state as PlayerState
+	if shadow != null:
+		reconcile_network_debug.emit(
+				shadow.pos - global_position,
+				shadow.velocity - velocity,
+				_net.unacked_inputs)
+	global_position = state.pos
+	velocity = state.velocity
 
 
 # Remote proxy: framework has already fetched the interp pair from the state
@@ -331,14 +305,21 @@ func _proxy_apply(from_state, to_state, alpha: float, extrapolation_s: float, de
 		velocity = s.velocity
 		update_camera(s.look)
 		%MovementStateMachine.set_visual_state_by_id(s.movement_state)
-		assert(not (s.crouch_progress > 0.0 and s.prone_progress > 0.0), "shadow state should not have non-zero crouch AND prone progress")
-		if s.crouch_progress > 0.0:
+		# Only Crouch/Prone states have `progress`. Gate on visual state name
+		# rather than `progress > 0.0` so quantization noise can't push a write
+		# onto a state with no progress field.
+		var msm_visual: StringName = %MovementStateMachine._visual_state.name
+		if msm_visual == &"CrouchMovementState":
 			%MovementStateMachine._visual_state.progress = s.crouch_progress
-		elif s.prone_progress > 0.0:
+		elif msm_visual == &"ProneMovementState":
 			%MovementStateMachine._visual_state.progress = s.prone_progress
 		%MovementStateMachine.run_visual(delta)
 		%PeekStateMachine.set_visual_state_by_id(s.peek_state)
-		if s.peek_progress != 0.0:
+		# Only PeekState carries a `progress` field; writing to NotPeekState's
+		# script would explode. QUANT8 [-1,1] on peek_progress also can't
+		# encode 0 exactly (quant noise hovers ~±0.004), so the legacy
+		# `!= 0.0` guard isn't safe — gate on the state itself.
+		if %PeekStateMachine._visual_state.name == &"PeekState":
 			%PeekStateMachine._visual_state.progress = s.peek_progress
 		%PeekStateMachine.run_visual(delta)
 	else:
@@ -458,19 +439,6 @@ func update_velocity(ctx: Enums.IntegrationContext) -> void:
 
 		game_velocity = game_body.velocity
 		game_transform = game_body.global_transform
-
-
-# === Networking glue ==============================================================
-
-func server_handle_player_input(peer_id: int, input_packet: PlayerInputPacket) -> void:
-	# server only
-	assert(NetSession.is_server)
-
-	# not owner
-	if peer_id != _owner_id:
-		return
-
-	_net.server_input_queue.enqueue(input_packet.sequence_id, input_packet.timestamp_us, input_packet)
 
 
 func despawn() -> void:

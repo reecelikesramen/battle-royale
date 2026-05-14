@@ -16,3 +16,9 @@ class_name NetCorrection extends Resource
 
 ## Force snap on every reconcile (useful for state-index or progress channels).
 @export var always_snap: bool = false
+
+## Inverse of always_snap: never let the snap-threshold breach kick alpha to 1.
+## When true the channel always uses the smoothed alpha from correction_alpha,
+## even when err > snap_threshold. snap_threshold still bounds the normalize
+## ramp. Useful for velocity channels where snapping introduces a visible jerk.
+@export var always_smooth: bool = false

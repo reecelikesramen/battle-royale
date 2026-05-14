@@ -153,6 +153,15 @@ func _ready() -> void:
 		_resolve_children()
 		_cache_state_field_cfgs()
 
+	# Auto-subscribe to the server's input fan-out when this predictor has a
+	# command_class. Server filters incoming PlayerInputPackets by peer_id ==
+	# owner_id and enqueues them; clients never see the signal so the connect
+	# is a no-op for them. Replaces per-controller boilerplate that previously
+	# wired this up in each entity's _enter_tree.
+	if command_class != null and NetSession.is_server:
+		NetServer.handle_player_input.connect(_on_server_player_input)
+		_subscribed_to_input = true
+
 
 # Sprint 6: cache schema.find_state_field() per name so the snapshot codec can
 # dispatch on Quant without re-walking schema.state_fields each field per tick.
@@ -188,6 +197,25 @@ func _resolve_children() -> void:
 func _exit_tree() -> void:
 	if schema and entity_id >= 0:
 		NetReplication.unregister_entity(schema.id, entity_id)
+	if _subscribed_to_input:
+		NetServer.handle_player_input.disconnect(_on_server_player_input)
+		_subscribed_to_input = false
+
+
+# Server-side handler installed in _ready when command_class is set. Filters by
+# owner_id (only inputs from this entity's owning peer feed the queue) and
+# enqueues into server_input_queue so _server_tick can drain the jitter buffer
+# and replay them in order.
+func _on_server_player_input(peer_id: int, input_packet) -> void:
+	if peer_id != owner_id:
+		return
+	server_input_queue.enqueue(input_packet.sequence_id, input_packet.timestamp_us, input_packet)
+
+
+# True once we've connected NetServer.handle_player_input in _ready. Guards
+# _exit_tree against disconnecting a signal we never bound (test harnesses that
+# skip _ready, predictors without a command_class).
+var _subscribed_to_input: bool = false
 
 
 # Returns the names of user-declared @export fields on a Resource, skipping
@@ -804,8 +832,24 @@ func _physics_process(delta: float) -> void:
 		_proxy_tick(delta)
 
 
-# Local authority: gather an input, store + send redundancy, simulate the
-# shadow forward, then apply + visualize + correct on the visual scene.
+# Local authority: gather input, advance shadow, sync visuals, run visual
+# physics, then lerp the scene back toward shadow per schema.corrections.
+#
+# Order matters because the player has *two* physics integrators — game (in
+# _simulate via the GAME integration context) and visual (in _visualize via
+# the VISUAL context's move_and_slide). The visual integrator mutates the
+# CharacterBody3D's pos/velocity directly each tick. To smooth scene toward
+# shadow without the visual integrator stomping the lerp, we let visual
+# physics run *first*, capture the resulting scene state into render_state,
+# lerp render_state toward shadow_state on the configured channels, then call
+# back into _apply_corrections so the host writes the smoothed values to
+# scene. This matches the pre-refactor behavior: visual physics is allowed to
+# drift each tick, and corrections pull it back.
+#
+# Hosts that don't have separate visual physics (replicate-only entities,
+# pure-state predictors) can skip the _capture_render_state / _apply_corrections
+# pair; render_state then defaults to a shadow snapshot and no scene write
+# happens via the corrections path.
 func _authority_tick(delta: float) -> void:
 	if host == null or not host.has_method(&"_gather_command"):
 		return
@@ -826,8 +870,26 @@ func _authority_tick(delta: float) -> void:
 		host._apply_state(shadow_state)
 	if host.has_method(&"_visualize"):
 		host._visualize(delta, shadow_state)
+	# Seed render_state from the post-visualize scene state. Hosts that own a
+	# scene-graph (player CharacterBody, etc.) implement _capture_render_state
+	# to copy node properties into the typed Resource. Hosts without that
+	# bridge fall through to a shadow snapshot, which makes the corrections
+	# pass a no-op snap.
+	if host.has_method(&"_capture_render_state"):
+		host._capture_render_state(render_state)
+	else:
+		_copy_state(shadow_state, render_state)
+	_corrections_pass(delta)
 	if host.has_method(&"_apply_corrections"):
-		host._apply_corrections(delta)
+		host._apply_corrections(render_state)
+
+
+# Field-wise copy of a NetState. duplicate() would also work but bypasses
+# typed-field reflection — if state_field_names is the canonical list, copying
+# only those keeps the framework's view of "what's networked" authoritative.
+func _copy_state(src: NetState, dst: NetState) -> void:
+	for fname in state_field_names:
+		dst.set(fname, src.get(fname))
 
 
 # Server: drain the per-tick input jitter buffer, run sim per frame, then
@@ -858,6 +920,222 @@ func _proxy_tick(delta: float) -> void:
 	if not pair.is_valid:
 		return
 	host._proxy_apply(pair.from, pair.to, pair.alpha, pair.extrapolation_s, delta)
+
+
+const _AXIS_INDEX := {"x": 0, "y": 1, "z": 2, "w": 3}
+
+
+# Schema-driven authority-side smoothing. Walks schema.corrections, computes
+# per-channel error magnitude over the fields listed in NetCorrection.fields,
+# then either snaps (err > snap_threshold and not always_smooth) or lerps
+# render_state toward shadow_state on the matching axes. Fields not claimed by
+# any correction snap render_state to shadow_state every tick — that's the
+# "instant" path for booleans / state ids / anything you don't want eased.
+#
+# Multi-field channels (e.g. vertical = [pos.y, velocity.y]) compute err from
+# the first field and apply the same alpha to all entries. Lets a single
+# channel keep coupled fields (pos + vel) coherent through the smoothing pass.
+func _corrections_pass(delta: float) -> void:
+	if render_state == null or shadow_state == null:
+		return
+	# touched[field] = Dict{axis_char: true}. Field-level presence (touched.has)
+	# means "some correction channel claimed at least some axes of this field";
+	# the inner dict's keys list which specific axes (xyzw chars) were claimed.
+	# Scalars have empty axis dicts but still register field-level presence so
+	# the catch-all skips them. The alpha=0 deadband path also marks the field
+	# touched so untouched-axis snapping doesn't override the held value.
+	var touched: Dictionary = {}
+	if schema != null:
+		for c in schema.corrections:
+			_apply_correction_channel(c, delta, touched)
+	for fname in state_field_names:
+		if not touched.has(fname):
+			render_state.set(fname, shadow_state.get(fname))
+			continue
+		var rv = render_state.get(fname)
+		var sv = shadow_state.get(fname)
+		var all_axes := _axes_for_value(rv)
+		if all_axes.is_empty():
+			continue  # scalar fully owned by a correction channel — nothing left to snap
+		var t: Dictionary = touched[fname]
+		var snap_axes := ""
+		for ch in all_axes:
+			if not t.has(ch):
+				snap_axes += ch
+		if snap_axes != "":
+			render_state.set(fname, _write_axes(rv, sv, snap_axes))
+
+
+func _apply_correction_channel(c: NetCorrection, delta: float, touched: Dictionary) -> void:
+	if c.fields.is_empty():
+		return
+	var first := _parse_field_path(c.fields[0])
+	var err_mag := _field_error_mag(shadow_state, render_state, first.field, first.axes)
+	var alpha: float
+	if c.always_snap:
+		alpha = 1.0
+	elif err_mag <= c.deadband:
+		alpha = 0.0
+	elif err_mag > c.snap_threshold and not c.always_smooth:
+		alpha = 1.0
+	else:
+		alpha = correction_alpha(delta, err_mag, c.snap_threshold, c.smooth_rate, c.deadband)
+	if alpha <= 0.0:
+		# Still record axes as "touched" so the snap-untouched pass leaves them
+		# alone — deadband means "hold render where it is", not "snap to shadow".
+		for path in c.fields:
+			var parsed := _parse_field_path(path)
+			var axes: String = parsed.axes if parsed.axes != "" else _axes_for_value(render_state.get(parsed.field))
+			if not touched.has(parsed.field):
+				touched[parsed.field] = {}
+			for ch in axes:
+				touched[parsed.field][ch] = true
+		return
+	for path in c.fields:
+		var parsed := _parse_field_path(path)
+		var field: String = parsed.field
+		var rv = render_state.get(field)
+		var sv = shadow_state.get(field)
+		var axes: String = parsed.axes if parsed.axes != "" else _axes_for_value(rv)
+		if alpha >= 1.0:
+			render_state.set(field, _write_axes(rv, sv, axes))
+		else:
+			render_state.set(field, _lerp_axes(rv, sv, axes, alpha))
+		if not touched.has(field):
+			touched[field] = {}
+		for ch in axes:
+			touched[field][ch] = true
+
+
+# "pos.xz" -> {field: "pos", axes: "xz"}. Whole-field path with no dot returns
+# axes = "" — the caller substitutes the full axis set for that value's type.
+func _parse_field_path(path: String) -> Dictionary:
+	var dot := path.find(".")
+	if dot < 0:
+		return {"field": path, "axes": ""}
+	return {"field": path.substr(0, dot), "axes": path.substr(dot + 1)}
+
+
+# Default axis set for a value's type: Vector2 -> "xy", Vector3 -> "xyz", etc.
+# Scalars return "" — _field_error_mag and _write_axes treat that as "whole
+# value", scalar diff / whole assignment.
+func _axes_for_value(value: Variant) -> String:
+	match typeof(value):
+		TYPE_VECTOR2:
+			return "xy"
+		TYPE_VECTOR3:
+			return "xyz"
+		TYPE_VECTOR4, TYPE_QUATERNION:
+			return "xyzw"
+	return ""
+
+
+# L2 norm of (shadow.<field> - render.<field>) projected to axes. Scalar fields
+# return absf(diff) regardless of axes. Unknown types return 0 — the channel
+# then takes the "no error" path and skips.
+func _field_error_mag(shadow: NetState, render: NetState, field: String, axes: String) -> float:
+	var s = shadow.get(field)
+	var r = render.get(field)
+	if s == null:
+		return 0.0
+	match typeof(s):
+		TYPE_FLOAT, TYPE_INT:
+			return absf(float(s) - float(r))
+		TYPE_VECTOR2, TYPE_VECTOR3, TYPE_VECTOR4:
+			var use_axes := axes if axes != "" else _axes_for_value(s)
+			var sum := 0.0
+			for ch in use_axes:
+				var idx: int = _AXIS_INDEX.get(ch, -1)
+				if idx < 0:
+					continue
+				var d: float = float(s[idx]) - float(r[idx])
+				sum += d * d
+			return sqrt(sum)
+		TYPE_QUATERNION:
+			var qs: Quaternion = s
+			var qr: Quaternion = r
+			var dot := qs.dot(qr)
+			return absf(1.0 - absf(dot))
+	return 0.0
+
+
+# Returns a new Variant with the specified axes overwritten from `source`.
+# Scalar values return source directly when axes == "". Other types preserve
+# untouched axes from `target`.
+func _write_axes(target: Variant, source: Variant, axes: String) -> Variant:
+	if axes == "":
+		return source
+	match typeof(target):
+		TYPE_VECTOR2:
+			var v: Vector2 = target
+			var sv: Vector2 = source
+			for ch in axes:
+				var idx: int = _AXIS_INDEX.get(ch, -1)
+				if idx >= 0 and idx < 2:
+					v[idx] = sv[idx]
+			return v
+		TYPE_VECTOR3:
+			var v: Vector3 = target
+			var sv: Vector3 = source
+			for ch in axes:
+				var idx: int = _AXIS_INDEX.get(ch, -1)
+				if idx >= 0 and idx < 3:
+					v[idx] = sv[idx]
+			return v
+		TYPE_VECTOR4:
+			var v: Vector4 = target
+			var sv: Vector4 = source
+			for ch in axes:
+				var idx: int = _AXIS_INDEX.get(ch, -1)
+				if idx >= 0 and idx < 4:
+					v[idx] = sv[idx]
+			return v
+		TYPE_QUATERNION:
+			# Quaternion partial writes are nonsensical mathematically (changing
+			# one component without renormalizing breaks the rotation). Treat
+			# any axis subset as "whole quaternion".
+			return source
+	return source
+
+
+# Lerps the listed axes of `target` toward `source`. Same axis semantics as
+# _write_axes — empty axes returns the full lerp.
+func _lerp_axes(target: Variant, source: Variant, axes: String, alpha: float) -> Variant:
+	match typeof(target):
+		TYPE_FLOAT, TYPE_INT:
+			return lerp(float(target), float(source), alpha)
+		TYPE_VECTOR2:
+			var v: Vector2 = target
+			var sv: Vector2 = source
+			var use_axes := axes if axes != "" else "xy"
+			for ch in use_axes:
+				var idx: int = _AXIS_INDEX.get(ch, -1)
+				if idx >= 0 and idx < 2:
+					v[idx] = lerp(v[idx], sv[idx], alpha)
+			return v
+		TYPE_VECTOR3:
+			var v: Vector3 = target
+			var sv: Vector3 = source
+			var use_axes := axes if axes != "" else "xyz"
+			for ch in use_axes:
+				var idx: int = _AXIS_INDEX.get(ch, -1)
+				if idx >= 0 and idx < 3:
+					v[idx] = lerp(v[idx], sv[idx], alpha)
+			return v
+		TYPE_VECTOR4:
+			var v: Vector4 = target
+			var sv: Vector4 = source
+			var use_axes := axes if axes != "" else "xyzw"
+			for ch in use_axes:
+				var idx: int = _AXIS_INDEX.get(ch, -1)
+				if idx >= 0 and idx < 4:
+					v[idx] = lerp(v[idx], sv[idx], alpha)
+			return v
+		TYPE_QUATERNION:
+			var qt: Quaternion = target
+			var qs: Quaternion = source
+			return qt.slerp(qs, alpha)
+	return target
 
 
 ## Framerate-independent correction alpha:
