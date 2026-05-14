@@ -1,9 +1,33 @@
 class_name NetPredictor extends Node
 
-# Phase 3: pure data container for prediction state. Player controller still
-# drives physics + reconcile; this just owns the queues, shadow state, and
-# tunables so the player script can shrink. Phase 4 introduces typed Resources
-# and pulls the simulate/apply hooks into here.
+# Sprint 1: hook-driven tick dispatcher. NetPredictor owns _physics_process and
+# routes per-role into host-implemented callbacks defined on its parent (the
+# entity controller). Per-role flow follows netcode-design.md §2:
+#
+#   AUTHORITY:  gather -> simulate -> apply_state -> visualize -> corrections
+#   SERVER:     consume queue -> simulate per frame -> apply_state -> broadcast
+#   PROXY:      interp from buffer -> proxy_apply
+#   SNAPSHOT:   decode shadow -> prune+replay (authority) | buffer (proxy)
+#
+# Host hooks (all duck-typed via has_method; absent hooks are no-ops unless
+# noted):
+#   _gather_command(delta: float) -> Resource
+#       (REQUIRED on authority) returns the wire packet for this tick. Host
+#       reads predictor.input_sequence + .last_received_tick to stamp the cmd.
+#   _simulate(state: NetState, cmd: Resource, delta: float) -> void
+#       (REQUIRED) advance state in place from cmd. Used in live ticks AND
+#       in replay after snapshot ack — must be idempotent for a (state, cmd).
+#   _load_simulation_state(state: NetState) -> void
+#       Snap host's sim representation from state. Called before replay.
+#   _apply_state(state: NetState) -> void
+#       Write scene from state. Camera, visual SM ids, non-smoothed fields.
+#   _visualize(delta: float, state: NetState) -> void
+#       Animation/SFX advance. Runs after _apply_state, before _apply_corrections.
+#   _apply_corrections(delta: float) -> void
+#       Lerp scene-graph toward shadow_state. Host-owned in Sprint 1; future
+#       sprint moves the schema-driven loop into the framework.
+#   _proxy_apply(from_state, to_state, alpha, extrapolation_s, delta) -> void
+#       Proxy interp + scene write. Host owns the field interpolation today.
 
 # Identity. Set by the owning controller before/while adding as child.
 # owner_id = the peer that owns the entity (player). entity_id is the routing
@@ -14,6 +38,25 @@ var entity_id: int = -1
 
 # Authority + replay flags read by states & systems.
 var is_replaying_inputs: bool = false
+
+# Most recent command applied via _simulate. Hosts that need edge detection
+# (just-pressed semantics) read this inside their _simulate body to compare
+# against the new cmd. Framework updates it after each successful _simulate
+# call. Set by _reconcile_replay to inputs[0] before stepping unacked inputs
+# so the replay's first step sees the ack-point as its predecessor.
+var previous_cmd: Variant = null
+
+
+# Convenience accessor: the entity script that owns this NetPredictor. Hooks
+# dispatch against this node by has_method() duck typing.
+var host: Node:
+	get: return get_parent()
+
+
+# True when this peer is the local authority for the entity (owns the input
+# stream + runs prediction). False on the server and on remote-proxy clients.
+var is_local_authority: bool:
+	get: return not NetworkTransport.is_server and owner_id == NetworkClient.id
 
 # Server tick we last received a state snapshot for. Echoed in every outbound
 # input so the server can advance its per-client baseline and delta-encode the
@@ -291,15 +334,52 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 				bit_idx += 1
 
 
-# Decode an inbound NetStatePacket directly into shadow_state, update tick +
-# input-ack bookkeeping, then notify subscribers. Phase 6b.4 will swap the
-# player controller's reconcile reads onto shadow_state and retire
-# PlayerStatePacket entirely.
+# Decode an inbound NetStatePacket and route by role:
+#   authority -> prune acked, load sim state, replay unacked via host._simulate
+#   proxy     -> append duplicate to interp ring
+#   server    -> ignored (shouldn't receive own snapshots)
+# Still emits state_snapshot_received for subscribers that want raw notification
+# (debug overlays etc).
 func handle_net_state_packet(packet) -> void:
 	last_received_tick = packet.new_tick
 	last_input_seq = packet.last_input_seq
 	decode_payload_into(shadow_state, packet.payload)
 	state_snapshot_received.emit(shadow_state, last_input_seq, last_received_tick)
+
+	if NetworkTransport.is_server:
+		return
+	if is_local_authority:
+		unacked_inputs.prune_up_to(last_input_seq)
+		if PacketSequence.is_newer(last_input_seq, game_sequence_id):
+			_reconcile_replay(last_input_seq)
+	else:
+		# duplicate() so subsequent in-place decode doesn't clobber buffered entries.
+		player_state_buffer.insert(
+			last_input_seq,
+			Time.get_ticks_usec(),
+			NetTimeline.server_now_us(),
+			shadow_state.duplicate())
+
+
+# Authority-side reconcile: snap host's sim representation to shadow_state,
+# then replay any inputs the server hasn't acked yet so the predicted view
+# resumes from the authoritative tick instead of the last predicted tick.
+# previous_cmd is anchored to inputs[0] (the acked input) so the first replay
+# step sees the correct predecessor for edge detection.
+func _reconcile_replay(new_sequence_id: int) -> void:
+	game_sequence_id = new_sequence_id
+	if host and host.has_method(&"_load_simulation_state"):
+		host._load_simulation_state(shadow_state)
+	is_replaying_inputs = true
+	var inputs := unacked_inputs.get_starting_at(game_sequence_id)
+	if not inputs.is_empty():
+		previous_cmd = inputs[0]
+	var dt := NetTimeline.tick_delta()
+	if host and host.has_method(&"_simulate"):
+		for i in range(1, inputs.size()):
+			host._simulate(shadow_state, inputs[i], dt)
+			previous_cmd = inputs[i]
+	is_replaying_inputs = false
 
 
 # Broadcast this entity's current shadow state. Server-side; called from the
@@ -388,6 +468,76 @@ func oldest_history_tick() -> int:
 # rewind/restore mutate shadow_state in-place.
 func apply_shadow_state_to_scene() -> void:
 	shadow_state_applied.emit()
+
+
+# Sprint 1: framework owns the physics tick. Per-role dispatcher; per-role
+# tick fns invoke host hooks. Hooks are has_method() duck-typed so an entity
+# script can omit any callback it doesn't need.
+func _physics_process(delta: float) -> void:
+	if schema == null or shadow_state == null:
+		return
+	if NetworkTransport.is_server:
+		_server_tick(delta)
+	elif is_local_authority:
+		_authority_tick(delta)
+	else:
+		_proxy_tick(delta)
+
+
+# Local authority: gather an input, store + send redundancy, simulate the
+# shadow forward, then apply + visualize + correct on the visual scene.
+func _authority_tick(delta: float) -> void:
+	if host == null or not host.has_method(&"_gather_command"):
+		return
+	var cmd = host._gather_command(delta)
+	if cmd == null:
+		return
+	unacked_inputs.insert(cmd.sequence_id, -1, cmd.timestamp_us, cmd)
+	input_redundancy_ring.append(cmd)
+	while input_redundancy_ring.size() > INPUT_REDUNDANCY:
+		input_redundancy_ring.pop_front()
+	for redundant in input_redundancy_ring:
+		NetworkTransport.send_packet(redundant.to_payload())
+
+	if host.has_method(&"_simulate"):
+		host._simulate(shadow_state, cmd, delta)
+		previous_cmd = cmd
+	if host.has_method(&"_apply_state"):
+		host._apply_state(shadow_state)
+	if host.has_method(&"_visualize"):
+		host._visualize(delta, shadow_state)
+	if host.has_method(&"_apply_corrections"):
+		host._apply_corrections(delta)
+
+
+# Server: drain the per-tick input jitter buffer, run sim per frame, then
+# broadcast the new authoritative shadow. No visual pass on the server; the
+# scene exists only to provide collision queries for the game body.
+func _server_tick(_delta: float) -> void:
+	if host == null:
+		return
+	var frames := server_input_queue.consume()
+	if frames.is_empty():
+		return
+	if host.has_method(&"_simulate"):
+		for frame in frames:
+			host._simulate(shadow_state, frame.packet, frame.delta)
+			previous_cmd = frame.packet
+	if host.has_method(&"_apply_state"):
+		host._apply_state(shadow_state)
+	server_broadcast_snapshot(frames[-1].packet.sequence_id)
+
+
+# Remote proxy: interpolate two ring entries, hand off to host for scene write.
+# No simulate, no reconcile.
+func _proxy_tick(delta: float) -> void:
+	if host == null or not host.has_method(&"_proxy_apply"):
+		return
+	var now_us := Time.get_ticks_usec()
+	var pair := player_state_buffer.get_interpolation_pair(now_us)
+	if not pair.is_valid:
+		return
+	host._proxy_apply(pair.from, pair.to, pair.alpha, pair.extrapolation_s, delta)
 
 
 ## Framerate-independent correction alpha:
