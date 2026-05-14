@@ -19,6 +19,8 @@ const TEST_SCRIPTS := [
 	"res://tests/test_interest_filter.gd",
 	"res://tests/test_net_replicator.gd",
 	"res://tests/test_player_state_packet.gd",
+	"res://tests/test_snapshot_quantization.gd",
+	"res://tests/test_per_peer_baselines.gd",
 ]
 
 

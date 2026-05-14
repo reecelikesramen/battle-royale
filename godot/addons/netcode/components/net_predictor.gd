@@ -101,6 +101,12 @@ var render_state: NetState
 var state_field_names: PackedStringArray = PackedStringArray()
 var command_field_names: PackedStringArray = PackedStringArray()
 
+# Sprint 6: parallel array of NetFieldConfig entries for each state_field_name.
+# Populated at _ready by walking schema.find_state_field; null entries fall back
+# to AUTO (put_var/get_var) so unconfigured fields keep working. Cached so the
+# encode/decode hot loops don't pay a linear search per field per snapshot.
+var _state_field_cfgs: Array[NetFieldConfig] = []
+
 # Phase 11: optional Callable(peer_id: int, predictor: NetPredictor) -> bool.
 # When set, server_broadcast_snapshot iterates connected peers and sends only
 # to those the filter accepts. Default (empty Callable) keeps the broadcast-
@@ -145,6 +151,18 @@ func _ready() -> void:
 		if entity_id >= 0:
 			NetReplication.register_entity(schema.id, entity_id, self)
 		_resolve_children()
+		_cache_state_field_cfgs()
+
+
+# Sprint 6: cache schema.find_state_field() per name so the snapshot codec can
+# dispatch on Quant without re-walking schema.state_fields each field per tick.
+# Fields not declared in the schema get a null cfg → AUTO fallback.
+func _cache_state_field_cfgs() -> void:
+	_state_field_cfgs.clear()
+	if schema == null:
+		return
+	for fname in state_field_names:
+		_state_field_cfgs.append(schema.find_state_field(fname))
 
 
 # Walks schema.child_refs, resolves each NodePath relative to the predictor's
@@ -223,8 +241,26 @@ const KEYFRAME_INTERVAL: int = 10
 # Server-side delta baseline: the shadow_state contents at the moment of the
 # previous broadcast. duplicate()'d each broadcast so subsequent mutations to
 # shadow_state don't bleed into the baseline. null until first broadcast.
+#
+# Sprint 6: this remains the shared/legacy baseline used by snapshot_payload()
+# (tests + external callers) and by the history ring. Per-peer broadcasts use
+# _peer_baselines below and never touch this field.
 var _last_broadcasted_state: NetState = null
 var _ticks_since_keyframe: int = 0
+
+# Sprint 6: per-peer delta baselines. Each entry tracks the state, child-field
+# values, and tick-since-keyframe counter that the server most recently sent
+# to that peer. Avoids the problem where one client's packet loss forces a
+# keyframe for everyone, and lets the keyframe schedule stagger naturally
+# across peers. Entries are created lazily on first send to a peer and are
+# pruned when the peer disconnects (see _on_peer_disconnected hook).
+#
+# Shape: { peer_id: int -> {
+#     state: NetState (duplicate),
+#     child_values: Array[Dictionary],
+#     ticks_since_kf: int,
+# } }
+var _peer_baselines: Dictionary = {}
 
 # Phase 10: server-side historical state ring for lag-comp rewind. Keyed by
 # the server tick the snapshot was authoritative at. Bounded so memory stays
@@ -237,64 +273,80 @@ var _history_ticks: Array[int] = []    # insertion order, used for FIFO prune
 
 # Wire format for snapshot_payload / decode_payload_into:
 #   byte 0:  is_keyframe (1 = full snapshot, 0 = delta)
-#   keyframe:  put_var per state_field_name, then per child-ref field, in order
+#   keyframe:  encode_field per state_field_name, then per child-ref field, in order
 #   delta:     ceil(N_total/8) bytes of dirty_mask covering [state_fields...,
-#              child_0_fields..., child_1_fields..., ...]; then put_var for each
-#              set bit, in the same order.
+#              child_0_fields..., child_1_fields..., ...]; then encode_field for
+#              each set bit, in the same order.
 #
 # Phase 8c: child-ref fields share the dirty mask with state_fields so unchanged
 # child properties (e.g. an idle AnimationTree blend) cost only a bit per tick.
-# Per-field quantization will land in a follow-on commit; AUTO Variant encoding
-# is used everywhere for now.
+#
+# Sprint 6: per-field encoding consults NetFieldConfig.quant to optionally
+# replace put_var/get_var with a tighter scalar codec (u8/u16/float32/quat32).
+# Unconfigured fields and child-ref fields stay on AUTO Variant. Decoders need
+# the receiver's `state` to already have a value of the right type for the
+# field so typeof() can pick the matching scalar reader.
 func snapshot_payload(force_keyframe: bool = false) -> PackedByteArray:
+	return _encode_payload(force_keyframe, _last_broadcasted_state, _last_child_values, _ticks_since_keyframe)
+
+
+# Internal encode used by both the shared-baseline path (snapshot_payload) and
+# the per-peer path (server_broadcast_snapshot). Callers pass the baseline they
+# want diffed against; null baseline forces a keyframe regardless of `force`.
+func _encode_payload(
+		force_keyframe: bool,
+		baseline_state: NetState,
+		baseline_child_values: Array,
+		ticks_since_keyframe: int) -> PackedByteArray:
 	if shadow_state == null:
 		return PackedByteArray()
 	var sp := StreamPeerBuffer.new()
 	var is_keyframe := force_keyframe \
-			or _last_broadcasted_state == null \
-			or _ticks_since_keyframe >= KEYFRAME_INTERVAL
+			or baseline_state == null \
+			or ticks_since_keyframe >= KEYFRAME_INTERVAL
 	if is_keyframe:
 		sp.put_u8(1)
-		for fname in state_field_names:
-			sp.put_var(shadow_state.get(fname))
+		for i in state_field_names.size():
+			_encode_state_field(sp, i, shadow_state.get(state_field_names[i]))
 		for entry in _resolved_children:
 			var node: Node = entry[0]
 			for f in entry[1]:
 				sp.put_var(node.get(f))
-	else:
-		sp.put_u8(0)
-		var n_state := state_field_names.size()
-		var n_total := n_state
-		for entry in _resolved_children:
-			n_total += entry[1].size()
-		var mask_bytes := (n_total + 7) / 8
-		var mask := PackedByteArray()
-		mask.resize(mask_bytes)
-		for i in n_state:
-			if shadow_state.get(state_field_names[i]) != _last_broadcasted_state.get(state_field_names[i]):
-				mask[i / 8] = mask[i / 8] | (1 << (i % 8))
-		var bit_idx := n_state
-		for child_i in _resolved_children.size():
-			var node: Node = _resolved_children[child_i][0]
-			var fields: PackedStringArray = _resolved_children[child_i][1]
-			var last: Dictionary = _last_child_values[child_i] if child_i < _last_child_values.size() else {}
-			for f in fields:
-				var cur = node.get(f)
-				if not last.has(f) or last[f] != cur:
-					mask[bit_idx / 8] = mask[bit_idx / 8] | (1 << (bit_idx % 8))
-				bit_idx += 1
-		sp.put_data(mask)
-		for i in n_state:
-			if mask[i / 8] & (1 << (i % 8)):
-				sp.put_var(shadow_state.get(state_field_names[i]))
-		bit_idx = n_state
-		for child_i in _resolved_children.size():
-			var node: Node = _resolved_children[child_i][0]
-			var fields: PackedStringArray = _resolved_children[child_i][1]
-			for f in fields:
-				if mask[bit_idx / 8] & (1 << (bit_idx % 8)):
-					sp.put_var(node.get(f))
-				bit_idx += 1
+		return sp.data_array
+
+	sp.put_u8(0)
+	var n_state := state_field_names.size()
+	var n_total := n_state
+	for entry in _resolved_children:
+		n_total += entry[1].size()
+	var mask_bytes := (n_total + 7) / 8
+	var mask := PackedByteArray()
+	mask.resize(mask_bytes)
+	for i in n_state:
+		if shadow_state.get(state_field_names[i]) != baseline_state.get(state_field_names[i]):
+			mask[i / 8] = mask[i / 8] | (1 << (i % 8))
+	var bit_idx := n_state
+	for child_i in _resolved_children.size():
+		var node: Node = _resolved_children[child_i][0]
+		var fields: PackedStringArray = _resolved_children[child_i][1]
+		var last: Dictionary = baseline_child_values[child_i] if child_i < baseline_child_values.size() else {}
+		for f in fields:
+			var cur = node.get(f)
+			if not last.has(f) or last[f] != cur:
+				mask[bit_idx / 8] = mask[bit_idx / 8] | (1 << (bit_idx % 8))
+			bit_idx += 1
+	sp.put_data(mask)
+	for i in n_state:
+		if mask[i / 8] & (1 << (i % 8)):
+			_encode_state_field(sp, i, shadow_state.get(state_field_names[i]))
+	bit_idx = n_state
+	for child_i in _resolved_children.size():
+		var node: Node = _resolved_children[child_i][0]
+		var fields: PackedStringArray = _resolved_children[child_i][1]
+		for f in fields:
+			if mask[bit_idx / 8] & (1 << (bit_idx % 8)):
+				sp.put_var(node.get(f))
+			bit_idx += 1
 	return sp.data_array
 
 
@@ -307,8 +359,8 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 	sp.data_array = payload
 	var is_keyframe := sp.get_u8() == 1
 	if is_keyframe:
-		for fname in state_field_names:
-			state.set(fname, sp.get_var())
+		for i in state_field_names.size():
+			state.set(state_field_names[i], _decode_state_field(sp, i, state.get(state_field_names[i])))
 		for entry in _resolved_children:
 			var node: Node = entry[0]
 			for f in entry[1]:
@@ -323,7 +375,7 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 		var mask: PackedByteArray = mask_pair[1]
 		for i in n_state:
 			if mask[i / 8] & (1 << (i % 8)):
-				state.set(state_field_names[i], sp.get_var())
+				state.set(state_field_names[i], _decode_state_field(sp, i, state.get(state_field_names[i])))
 		var bit_idx := n_state
 		for entry in _resolved_children:
 			var node: Node = entry[0]
@@ -332,6 +384,209 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 				if mask[bit_idx / 8] & (1 << (bit_idx % 8)):
 					node.set(f, sp.get_var())
 				bit_idx += 1
+
+
+# Sprint 6: per-field quantized codecs. `field_idx` indexes _state_field_cfgs;
+# null/missing cfg or Quant.AUTO falls back to put_var so unconfigured fields
+# keep working byte-for-byte identical to pre-Sprint-6 wire format.
+func _encode_state_field(sp: StreamPeerBuffer, field_idx: int, value: Variant) -> void:
+	var cfg: NetFieldConfig = _state_field_cfgs[field_idx] if field_idx < _state_field_cfgs.size() else null
+	if cfg == null or cfg.quant == NetFieldConfig.Quant.AUTO:
+		sp.put_var(value)
+		return
+	match cfg.quant:
+		NetFieldConfig.Quant.FLOAT32:
+			_put_float32(sp, value)
+		NetFieldConfig.Quant.QUANT8:
+			_put_quantized(sp, value, cfg.min_value, cfg.max_value, 255)
+		NetFieldConfig.Quant.QUANT16:
+			_put_quantized(sp, value, cfg.min_value, cfg.max_value, 65535)
+		NetFieldConfig.Quant.QUAT32:
+			_put_quat32(sp, value)
+		_:
+			sp.put_var(value)
+
+
+func _decode_state_field(sp: StreamPeerBuffer, field_idx: int, type_hint: Variant) -> Variant:
+	var cfg: NetFieldConfig = _state_field_cfgs[field_idx] if field_idx < _state_field_cfgs.size() else null
+	if cfg == null or cfg.quant == NetFieldConfig.Quant.AUTO:
+		return sp.get_var()
+	match cfg.quant:
+		NetFieldConfig.Quant.FLOAT32:
+			return _get_float32(sp, type_hint)
+		NetFieldConfig.Quant.QUANT8:
+			return _get_quantized(sp, type_hint, cfg.min_value, cfg.max_value, 255)
+		NetFieldConfig.Quant.QUANT16:
+			return _get_quantized(sp, type_hint, cfg.min_value, cfg.max_value, 65535)
+		NetFieldConfig.Quant.QUAT32:
+			return _get_quat32(sp)
+		_:
+			return sp.get_var()
+
+
+# FLOAT32: emit each scalar as IEEE-754 4-byte float. Saves ~5+ bytes/field vs
+# put_var on Vector3/Vector4. Type comes from the value being encoded; decode
+# side reads back from the receiver state's current value's type.
+func _put_float32(sp: StreamPeerBuffer, value: Variant) -> void:
+	match typeof(value):
+		TYPE_FLOAT, TYPE_INT:
+			sp.put_float(float(value))
+		TYPE_VECTOR2:
+			var v2: Vector2 = value
+			sp.put_float(v2.x); sp.put_float(v2.y)
+		TYPE_VECTOR3:
+			var v3: Vector3 = value
+			sp.put_float(v3.x); sp.put_float(v3.y); sp.put_float(v3.z)
+		TYPE_VECTOR4:
+			var v4: Vector4 = value
+			sp.put_float(v4.x); sp.put_float(v4.y); sp.put_float(v4.z); sp.put_float(v4.w)
+		_:
+			push_warning("FLOAT32 quant unsupported for type %d, falling back to put_var" % typeof(value))
+			sp.put_var(value)
+
+
+func _get_float32(sp: StreamPeerBuffer, type_hint: Variant) -> Variant:
+	match typeof(type_hint):
+		TYPE_FLOAT, TYPE_INT:
+			return sp.get_float()
+		TYPE_VECTOR2:
+			return Vector2(sp.get_float(), sp.get_float())
+		TYPE_VECTOR3:
+			return Vector3(sp.get_float(), sp.get_float(), sp.get_float())
+		TYPE_VECTOR4:
+			return Vector4(sp.get_float(), sp.get_float(), sp.get_float(), sp.get_float())
+		_:
+			return sp.get_var()
+
+
+# QUANT8 / QUANT16: scale each scalar into [min_value, max_value] and write as
+# u8 or u16. Out-of-range values clamp at the endpoints (preferable to silent
+# wraparound). min == max is a degenerate config; encode emits midpoint to
+# avoid a divide-by-zero and decode returns the midpoint scalar.
+func _put_quantized(sp: StreamPeerBuffer, value: Variant, lo: float, hi: float, max_int: int) -> void:
+	match typeof(value):
+		TYPE_FLOAT, TYPE_INT:
+			_put_scalar_quantized(sp, float(value), lo, hi, max_int)
+		TYPE_VECTOR2:
+			var v2: Vector2 = value
+			_put_scalar_quantized(sp, v2.x, lo, hi, max_int)
+			_put_scalar_quantized(sp, v2.y, lo, hi, max_int)
+		TYPE_VECTOR3:
+			var v3: Vector3 = value
+			_put_scalar_quantized(sp, v3.x, lo, hi, max_int)
+			_put_scalar_quantized(sp, v3.y, lo, hi, max_int)
+			_put_scalar_quantized(sp, v3.z, lo, hi, max_int)
+		TYPE_VECTOR4:
+			var v4: Vector4 = value
+			_put_scalar_quantized(sp, v4.x, lo, hi, max_int)
+			_put_scalar_quantized(sp, v4.y, lo, hi, max_int)
+			_put_scalar_quantized(sp, v4.z, lo, hi, max_int)
+			_put_scalar_quantized(sp, v4.w, lo, hi, max_int)
+		_:
+			push_warning("QUANT8/QUANT16 unsupported for type %d, falling back to put_var" % typeof(value))
+			sp.put_var(value)
+
+
+func _get_quantized(sp: StreamPeerBuffer, type_hint: Variant, lo: float, hi: float, max_int: int) -> Variant:
+	match typeof(type_hint):
+		TYPE_FLOAT, TYPE_INT:
+			return _get_scalar_quantized(sp, lo, hi, max_int)
+		TYPE_VECTOR2:
+			var x := _get_scalar_quantized(sp, lo, hi, max_int)
+			var y := _get_scalar_quantized(sp, lo, hi, max_int)
+			return Vector2(x, y)
+		TYPE_VECTOR3:
+			var x := _get_scalar_quantized(sp, lo, hi, max_int)
+			var y := _get_scalar_quantized(sp, lo, hi, max_int)
+			var z := _get_scalar_quantized(sp, lo, hi, max_int)
+			return Vector3(x, y, z)
+		TYPE_VECTOR4:
+			var x := _get_scalar_quantized(sp, lo, hi, max_int)
+			var y := _get_scalar_quantized(sp, lo, hi, max_int)
+			var z := _get_scalar_quantized(sp, lo, hi, max_int)
+			var w := _get_scalar_quantized(sp, lo, hi, max_int)
+			return Vector4(x, y, z, w)
+		_:
+			return sp.get_var()
+
+
+func _put_scalar_quantized(sp: StreamPeerBuffer, value: float, lo: float, hi: float, max_int: int) -> void:
+	var range_: float = hi - lo
+	var t: float
+	if range_ <= 0.0:
+		t = 0.5
+	else:
+		t = clamp((value - lo) / range_, 0.0, 1.0)
+	var q: int = int(round(t * float(max_int)))
+	if max_int <= 255:
+		sp.put_u8(q)
+	else:
+		sp.put_u16(q)
+
+
+func _get_scalar_quantized(sp: StreamPeerBuffer, lo: float, hi: float, max_int: int) -> float:
+	var q: int
+	if max_int <= 255:
+		q = sp.get_u8()
+	else:
+		q = sp.get_u16()
+	var range_: float = hi - lo
+	if range_ <= 0.0:
+		return lo
+	return lo + (float(q) / float(max_int)) * range_
+
+
+# QUAT32: smallest-three quaternion compression. 2 bits encode which of x/y/z/w
+# has the largest absolute value; the other three components encode as 10-bit
+# unsigned ints over the [-1/sqrt(2), 1/sqrt(2)] range. Sign of the largest is
+# absorbed by flipping the whole quaternion before packing (q and -q represent
+# the same rotation). 32 bits total vs ~20 bytes for put_var(Quaternion).
+const _QUAT32_RANGE: float = 1.4142135  # sqrt(2)
+const _QUAT32_HALF: float = 0.70710677   # sqrt(2)/2
+
+func _put_quat32(sp: StreamPeerBuffer, value: Variant) -> void:
+	if typeof(value) != TYPE_QUATERNION:
+		push_warning("QUAT32 quant requires Quaternion, got type %d" % typeof(value))
+		sp.put_var(value)
+		return
+	var q: Quaternion = value
+	var comps: Array[float] = [q.x, q.y, q.z, q.w]
+	var li: int = 0
+	var lm: float = abs(comps[0])
+	for i in range(1, 4):
+		if abs(comps[i]) > lm:
+			lm = abs(comps[i])
+			li = i
+	var sign_: float = -1.0 if comps[li] < 0.0 else 1.0
+	var packed: int = li & 0x3
+	var bit_off: int = 2
+	for i in range(4):
+		if i == li:
+			continue
+		var n: float = comps[i] * sign_
+		var t: float = clamp((n + _QUAT32_HALF) / _QUAT32_RANGE, 0.0, 1.0)
+		var q10: int = int(round(t * 1023.0)) & 0x3FF
+		packed |= q10 << bit_off
+		bit_off += 10
+	sp.put_u32(packed)
+
+
+func _get_quat32(sp: StreamPeerBuffer) -> Quaternion:
+	var packed: int = sp.get_u32()
+	var li: int = packed & 0x3
+	var bit_off: int = 2
+	var vals: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var sq: float = 0.0
+	for i in range(4):
+		if i == li:
+			continue
+		var q10: int = (packed >> bit_off) & 0x3FF
+		var n: float = (float(q10) / 1023.0) * _QUAT32_RANGE - _QUAT32_HALF
+		vals[i] = n
+		sq += n * n
+		bit_off += 10
+	vals[li] = sqrt(max(1.0 - sq, 0.0))
+	return Quaternion(vals[0], vals[1], vals[2], vals[3])
 
 
 # Decode an inbound NetStatePacket and route by role:
@@ -383,39 +638,44 @@ func _reconcile_replay(new_sequence_id: int) -> void:
 
 
 # Broadcast this entity's current shadow state. Server-side; called from the
-# entity controller's _server_physics_step. Phase 6b runs alongside the
-# entity's pre-existing per-type packet (PlayerStatePacket); Phase 6b.2 retires
-# the per-type packets.
+# entity controller's _server_physics_step.
+#
+# Sprint 6: switched from a single shared baseline + broadcast-once to per-peer
+# baselines + per-peer encode. Each recipient sees a delta against the last
+# snapshot we sent specifically to them, which means:
+#   - keyframe cadence staggers naturally across peers (no global resync storm),
+#   - a single client's packet loss only forces *that* client to wait for its
+#     own next keyframe, not the whole lobby,
+#   - interest-filter ramp-up sends a keyframe automatically on first send to a
+#     newly-eligible peer (their baseline is null until then).
+# The shared `_last_broadcasted_state` is still updated for the history ring +
+# legacy snapshot_payload() callers; the wire stops using it directly.
 func server_broadcast_snapshot(last_input_seq: int) -> void:
 	if schema == null or entity_id < 0:
 		return
-	var is_keyframe_now := _last_broadcasted_state == null \
-			or _ticks_since_keyframe >= KEYFRAME_INTERVAL
-	var packet := NetStatePacket.new()
-	packet.schema_id = schema.id
-	packet.entity_id = entity_id
-	packet.last_input_seq = last_input_seq
-	# baseline_tick = the prior keyframe tick this delta is anchored against;
-	# 0 on a keyframe itself. Phase 6b.4 may use it for per-client baseline
-	# selection once we send per-peer instead of broadcast.
-	packet.baseline_tick = 0 if is_keyframe_now else (NetServer.server_tick - _ticks_since_keyframe)
-	packet.new_tick = NetServer.server_tick
-	packet.payload = snapshot_payload(is_keyframe_now)
-	# Phase 11: when an interest_filter is installed, switch from broadcast to
-	# targeted per-peer send. Same encoded payload is reused across recipients
-	# (per-peer deltas / per-peer baselines remain a follow-up optimization).
-	var gd_packet := packet.to_payload()
-	if interest_filter.is_null():
-		NetSession.broadcast_packet(gd_packet)
-	else:
-		for peer_id in NetServer.peer_ids:
-			if interest_filter.call(peer_id, self):
-				NetSession.send_packet_to_peer(peer_id, gd_packet)
-	# duplicate() snapshots shadow_state so subsequent in-place mutation by the
-	# sim doesn't poison the baseline mid-tick.
+	var target_peers: Array = _select_target_peers()
+	for peer_id in target_peers:
+		var record: Dictionary = _peer_baselines.get(peer_id, {})
+		var baseline_state: NetState = record.get("state", null)
+		var baseline_children: Array = record.get("child_values", [])
+		var ticks_since_kf: int = record.get("ticks_since_kf", KEYFRAME_INTERVAL)
+		var is_keyframe_now: bool = baseline_state == null \
+				or ticks_since_kf >= KEYFRAME_INTERVAL
+		var packet := NetStatePacket.new()
+		packet.schema_id = schema.id
+		packet.entity_id = entity_id
+		packet.last_input_seq = last_input_seq
+		# baseline_tick = the tick of the snapshot this delta anchors against;
+		# 0 on a keyframe. Per-peer because peers may have different baselines.
+		packet.baseline_tick = 0 if is_keyframe_now else (NetServer.server_tick - ticks_since_kf)
+		packet.new_tick = NetServer.server_tick
+		packet.payload = _encode_payload(is_keyframe_now, baseline_state, baseline_children, ticks_since_kf)
+		NetSession.send_packet_to_peer(peer_id, packet.to_payload())
+		_update_peer_baseline(peer_id, is_keyframe_now)
+	# Maintain shared baseline + history ring even when no peers are connected
+	# yet. tests + lag-comp rewind read from the shared baseline; snapshot_payload()
+	# without arguments still works for callers that haven't migrated.
 	_last_broadcasted_state = shadow_state.duplicate()
-	# Phase 8c: child baselines mirror the state baseline so the next snapshot's
-	# dirty mask correctly identifies child-field changes.
 	for child_i in _resolved_children.size():
 		var node: Node = _resolved_children[child_i][0]
 		var fields: PackedStringArray = _resolved_children[child_i][1]
@@ -424,11 +684,55 @@ func server_broadcast_snapshot(last_input_seq: int) -> void:
 		var baseline: Dictionary = _last_child_values[child_i]
 		for f in fields:
 			baseline[f] = node.get(f)
-	_record_history(packet.new_tick, _last_broadcasted_state)
-	if is_keyframe_now:
-		_ticks_since_keyframe = 1
-	else:
+	_record_history(NetServer.server_tick, _last_broadcasted_state)
+	# Shared keyframe counter advances per tick so callers that still use
+	# snapshot_payload() (no per-peer state) maintain their old cadence. The
+	# wire is no longer keyed off this counter when peers are connected.
+	if _last_broadcasted_state != null and _ticks_since_keyframe < KEYFRAME_INTERVAL:
 		_ticks_since_keyframe += 1
+	else:
+		_ticks_since_keyframe = 1
+
+
+# Sprint 6: returns the peer set this broadcast should target. Honors the
+# interest_filter if installed; otherwise covers every connected peer.
+func _select_target_peers() -> Array:
+	if interest_filter.is_null():
+		return NetServer.peer_ids
+	var out: Array = []
+	for peer_id in NetServer.peer_ids:
+		if interest_filter.call(peer_id, self):
+			out.append(peer_id)
+	return out
+
+
+# Sprint 6: bookkeeping after sending a packet to one peer. Records the just-
+# sent shadow_state + child values as that peer's baseline and advances its
+# keyframe counter (resets on a keyframe send, increments on a delta).
+func _update_peer_baseline(peer_id: int, was_keyframe: bool) -> void:
+	var record: Dictionary = _peer_baselines.get(peer_id, {})
+	record["state"] = shadow_state.duplicate()
+	var child_snap: Array = []
+	for child_i in _resolved_children.size():
+		var node: Node = _resolved_children[child_i][0]
+		var fields: PackedStringArray = _resolved_children[child_i][1]
+		var d: Dictionary = {}
+		for f in fields:
+			d[f] = node.get(f)
+		child_snap.append(d)
+	record["child_values"] = child_snap
+	if was_keyframe:
+		record["ticks_since_kf"] = 1
+	else:
+		record["ticks_since_kf"] = int(record.get("ticks_since_kf", 0)) + 1
+	_peer_baselines[peer_id] = record
+
+
+# Sprint 6: drop a peer's baseline when it disconnects. Server controllers
+# should call this from their peer-disconnect handler so the dictionary doesn't
+# grow unbounded across a long server lifetime.
+func forget_peer_baseline(peer_id: int) -> void:
+	_peer_baselines.erase(peer_id)
 
 
 # Records the just-broadcast state at `tick` in the history ring, evicting
