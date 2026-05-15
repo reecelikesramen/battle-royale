@@ -11,20 +11,24 @@ config_version=5
 [animation]
 
 warnings/check_invalid_track_paths=false
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
 config/name="Battle Royale"
 config/version="0.0.0"
 run/main_scene="uid://coun7o75iw0jv"
-config/features=PackedStringArray("4.5", "Forward Plus")
+config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="uid://cwno5sullptma"
 
 [autoload]
 
-NetworkTransport="*res://autoload/network/network_transport.tscn"
-NetworkClient="*res://autoload/network/network_client.gd"
-NetworkServer="*res://autoload/network/network_server.gd"
+NetSession="*res://addons/netcode/core/net_session.tscn"
+NetClient="*res://addons/netcode/core/net_client.gd"
+NetServer="*res://addons/netcode/core/net_server.gd"
+NetTimeline="*res://addons/netcode/core/net_timeline.gd"
+NetReplication="*res://addons/netcode/core/net_replication.gd"
+NetReliableHub="*res://addons/netcode/core/net_reliable_hub.gd"
 Enums="*res://autoload/enums.gd"
 Constants="*res://autoload/constants.gd"
 
@@ -34,7 +38,7 @@ gdscript/warnings/integer_division=0
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/terrain_3d/plugin.cfg")
+enabled=PackedStringArray("res://addons/netcode/plugin.cfg", "res://addons/terrain_3d/plugin.cfg")
 
 [input]
 
@@ -111,6 +115,21 @@ toggle_chat={
 free_look={
 "deadzone": 0.2,
 "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194328,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+]
+}
+throw_grenade={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":71,"key_label":0,"unicode":103,"location":0,"echo":false,"script":null)
+]
+}
+shoot={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":0,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":1,"canceled":false,"pressed":false,"double_click":false,"script":null)
+]
+}
+scope={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":0,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":2,"canceled":false,"pressed":false,"double_click":false,"script":null)
 ]
 }
 

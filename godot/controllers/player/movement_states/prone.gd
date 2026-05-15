@@ -29,11 +29,15 @@ func _ready() -> void:
 
 func logic_enter() -> void:
 	player.set_parameters(SPEED, ACCELERATION)
-	_modifier = JUMP_PRONE_MODIFIER if previous_state.name == &"JumpMovementState" else 1.0
+	_modifier = JUMP_PRONE_MODIFIER if previous_state != null and previous_state.name == &"JumpMovementState" else 1.0
 	if not player.is_replaying_inputs:
 		_last_toggle_time = Time.get_ticks_usec()
 		_wants_to_unprone = false
-		progress = 0.0
+		# Coming from crouch, snap to full prone — player is already low.
+		if previous_state != null and previous_state.name == &"CrouchMovementState":
+			progress = _prone_anim_length
+		else:
+			progress = 0.0
 
 
 func visual_enter() -> void:
@@ -59,10 +63,19 @@ func logic_physics(delta: float) -> void:
 
 
 func logic_transitions() -> void:
+	# Direct prone -> crouch (skip going fully upright first).
+	if player.input.is_crouch_just_pressed():
+		transition.emit(&"CrouchMovementState")
+		return
+
 	if player.input.is_prone_just_pressed() and _toggle_debounce_us() > 50_000:
 		_last_toggle_time = Time.get_ticks_usec()
 		_wants_to_unprone = !_wants_to_unprone
-	
+
+	# Jump from prone: doesn't actually jump, just unprones (stand up).
+	if player.input.is_jump_just_pressed():
+		_wants_to_unprone = true
+
 	# TODO: make work with jump prone
 	if not player.on_floor(Enums.IntegrationContext.GAME) and player.game_position.y < player.last_grounded_height - UNPRONE_FALL_DISTANCE:
 		_wants_to_unprone = true
@@ -71,7 +84,7 @@ func logic_transitions() -> void:
 		# Block uncrouch if hitting ceiling
 		if _crouch_shapecast and _crouch_shapecast.is_colliding():
 			return
-			
+
 		transition.emit(&"IdleMovementState")
 
 
@@ -80,7 +93,7 @@ func visual_physics(delta: float) -> void:
 		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
 		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
 		player.update_velocity(Enums.IntegrationContext.VISUAL)
-		
+
 	# Sync animation to logic progress via TimeSeek
 	animation_tree.set("parameters/ProneTimeSeek/seek_request", progress)
 

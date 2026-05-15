@@ -1,8 +1,8 @@
 extends MovementState
 
-@export var SPEED := 7.0
-@export var ACCELERATION := 35.0
-@export var TOP_ANIM_SPEED: float = 1.6
+@export var SPEED := 9.0
+@export var ACCELERATION := 50.0
+@export var TOP_ANIM_SPEED: float = 1.8
 
 var TOP_SPEED_SQ: float:
 	get: return SPEED * SPEED
@@ -26,19 +26,23 @@ func logic_transitions() -> void:
 	if not player.on_floor(Enums.IntegrationContext.GAME):
 		transition.emit(&"FallMovementState")
 		return
-	
+
 	if player.game_velocity.is_zero_approx():
 		transition.emit(&"IdleMovementState")
 
 	if !player.input.is_sprinting():
-		transition.emit(&"WalkMovementState")
+		# Release sprint -> walk_mode picks Walk or Run.
+		if player.input.is_walk_mode():
+			transition.emit(&"WalkMovementState")
+		else:
+			transition.emit(&"RunMovementState")
 
 	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
 		transition.emit(&"JumpMovementState")
-	
+
 	if player.input.is_crouching():
 		transition.emit(&"CrouchMovementState")
-	
+
 	if player.input.is_prone_just_pressed():
 		transition.emit(&"ProneMovementState")
 

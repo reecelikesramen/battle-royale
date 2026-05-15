@@ -1,4 +1,4 @@
-[gd_scene load_steps=49 format=3 uid="uid://cno0j53ottrgj"]
+[gd_scene format=3 uid="uid://cno0j53ottrgj"]
 
 [ext_resource type="Script" uid="uid://bmbvova1tm3y8" path="res://controllers/player/player.gd" id="1_icig3"]
 [ext_resource type="PackedScene" uid="uid://dqvg7w4c8u3oa" path="res://assets/mesh/fps_hands/fps_hands_rigged_by_evolvegames.glb" id="2_g7yr6"]
@@ -12,9 +12,12 @@
 [ext_resource type="Script" uid="uid://d0igha5eqiup3" path="res://controllers/player/movement_states/jump.gd" id="10_fy606"]
 [ext_resource type="Script" uid="uid://b62btg7hc68a1" path="res://controllers/player/movement_states/prone.gd" id="10_icig3"]
 [ext_resource type="Script" uid="uid://sjabr5vf27je" path="res://controllers/player/movement_states/fall.gd" id="11_6e1eu"]
+[ext_resource type="Script" path="res://controllers/player/movement_states/run.gd" id="run_state"]
 [ext_resource type="Script" uid="uid://dwr5fk7m6jfqm" path="res://controllers/player/peek_state_machine.gd" id="11_a1kld"]
 [ext_resource type="Script" uid="uid://xirslhtv3akx" path="res://controllers/player/peek_states/not_peek_state.gd" id="11_bn7gw"]
 [ext_resource type="Script" uid="uid://oowrww0px1ws" path="res://controllers/player/peek_states/peeking_state.gd" id="12_a1kld"]
+[ext_resource type="Script" uid="uid://jf7cr4funpm5" path="res://addons/netcode/components/net_predictor.gd" id="13_npred"]
+[ext_resource type="Resource" uid="uid://carnketvn7m1v" path="res://entities/player/player_schema.tres" id="14_pscheme"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_74qjk"]
 resource_local_to_scene = true
@@ -28,7 +31,6 @@ emission_energy_multiplier = 0.0
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_gf80s"]
 resource_local_to_scene = true
 material = SubResource("StandardMaterial3D_rk4xh")
-height = 1.999995
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_uovkr"]
 resource_local_to_scene = true
@@ -43,7 +45,6 @@ emission_energy_multiplier = 0.0
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_l8yvu"]
 resource_local_to_scene = true
 material = SubResource("StandardMaterial3D_uovkr")
-height = 1.999995
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_ca8e7"]
 
@@ -596,6 +597,44 @@ nodes/AnimNotPeek/position = Vector2(-160, 570)
 "nodes/Add Peek/position" = Vector2(590, 360)
 node_connections = [&"output", 0, &"Add Peek", &"Movement", 0, &"AnimIdle", &"Movement", 1, &"CrouchTimeSeek", &"Movement", 2, &"ProneTimeSeek", &"Movement", 3, &"AnimJump", &"Movement", 4, &"AnimFall", &"Peeking", 0, &"AnimNotPeek", &"Peeking", 1, &"PeekTimeSeek", &"CrouchTimeSeek", 0, &"AnimCrouch", &"ProneTimeSeek", 0, &"AnimProne", &"PeekTimeSeek", 0, &"AnimPeek", &"Add Peek", 0, &"Movement", &"Add Peek", 1, &"Peeking"]
 
+[sub_resource type="Animation" id="Animation_6e1eu"]
+resource_name = "RESET"
+length = 0.001
+loop_mode = 1
+tracks/0/type = "bezier"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("CameraController/Camera3D:position:x")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"handle_modes": PackedInt32Array(2),
+"points": PackedFloat32Array(0, -0.24999733, 0, 0.25, 0),
+"times": PackedFloat32Array(0)
+}
+tracks/1/type = "bezier"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("CameraController/Camera3D:position:y")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"handle_modes": PackedInt32Array(2),
+"points": PackedFloat32Array(0, -0.24999978, 0, 0.25, 0),
+"times": PackedFloat32Array(0)
+}
+tracks/2/type = "bezier"
+tracks/2/imported = false
+tracks/2/enabled = true
+tracks/2/path = NodePath("CameraController/Camera3D:position:z")
+tracks/2/interp = 1
+tracks/2/loop_wrap = true
+tracks/2/keys = {
+"handle_modes": PackedInt32Array(2),
+"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
+"times": PackedFloat32Array(0)
+}
+
 [sub_resource type="Animation" id="Animation_rk4xh"]
 resource_name = "Sprint"
 length = 1.2
@@ -672,44 +711,6 @@ tracks/2/keys = {
 "times": PackedFloat32Array(0)
 }
 
-[sub_resource type="Animation" id="Animation_6e1eu"]
-resource_name = "RESET"
-length = 0.001
-loop_mode = 1
-tracks/0/type = "bezier"
-tracks/0/imported = false
-tracks/0/enabled = true
-tracks/0/path = NodePath("CameraController/Camera3D:position:x")
-tracks/0/interp = 1
-tracks/0/loop_wrap = true
-tracks/0/keys = {
-"handle_modes": PackedInt32Array(2),
-"points": PackedFloat32Array(0, -0.24999733, 0, 0.25, 0),
-"times": PackedFloat32Array(0)
-}
-tracks/1/type = "bezier"
-tracks/1/imported = false
-tracks/1/enabled = true
-tracks/1/path = NodePath("CameraController/Camera3D:position:y")
-tracks/1/interp = 1
-tracks/1/loop_wrap = true
-tracks/1/keys = {
-"handle_modes": PackedInt32Array(2),
-"points": PackedFloat32Array(0, -0.24999978, 0, 0.25, 0),
-"times": PackedFloat32Array(0)
-}
-tracks/2/type = "bezier"
-tracks/2/imported = false
-tracks/2/enabled = true
-tracks/2/path = NodePath("CameraController/Camera3D:position:z")
-tracks/2/interp = 1
-tracks/2/loop_wrap = true
-tracks/2/keys = {
-"handle_modes": PackedInt32Array(2),
-"points": PackedFloat32Array(0, -0.25, 0, 0.25, 0),
-"times": PackedFloat32Array(0)
-}
-
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_afx4e"]
 _data = {
 &"RESET": SubResource("Animation_6e1eu"),
@@ -717,30 +718,30 @@ _data = {
 &"Walk": SubResource("Animation_jdr2h")
 }
 
-[node name="PlayerController" type="CharacterBody3D"]
+[node name="PlayerController" type="CharacterBody3D" unique_id=539625814]
 slide_on_ceiling = false
 script = ExtResource("1_icig3")
 FRICTION = 6.5
 STOP_SPEED = 0.7
 
-[node name="VisualCollider" type="CollisionShape3D" parent="."]
+[node name="VisualCollider" type="CollisionShape3D" parent="." unique_id=1840093645]
 transform = Transform3D(0.99999994, 0, 0, 0, 0.99999994, 0, 0, 0, 1, 0, 1, 0)
 shape = SubResource("CapsuleShape3D_74qjk")
 
-[node name="PlaceholderMesh" type="MeshInstance3D" parent="VisualCollider"]
+[node name="PlaceholderMesh" type="MeshInstance3D" parent="VisualCollider" unique_id=1233054786]
 mesh = SubResource("CapsuleMesh_gf80s")
 
-[node name="GameController" type="CharacterBody3D" parent="."]
+[node name="GameController" type="CharacterBody3D" parent="." unique_id=15363569]
 top_level = true
 
-[node name="GameCollider" type="CollisionShape3D" parent="GameController"]
+[node name="GameCollider" type="CollisionShape3D" parent="GameController" unique_id=5681739]
 transform = Transform3D(1, 0, 0, 0, 0.99999994, 0, 0, 0, 0.99999994, 0, 1, 0)
 shape = SubResource("CapsuleShape3D_uovkr")
 
-[node name="PlaceholderMesh" type="MeshInstance3D" parent="GameController/GameCollider"]
+[node name="PlaceholderMesh" type="MeshInstance3D" parent="GameController/GameCollider" unique_id=133106010]
 mesh = SubResource("CapsuleMesh_l8yvu")
 
-[node name="CrouchShapeCast3D" type="ShapeCast3D" parent="GameController"]
+[node name="CrouchShapeCast3D" type="ShapeCast3D" parent="GameController" unique_id=1938644273]
 unique_name_in_owner = true
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 shape = SubResource("SphereShape3D_ca8e7")
@@ -748,34 +749,32 @@ target_position = Vector3(0, 0.5, 0)
 debug_shape_custom_color = Color(0, 0.8586215, 0, 1)
 script = SubResource("GDScript_271ko")
 
-[node name="CameraController" type="Node3D" parent="."]
+[node name="CameraController" type="Node3D" parent="." unique_id=1128249673]
 transform = Transform3D(0.99999994, 0, 0, 0, 0.99999994, 0, 0, 0, 1, 0, 1.5, 0)
 
-[node name="Camera3D" type="Camera3D" parent="CameraController"]
+[node name="Camera3D" type="Camera3D" parent="CameraController" unique_id=680788549]
 unique_name_in_owner = true
 fov = 70.0
 
-[node name="LineOfSightMesh" type="MeshInstance3D" parent="CameraController/Camera3D"]
+[node name="LineOfSightMesh" type="MeshInstance3D" parent="CameraController/Camera3D" unique_id=1814984078]
 transform = Transform3D(1, 0, 0, 0, -4.3711385e-08, 0.99999994, 0, -0.99999994, -4.3711385e-08, 0, 0, -1)
 mesh = SubResource("CylinderMesh_gshig")
 skeleton = NodePath("../../..")
 
-[node name="ReflectionProbe" type="ReflectionProbe" parent="CameraController/Camera3D"]
+[node name="ReflectionProbe" type="ReflectionProbe" parent="CameraController/Camera3D" unique_id=1156481346]
 update_mode = 1
 
-[node name="Sketchfab_Scene" parent="CameraController/Camera3D" instance=ExtResource("2_g7yr6")]
+[node name="Sketchfab_Scene" parent="CameraController/Camera3D" unique_id=278878197 instance=ExtResource("2_g7yr6")]
 transform = Transform3D(-1.5, 2.1191783e-08, -1.294105e-07, -5.372567e-08, 1.2510309, 0.8275997, 1.1962324e-07, 0.8275997, -1.2510309, 0, -0.5634872, -0.36864218)
 
-[node name="ThirdPersonCamera3D" type="Camera3D" parent="CameraController"]
+[node name="ThirdPersonCamera3D" type="Camera3D" parent="CameraController" unique_id=897997797]
 transform = Transform3D(1, 0, 0, 0, 0.9261671, 0.3771135, 0, -0.3771135, 0.9261671, 0, 1.4404721, 2.607768)
 
-[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+[node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=156805629]
 callback_mode_process = 0
-libraries = {
-&"": SubResource("AnimationLibrary_xc2pf")
-}
+libraries/ = SubResource("AnimationLibrary_xc2pf")
 
-[node name="AnimationTree" type="AnimationTree" parent="."]
+[node name="AnimationTree" type="AnimationTree" parent="." unique_id=1265729131]
 callback_mode_process = 0
 tree_root = SubResource("AnimationNodeBlendTree_6e1eu")
 anim_player = NodePath("../AnimationPlayer")
@@ -790,68 +789,71 @@ parameters/ProneTimeSeek/seek_request = -1.0
 parameters/PeekTimeSeek/seek_request = -1.0
 "parameters/Add Peek/add_amount" = -1.0
 
-[node name="CameraAnimationPlayer" type="AnimationPlayer" parent="."]
-libraries = {
-&"": SubResource("AnimationLibrary_afx4e")
-}
+[node name="CameraAnimationPlayer" type="AnimationPlayer" parent="." unique_id=1546256453]
+libraries/ = SubResource("AnimationLibrary_afx4e")
 blend_times = [&"RESET", &"RESET", 0.25, &"RESET", &"Sprint", 0.25, &"RESET", &"Walk", 0.25, &"Sprint", &"RESET", 0.25, &"Sprint", &"Sprint", 0.25, &"Sprint", &"Walk", 0.25, &"Walk", &"RESET", 0.25, &"Walk", &"Sprint", 0.25, &"Walk", &"Walk", 0.25]
 
-[node name="GUI" parent="." instance=ExtResource("2_jja72")]
+[node name="GUI" parent="." unique_id=2147038080 instance=ExtResource("2_jja72")]
 unique_name_in_owner = true
 
-[node name="EscapeMenu" parent="." instance=ExtResource("4_6e1eu")]
+[node name="EscapeMenu" parent="." unique_id=1708052532 instance=ExtResource("4_6e1eu")]
 visible = false
 
-[node name="MovementStateMachine" type="Node" parent="." node_paths=PackedStringArray("INITIAL_STATE")]
+[node name="MovementStateMachine" type="Node" parent="." unique_id=632639602 node_paths=PackedStringArray("INITIAL_STATE")]
 unique_name_in_owner = true
 script = ExtResource("4_a1kld")
-INITIAL_STATE = NodePath("WalkMovementState")
+INITIAL_STATE = NodePath("IdleMovementState")
 DEBUG_NAME = "Move"
 metadata/_custom_type_script = "uid://c1csw7q0gomdp"
 
-[node name="IdleMovementState" type="Node" parent="MovementStateMachine"]
+[node name="IdleMovementState" type="Node" parent="MovementStateMachine" unique_id=934428582]
 script = ExtResource("6_6e1eu")
 metadata/_custom_type_script = "uid://8ywkt0fgrttk"
 
-[node name="WalkMovementState" type="Node" parent="MovementStateMachine"]
+[node name="WalkMovementState" type="Node" parent="MovementStateMachine" unique_id=1286811509]
 script = ExtResource("7_afx4e")
-SPEED = 3.5
+SPEED = 2.0
 metadata/_custom_type_script = "uid://8ywkt0fgrttk"
 
-[node name="SprintMovementState" type="Node" parent="MovementStateMachine"]
+[node name="SprintMovementState" type="Node" parent="MovementStateMachine" unique_id=1253289913]
 script = ExtResource("8_40vpa")
 metadata/_custom_type_script = "uid://8ywkt0fgrttk"
 
-[node name="CrouchMovementState" type="Node" parent="MovementStateMachine"]
+[node name="CrouchMovementState" type="Node" parent="MovementStateMachine" unique_id=2050766656]
 script = ExtResource("9_qdb0h")
 metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
-[node name="JumpMovementState" type="Node" parent="MovementStateMachine"]
+[node name="JumpMovementState" type="Node" parent="MovementStateMachine" unique_id=1382009700]
 script = ExtResource("10_fy606")
 SPEED = 4.0
 ACCELERATION = 8.0
 metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
-[node name="ProneMovementState" type="Node" parent="MovementStateMachine"]
+[node name="ProneMovementState" type="Node" parent="MovementStateMachine" unique_id=460739806]
 script = ExtResource("10_icig3")
 
-[node name="FallMovementState" type="Node" parent="MovementStateMachine"]
+[node name="FallMovementState" type="Node" parent="MovementStateMachine" unique_id=1183687678]
 script = ExtResource("11_6e1eu")
 metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
-[node name="PeekStateMachine" type="Node" parent="." node_paths=PackedStringArray("INITIAL_STATE")]
+[node name="RunMovementState" type="Node" parent="MovementStateMachine"]
+script = ExtResource("run_state")
+
+[node name="PeekStateMachine" type="Node" parent="." unique_id=1782461289 node_paths=PackedStringArray("INITIAL_STATE")]
 unique_name_in_owner = true
 script = ExtResource("11_a1kld")
 INITIAL_STATE = NodePath("NotPeekState")
 DEBUG_NAME = "Peek"
 metadata/_custom_type_script = "uid://c1csw7q0gomdp"
 
-[node name="NotPeekState" type="Node" parent="PeekStateMachine"]
+[node name="NotPeekState" type="Node" parent="PeekStateMachine" unique_id=1063224574]
 script = ExtResource("11_bn7gw")
 metadata/_custom_type_script = "uid://micpxcoldkpl"
 
-[node name="PeekState" type="Node" parent="PeekStateMachine"]
+[node name="PeekState" type="Node" parent="PeekStateMachine" unique_id=323538422]
 script = ExtResource("12_a1kld")
 metadata/_custom_type_script = "uid://micpxcoldkpl"
 
-[connection signal="reconcile_network_debug" from="." to="GUI" method="_on_fps_controller_reconcile_network_debug"]
+[node name="NetPredictor" type="Node" parent="." unique_id=696029574]
+script = ExtResource("13_npred")
+schema = ExtResource("14_pscheme")

@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="GrenadeState" format=3]
+
+[ext_resource type="Script" path="res://entities/grenade/grenade_state.gd" id="1_gstate"]
+
+[resource]
+script = ExtResource("1_gstate")

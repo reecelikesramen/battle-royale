@@ -4,30 +4,57 @@ var ip_regex = RegEx.new()
 var num_regex = RegEx.new()
 
 func _enter_tree() -> void:
-	NetworkTransport.on_connect_to_server.connect(_on_connect_to_server)
-	NetworkClient.handle_disconnect_from_server.connect(set_disconnected_message)
+	NetSession.on_connect_to_server.connect(_on_connect_to_server)
+	NetClient.handle_disconnect_from_server.connect(set_disconnected_message)
 
 func _exit_tree() -> void:
-	NetworkTransport.on_connect_to_server.disconnect(_on_connect_to_server)
-	NetworkClient.handle_disconnect_from_server.disconnect(set_disconnected_message)
+	NetSession.on_connect_to_server.disconnect(_on_connect_to_server)
+	NetClient.handle_disconnect_from_server.disconnect(set_disconnected_message)
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	if NetworkTransport.is_dedicated_server:
+	if NetSession.is_dedicated_server:
 		get_tree().call_deferred("change_scene_to_file", Constants.MAP_SCENE_PATH)
 		return
-	
+
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	set_disconnected_message()
-	
+
 	if OS.get_name() == "macOS":
 		get_window().content_scale_factor = 1.5
-	
+
 	if ip_regex.compile("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$") != OK:
 		push_error("IP regex failed to compile")
 	if num_regex.compile("^\\d+$") != OK:
 		push_error("Numeric regex failed to compile")
+
+	_maybe_autoconnect()
+
+
+# Honors `-- --client [ip] [port] [username]` user args so scripts/run-debug.sh
+# can spin up clients without anyone clicking the Connect button. All three
+# trailing args are optional and fall back to localhost / default port / a
+# generated username.
+func _maybe_autoconnect() -> void:
+	var args := OS.get_cmdline_user_args()
+	var idx := args.find("--client")
+	if idx == -1:
+		return
+
+	var ip := "127.0.0.1"
+	var port := 45876
+	var username := "AutoClient_%d" % (Time.get_ticks_msec() % 10000)
+	if idx + 1 < args.size():
+		ip = args[idx + 1]
+	if idx + 2 < args.size():
+		port = int(args[idx + 2])
+	if idx + 3 < args.size():
+		username = args[idx + 3]
+
+	NetClient.username = username
+	NetSession.start_client(ip, port)
+	print("Auto-connecting to %s:%d as %s" % [ip, port, username])
 
 
 func _on_quit_button_pressed() -> void:
@@ -66,16 +93,16 @@ func connection_changed(ip_address: String, port: String) -> void:
 
 
 func _on_connect_button_pressed() -> void:
-	if NetworkTransport.is_dedicated_server:
+	if NetSession.is_dedicated_server:
 		push_error("Server tried to connect")
 		return
 		
 	var ip_address = %IPAddressEdit.text if !%IPAddressEdit.text.is_empty() else "127.0.0.1"
 	var port = int(%PortEdit.text) if !%PortEdit.text.is_empty() else 45876
 
-	if !NetworkTransport.is_connected:
-		NetworkTransport.start_client(ip_address, port)
-		NetworkClient.username = %UsernameEdit.text
+	if !NetSession.is_connected:
+		NetSession.start_client(ip_address, port)
+		NetClient.username = %UsernameEdit.text
 		print("Client started")
 	else:
 		push_error("Client tried to connect twice")
@@ -90,9 +117,9 @@ func _on_full_screen_button_toggled(toggled_on: bool) -> void:
 
 
 func set_disconnected_message() -> void:
-	if !NetworkClient._disconnected_message.is_empty():
-		%DisconnectedLabel.text = NetworkClient._disconnected_message
-		NetworkClient._disconnected_message = ""
+	if !NetClient._disconnected_message.is_empty():
+		%DisconnectedLabel.text = NetClient._disconnected_message
+		NetClient._disconnected_message = ""
 		%DisconnectedLabel.visible = true
 	else:
 		%DisconnectedLabel.visible = false

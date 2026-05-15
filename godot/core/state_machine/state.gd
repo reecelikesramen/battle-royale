@@ -7,6 +7,14 @@ signal transition(new_state_name: StringName)
 ## The state we transitioned from
 var previous_state: State
 
+## Sprint 7: stable wire id for this state. Defaults to -1, which makes the
+## StateMachine fall back to child index (legacy behavior). Set this to a
+## positive int once a state is wire-visible so reordering the child nodes
+## doesn't re-number it under reconciliation / replay. Each State in a
+## StateMachine must have a unique stable_id (duplicates emit a warning at
+## _ready and the second-registrant wins).
+@export var stable_id: int = -1
+
 ## game logic callback on enter
 func logic_enter() -> void: pass
 ## game logic callback on exit

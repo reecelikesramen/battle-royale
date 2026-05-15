@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://cjj5pu3lldhjc"]
+
+[ext_resource type="Script" uid="uid://cljo0h54ukqrs" path="res://addons/netcode/core/net_session.gd" id="1_yduhh"]
+
+[node name="NetSession" type="NetworkDriver"]
+script = ExtResource("1_yduhh")
+load_testing_off = true

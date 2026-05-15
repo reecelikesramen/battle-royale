@@ -1,10 +1,9 @@
-[gd_scene load_steps=4 format=3 uid="uid://trgd65vjwowf"]
+[gd_scene format=3 uid="uid://trgd65vjwowf"]
 
 [ext_resource type="Script" uid="uid://2j0ubpg0qevr" path="res://ui/debug/gui.gd" id="1_ex4wv"]
-[ext_resource type="Theme" uid="uid://b28fy0uaom4ds" path="res://ui/themes/debug.tres" id="2_pfgjb"]
 [ext_resource type="Script" uid="uid://sv4ikmsp6nik" path="res://ui/debug/debug.gd" id="3_kh5r6"]
 
-[node name="GUI" type="Control"]
+[node name="GUI" type="Control" unique_id=115008218]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -14,85 +13,89 @@ grow_vertical = 2
 mouse_filter = 1
 script = ExtResource("1_ex4wv")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="."]
+[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=354784686]
 layout_mode = 0
 offset_left = 2.0
 offset_top = 2.0
 offset_right = 298.0
 offset_bottom = 123.0
+theme_override_constants/separation = 10
 
-[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer"]
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer" unique_id=859934151]
 layout_mode = 2
-theme_override_constants/margin_right = 200
+theme_override_constants/margin_right = 0
 
-[node name="DebugPanel" type="PanelContainer" parent="VBoxContainer/MarginContainer"]
+[node name="DebugPanel" type="PanelContainer" parent="VBoxContainer/MarginContainer" unique_id=2045916973]
 custom_minimum_size = Vector2(300, 0)
 layout_mode = 2
-theme = ExtResource("2_pfgjb")
 script = ExtResource("3_kh5r6")
 
-[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/MarginContainer/DebugPanel"]
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/MarginContainer/DebugPanel" unique_id=1092617222]
 layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
 
-[node name="VBoxContainer" type="VBoxContainer" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer" unique_id=404659157]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="ChatEdit" type="LineEdit" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
+[node name="ChatEdit" type="LineEdit" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer" unique_id=2065771172]
 unique_name_in_owner = true
 layout_mode = 2
 placeholder_text = "Press enter to send chat"
 
-[node name="ExitToMenuButton" type="Button" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
+[node name="ExitToMenuButton" type="Button" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer" unique_id=63246663]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Exit to Menu"
 
-[node name="QuitButton" type="Button" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer"]
+[node name="QuitButton" type="Button" parent="VBoxContainer/MarginContainer/DebugPanel/MarginContainer/VBoxContainer" unique_id=1317286464]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Quit"
 
-[node name="PanelContainer" type="PanelContainer" parent="VBoxContainer"]
+[node name="PanelContainer" type="PanelContainer" parent="VBoxContainer" unique_id=660889457]
 custom_minimum_size = Vector2(500, 0)
 layout_mode = 2
 
-[node name="ChatMessagePrototype" type="Label" parent="VBoxContainer/PanelContainer"]
+[node name="ChatMessagePrototype" type="Label" parent="VBoxContainer/PanelContainer" unique_id=570757709]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 text = "test
 "
 
-[node name="ScrollContainer" type="ScrollContainer" parent="VBoxContainer/PanelContainer"]
+[node name="ScrollContainer" type="ScrollContainer" parent="VBoxContainer/PanelContainer" unique_id=1834472178]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(500, 31)
 layout_mode = 2
 
-[node name="ChatVBox" type="VBoxContainer" parent="VBoxContainer/PanelContainer/ScrollContainer"]
+[node name="ChatVBox" type="VBoxContainer" parent="VBoxContainer/PanelContainer/ScrollContainer" unique_id=1679599532]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="NetworkDebug" type="Control" parent="."]
+[node name="NetworkDebug" type="Control" parent="." unique_id=913487133]
 visible = false
 anchors_preset = 0
 offset_right = 40.0
 offset_bottom = 40.0
 
-[node name="DeltaPos" type="ColorRect" parent="NetworkDebug"]
+[node name="DeltaPos" type="ColorRect" parent="NetworkDebug" unique_id=1502132854]
 layout_mode = 0
 offset_left = 465.0
 offset_right = 505.0
 offset_bottom = 40.0
 
-[node name="DeltaVel" type="ColorRect" parent="NetworkDebug"]
+[node name="DeltaVel" type="ColorRect" parent="NetworkDebug" unique_id=2120617251]
 layout_mode = 0
 offset_left = 465.0
 offset_top = 48.0
 offset_right = 505.0
 offset_bottom = 88.0
 
-[node name="InputBuffer" type="Label" parent="NetworkDebug"]
+[node name="InputBuffer" type="Label" parent="NetworkDebug" unique_id=989104130]
 layout_mode = 0
 offset_left = 513.0
 offset_right = 723.0

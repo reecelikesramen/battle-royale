@@ -28,14 +28,17 @@ CI: `.github/workflows/godot-google-ci.yml` builds Rust on 3 OS runners, uploads
 
 ### Networking — client/server split
 
-Three autoloads in `godot/autoload/network/` (see `[autoload]` in `project.godot`):
-- `NetworkTransport` (`network_transport.tscn`) — extends the Rust `NetworkDriver` class. Exposes fake lag/loss/jitter/dup/reorder knobs that proxy into GNS. Emits `on_client_packet` / `on_server_packet` / `on_disconnect_from_server`.
-- `NetworkClient` — receives packets, manages local + remote player IDs, emits per-packet-type signals (`handle_player_state`, `handle_chat`, etc.).
-- `NetworkServer` — server-side counterpart.
+Autoloads registered in `project.godot` from `addons/netcode/core/`:
+- `NetSession` (`net_session.tscn`) — extends the Rust `NetworkDriver` class. Exposes fake lag/loss/jitter/dup/reorder knobs that proxy into GNS. Emits `on_client_packet` / `on_server_packet` / `on_disconnect_from_server`. Renamed from `NetworkTransport` in Sprint 3.
+- `NetClient` — receives packets, manages local + remote player IDs, emits per-packet-type signals (`handle_net_state`, `handle_net_reliable`, `handle_server_tick`, etc.). Renamed from `NetworkClient`.
+- `NetServer` — server-side counterpart. Renamed from `NetworkServer`.
+- `NetTimeline` — server tick clock + interp window helpers (`tick_delta`, `server_now_us`, `render_time_us`).
+- `NetReplication` — entity registry + snapshot dispatch (registers schemas/predictors, routes `NetStatePacket`s).
+- `NetReliableHub` — reliable RPC routing with topic-based subscription + dedup ring.
 
-`NetworkTransport.is_server` distinguishes roles at runtime — same binary, same scripts. Both autoload always.
+`NetSession.is_server` distinguishes roles at runtime — same binary, same scripts. All autoload always.
 
-Packets defined in Rust (`rust/src/packet/`): `PlayerInputPacket`, `PlayerStatePacket`, `IdAssignmentPacket`, `ChatPacket`, `PlayerDisconnectedPacket`. Serialized with `postcard` + serde. Macros in `packet/macros.rs` bridge to GDScript classes.
+Packets defined in Rust (`rust/src/packet/`): `PlayerInputPacket`, `NetStatePacket`, `NetReliablePacket`, `IdAssignmentPacket`, `PlayerDisconnectedPacket`, `ServerTickPacket`. Serialized with `postcard` + serde. Macros in `packet/macros.rs` bridge to GDScript classes.
 
 ### Player controller — dual logic/visual state machine
 

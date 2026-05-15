@@ -6,27 +6,29 @@ extends PanelContainer
 var props = {}
 
 var player: PlayerController:
-	get: return NetworkClient.player
+	get: return owner as PlayerController
 
 func _enter_tree() -> void:
-	NetworkClient.handle_chat.connect(chat_message_added)
+	# Phase 9b: chat now travels over NetReliableHub instead of a dedicated
+	# ChatPacket. Payload format below in _encode_chat_payload.
+	NetReliableHub.subscribe(Enums.ReliableTopic.CHAT, _on_chat_payload)
 
 
 func _exit_tree() -> void:
-	NetworkClient.handle_chat.disconnect(chat_message_added)
+	NetReliableHub.unsubscribe(Enums.ReliableTopic.CHAT, _on_chat_payload)
 
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	visible = false
 	
-	if NetworkTransport.is_server:
+	if NetSession.is_server:
 		return
 	
 	if not player or not player.is_authority:
 		return
 	
-	NetworkClient.debug = self
+	NetClient.debug = self
 	%ScrollContainer.visible = false
 
 	# Timer to auto-hide chat when debug overlay is off
@@ -39,7 +41,7 @@ func _ready() -> void:
 
 func _process(_delta) -> void:
 	set_debug_property("FPS", Engine.get_frames_per_second())
-	set_debug_property("Ping", "%d ms" % NetworkTransport.client_ping)
+	set_debug_property("Ping", "%d ms" % NetSession.client_ping)
 
 
 func _input(event):
@@ -65,7 +67,7 @@ func set_debug_property(title: String, value):
 
 
 func _on_exit_to_menu_button_pressed() -> void:
-	NetworkTransport.disconnect_client()
+	NetSession.disconnect_client()
 
 
 func _on_quit_button_pressed() -> void:
@@ -74,16 +76,35 @@ func _on_quit_button_pressed() -> void:
 
 func _on_chat_edit_text_submitted(new_text: String) -> void:
 	%ChatEdit.text = ""
-	var packet = ChatPacket.new()
-	packet.username = NetworkClient.username
-	packet.message = new_text
-	NetworkTransport.send_packet(packet)
+	var payload := _encode_chat_payload(NetClient.username, new_text)
+	NetReliableHub.send(Enums.ReliableTopic.CHAT, payload)
 
 
-func chat_message_added(packet: ChatPacket):
+# Payload layout: put_string(username) then put_string(message). Variant-
+# tagged via put_string under the hood — postcard is not used here because the
+# wire-level NetReliablePacket already pays its serialization cost.
+static func _encode_chat_payload(username: String, message: String) -> PackedByteArray:
+	var sp := StreamPeerBuffer.new()
+	sp.put_string(username)
+	sp.put_string(message)
+	return sp.data_array
+
+
+static func _decode_chat_payload(payload: PackedByteArray) -> Array:
+	var sp := StreamPeerBuffer.new()
+	sp.data_array = payload
+	return [sp.get_string(), sp.get_string()]
+
+
+func _on_chat_payload(payload: PackedByteArray) -> void:
+	var parts: Array = _decode_chat_payload(payload)
+	_append_chat_line(parts[0], parts[1])
+
+
+func _append_chat_line(username: String, message: String) -> void:
 	%ScrollContainer.visible = true
 	var new_chat = %ChatMessagePrototype.duplicate()
-	new_chat.text = "<%s> %s" % [packet.username, packet.message]
+	new_chat.text = "<%s> %s" % [username, message]
 	new_chat.visible = true
 	print("New chat: %s" % new_chat.text)
 	%ChatVBox.add_child(new_chat)

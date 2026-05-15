@@ -18,18 +18,27 @@ var _pending_transition: StringName = &""
 var _show_in_debug: bool:
 	get:
 		if !SHOW_IN_DEBUG: return false
-		if NetworkTransport.is_server: return false
-		if not NetworkClient.debug: return false
+		if NetSession.is_server: return false
+		if not NetClient.debug: return false
 		var player: PlayerController = owner
 		return player.is_authority
 
 
 func _ready() -> void:
+	# Sprint 7: prefer the State's exported stable_id over its scene-tree
+	# child index so reordering nodes in the editor doesn't reshuffle the
+	# wire ids that NetStatePacket.payload carries. Fall back to child index
+	# when stable_id is unset (-1) so untouched state machines keep their
+	# legacy numbering byte-for-byte.
 	for child in get_children():
 		if child is State:
 			states[child.name] = child
-			state_to_id[child.name] = child.get_index()
-			id_to_state[child.get_index()] = child.name
+			var sid: int = child.stable_id if child.stable_id >= 0 else child.get_index()
+			if id_to_state.has(sid):
+				push_warning("State Machine '%s': duplicate stable_id %d on '%s' (conflicts with '%s'); second registrant wins" \
+						% [name, sid, child.name, id_to_state[sid]])
+			state_to_id[child.name] = sid
+			id_to_state[sid] = child.name
 			child.transition.connect(_on_logic_transition)
 		else:
 			push_warning("State Machine '%s' contains an incompatible child node '%s', type '%s'" % [name, child.name, type_string(typeof(child))])
@@ -69,6 +78,9 @@ func run_logic(delta: float) -> void:
 func sync_visual() -> void:
 	if _visual_state == _logic_state:
 		return
+	if DEBUG_NAME == "Move":
+		print("[SM-SYNC f=%d sm=%s] visual: %s -> %s" % [
+				Engine.get_physics_frames(), DEBUG_NAME, _visual_state.name, _logic_state.name])
 	_visual_state.visual_exit()
 	_visual_state = _logic_state
 	_visual_state.visual_enter()
@@ -86,6 +98,9 @@ func set_logic_state_by_id(new_state_id: int) -> void:
 	var target := states[id_to_state[new_state_id]]
 	if target == null or target == _logic_state:
 		return
+	if DEBUG_NAME == "Move":
+		print("[SM-LOG-SET f=%d sm=%s] logic: %s -> %s (id=%d)" % [
+				Engine.get_physics_frames(), DEBUG_NAME, _logic_state.name, target.name, new_state_id])
 	_logic_state.logic_exit()
 	target.previous_state = _logic_state
 	_logic_state = target
@@ -110,6 +125,9 @@ func _switch_logic(new_state_name: StringName) -> void:
 	var target := states[new_state_name]
 	if target == null or target == _logic_state:
 		return
+	if DEBUG_NAME == "Move":
+		print("[SM-LOG-TRANS f=%d sm=%s] logic: %s -> %s" % [
+				Engine.get_physics_frames(), DEBUG_NAME, _logic_state.name, target.name])
 	_logic_state.logic_exit()
 	target.previous_state = _logic_state
 	_logic_state = target
@@ -118,4 +136,4 @@ func _switch_logic(new_state_name: StringName) -> void:
 
 func _process(_delta: float) -> void:
 	if _show_in_debug:
-		NetworkClient.debug.set_debug_property(DEBUG_NAME, _logic_state.name)
+		NetClient.debug.set_debug_property(DEBUG_NAME, _logic_state.name)

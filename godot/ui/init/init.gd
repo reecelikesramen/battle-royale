@@ -24,7 +24,7 @@ var _downloading_manifest := true
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	if NetworkTransport.is_dedicated_server:
+	if NetSession.is_dedicated_server:
 		initialize()
 		return
 	

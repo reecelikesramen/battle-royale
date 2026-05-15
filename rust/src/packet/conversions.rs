@@ -94,3 +94,15 @@ impl ToGodot<f64> for i8 {
         f64::from(*self)
     }
 }
+
+impl ToWire<Vec<u8>> for PackedByteArray {
+    fn to_wire(&self) -> Vec<u8> {
+        self.to_vec()
+    }
+}
+
+impl ToGodot<PackedByteArray> for Vec<u8> {
+    fn to_godot(&self) -> PackedByteArray {
+        PackedByteArray::from(self.as_slice())
+    }
+}

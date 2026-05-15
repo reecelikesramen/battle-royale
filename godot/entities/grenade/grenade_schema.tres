@@ -1,0 +1,54 @@
+[gd_resource type="Resource" script_class="NetSchema" format=3 uid="uid://bc45wbo1355gu"]
+
+[ext_resource type="Script" uid="uid://bkbabr45mnm8d" path="res://addons/netcode/resources/net_child_ref.gd" id="1_0e568"]
+[ext_resource type="Script" uid="uid://cmp2jhgtkye1t" path="res://addons/netcode/resources/net_schema.gd" id="1_schema"]
+[ext_resource type="Script" uid="uid://nerxe2t21ft7" path="res://addons/netcode/resources/net_state_field.gd" id="2_field"]
+[ext_resource type="Script" uid="uid://dh0tg4ybbnptl" path="res://addons/netcode/resources/net_correction.gd" id="3_corr"]
+[ext_resource type="Script" uid="uid://do0r0qgoi7ufc" path="res://entities/grenade/grenade_state.gd" id="4_gstate"]
+
+[sub_resource type="Resource" id="CorrDiscreteState"]
+script = ExtResource("3_corr")
+name = &"discrete_state"
+fields = PackedStringArray("state")
+always_snap = true
+
+[sub_resource type="Resource" id="FieldExplosionProgress"]
+script = ExtResource("2_field")
+quant = 1
+max_value = 1.0
+
+[sub_resource type="Resource" id="FieldFuse"]
+script = ExtResource("2_field")
+quant = 1
+no_interp = true
+max_value = 5.0
+
+[sub_resource type="Resource" id="FieldPos"]
+script = ExtResource("2_field")
+quant = 3
+
+[sub_resource type="Resource" id="FieldRotation"]
+script = ExtResource("2_field")
+quant = 4
+
+[sub_resource type="Resource" id="FieldState"]
+script = ExtResource("2_field")
+no_interp = true
+
+[sub_resource type="Resource" id="GrenadeStateTemplate"]
+script = ExtResource("4_gstate")
+
+[resource]
+script = ExtResource("1_schema")
+id = 2
+state_template = SubResource("GrenadeStateTemplate")
+tick_hz = 60
+snapshot_hz = 20
+state_fields = Dictionary[StringName, ExtResource("2_field")]({
+&"explosion_progress": SubResource("FieldExplosionProgress"),
+&"fuse_remaining": SubResource("FieldFuse"),
+&"pos": SubResource("FieldPos"),
+&"rotation_quat": SubResource("FieldRotation"),
+&"state": SubResource("FieldState")
+})
+corrections = Array[ExtResource("3_corr")]([SubResource("CorrDiscreteState")])

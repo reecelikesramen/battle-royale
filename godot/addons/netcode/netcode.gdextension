@@ -1,0 +1,21 @@
+; Sprint 3: addon-located gdextension manifest. Replaces the previous
+; addons/rust/rust.gdextension. Debug paths target the in-tree Rust build at
+; rust/target/debug/ (set by `cd rust && cargo build`). Release paths target
+; the platform-suffixed binaries that ship inside the addon at
+; addons/netcode/bin/, populated by scripts/make-addon.sh from the release
+; build of the Rust crate.
+
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.1
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 =     "res://../rust/target/debug/librust.so"
+linux.release.x86_64 =   "res://addons/netcode/bin/libnetcode.linux.x86_64.so"
+windows.debug.x86_64 =   "res://../rust/target/debug/rust.dll"
+windows.release.x86_64 = "res://addons/netcode/bin/libnetcode.windows.x86_64.dll"
+macos.debug =            "res://../rust/target/debug/librust.dylib"
+macos.release =          "res://addons/netcode/bin/libnetcode.macos.universal.dylib"
+macos.debug.arm64 =      "res://../rust/target/debug/librust.dylib"
+macos.release.arm64 =    "res://addons/netcode/bin/libnetcode.macos.universal.dylib"
