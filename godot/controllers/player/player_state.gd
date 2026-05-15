@@ -15,3 +15,5 @@ class_name PlayerState extends NetState
 @export var crouch_progress: float = 0.0
 @export var prone_progress: float = 0.0
 @export var peek_progress: float = 0.0
+
+@export var health: int = 100

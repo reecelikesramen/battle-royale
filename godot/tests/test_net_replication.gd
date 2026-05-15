@@ -6,7 +6,7 @@ extends TestBase
 
 func test_register_and_lookup() -> void:
 	var reg := _new_registry()
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	var p := NetPredictor.new()
 	p.schema = schema
 	p.entity_id = 42
@@ -24,7 +24,7 @@ func test_unknown_lookup_returns_null() -> void:
 
 func test_unregister_removes() -> void:
 	var reg := _new_registry()
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	var p := NetPredictor.new()
 	p.schema = schema
 	p.entity_id = 7
@@ -35,7 +35,7 @@ func test_unregister_removes() -> void:
 
 func test_iter_entities_returns_all() -> void:
 	var reg := _new_registry()
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	var p1 := NetPredictor.new()
 	var p2 := NetPredictor.new()
 	p1.schema = schema
@@ -50,7 +50,7 @@ func test_pending_packet_buffered_then_flushed_on_register() -> void:
 	# Phase 9c: a state packet for an entity that hasn't registered yet should
 	# be queued and replayed once register_entity fires.
 	var reg := _new_registry()
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 
 	# Build a payload from a source predictor so the receiver decodes real
 	# bytes, not garbage.
@@ -87,7 +87,7 @@ func test_pending_packet_buffered_then_flushed_on_register() -> void:
 
 func test_pending_buffer_trims_at_capacity() -> void:
 	var reg := _new_registry()
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	for i in range(reg.MAX_PENDING_PER_ENTITY + 5):
 		var packet := NetStatePacket.new()
 		packet.schema_id = schema.id
@@ -100,7 +100,7 @@ func test_pending_buffer_trims_at_capacity() -> void:
 
 func test_unregister_clears_pending() -> void:
 	var reg := _new_registry()
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	var p := NetPredictor.new()
 	p.schema = schema
 

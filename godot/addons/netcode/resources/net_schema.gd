@@ -87,16 +87,25 @@ func _do_deferred_revalidate() -> void:
 # NetStateField defaults instead — same outcome as the (now-retired) "Reset
 # state_fields config to defaults" button, but driven by Godot's standard UX.
 func _property_can_revert(property: StringName) -> bool:
-	return property == &"state_fields" and state_template != null
+	if property == &"state_fields":
+		return state_template != null
+	if property == &"command_fields":
+		return command_template != null
+	return false
 
 
 func _property_get_revert(property: StringName) -> Variant:
-	if property != &"state_fields":
-		return null
 	var defaults: Dictionary[StringName, NetStateField] = {}
-	if state_template == null:
+	var tmpl: Resource = null
+	if property == &"state_fields":
+		tmpl = state_template
+	elif property == &"command_fields":
+		tmpl = command_template
+	else:
+		return null
+	if tmpl == null:
 		return defaults
-	for fname in _user_field_names(state_template):
+	for fname in _user_field_names(tmpl):
 		defaults[fname] = NetStateField.new()
 	return defaults
 
@@ -154,6 +163,13 @@ static var _revalidate_scheduled: bool = false
 	set(v):
 		state_fields = v
 		_schedule_emit_changed()
+## Per-field codec config for command_template fields. Mirrors state_fields.
+## Quant.AUTO falls back to put_var on the wire (safe default for bool/int).
+## Use QUANT8/QUANT16 on float-typed cmd fields when range is known.
+@export var command_fields: Dictionary[StringName, NetStateField] = {}:
+	set(v):
+		command_fields = v
+		_schedule_emit_changed()
 ## Reconcile channels — groups of state fields that share an error magnitude
 ## and smoothing behavior (e.g. "horizontal" snaps + smooths pos.xz together).
 ## Order doesn't affect the wire; the framework iterates them in declaration
@@ -185,6 +201,10 @@ func find_correction(correction_name: StringName) -> NetCorrection:
 
 func find_state_field(field_name: StringName) -> NetStateField:
 	return state_fields.get(field_name)
+
+
+func find_command_field(field_name: StringName) -> NetStateField:
+	return command_fields.get(field_name)
 
 
 # Returns a list of structured issues with this schema (empty when valid).
@@ -647,6 +667,17 @@ func compute_hash() -> int:
 				int(f.quant),
 				int(f.predict),
 				int(f.no_interp),
+				f.min_value,
+				f.max_value])
+	# Command fields participate too: a server with QUANT8 vs client with AUTO
+	# on the same cmd field decodes wrong bytes silently otherwise.
+	var sorted_cmd_field_names: Array = command_fields.keys()
+	sorted_cmd_field_names.sort()
+	for fname in sorted_cmd_field_names:
+		var f: NetStateField = command_fields[fname]
+		parts.append("cmd_field|%s|%d|%f|%f" % [
+				str(fname),
+				int(f.quant),
 				f.min_value,
 				f.max_value])
 	for c in corrections:

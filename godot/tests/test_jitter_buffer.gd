@@ -39,10 +39,7 @@ func test_in_window_future_accepted() -> void:
 	assert_eq(jb.size(), 1)
 
 
-# Helper: produce a PlayerInputPacket with the bare-minimum fields the buffer
-# inspects (sequence_id, timestamp_us). All other fields stay defaults.
-func _packet(seq: int, ts_us: int) -> PlayerInputPacket:
-	var p := PlayerInputPacket.new()
-	p.sequence_id = seq
-	p.timestamp_us = ts_us
-	return p
+# Helper: build a payload-shaped dict the buffer can store as Variant. Buffer
+# only reads (seq, ts) via the enqueue args, so the packet itself is opaque.
+func _packet(seq: int, ts_us: int) -> Dictionary:
+	return {"sequence_id": seq, "timestamp_us": ts_us}

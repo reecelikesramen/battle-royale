@@ -15,10 +15,16 @@ func logic_transitions() -> void:
 	if not player.on_floor(Enums.IntegrationContext.GAME):
 		transition.emit(&"FallMovementState")
 		return
-	
+
 	if !is_zero_approx(player.game_velocity.x) or !is_zero_approx(player.game_velocity.z):
-		transition.emit(&"WalkMovementState")
-	
+		# Run is the default ground locomotion. Walk on toggle, Sprint on hold.
+		if player.input.is_sprinting():
+			transition.emit(&"SprintMovementState")
+		elif player.input.is_walk_mode():
+			transition.emit(&"WalkMovementState")
+		else:
+			transition.emit(&"RunMovementState")
+
 	if player.input.is_jump_just_pressed():
 		transition.emit(&"JumpMovementState")
 

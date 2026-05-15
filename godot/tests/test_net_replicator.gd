@@ -67,7 +67,7 @@ func _make_replicator() -> NetReplicator:
 	# Same trick as test_snapshot_roundtrip._make_predictor: bypass _ready by
 	# poking the framework's fields directly so we don't need a SceneTree.
 	var r := NetReplicator.new()
-	r.schema = PlayerSchema.build()
+	r.schema = load("res://entities/player/player_schema.tres") as NetSchema
 	r.shadow_state = r.state_template.duplicate(true) as NetState
 	r.state_field_names = NetPredictor._user_field_names(r.shadow_state)
 	return r

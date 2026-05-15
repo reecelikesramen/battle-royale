@@ -1,8 +1,8 @@
 extends MovementState
 
-@export var SPEED := 9.0
-@export var ACCELERATION := 50.0
-@export var TOP_ANIM_SPEED: float = 1.8
+@export var SPEED := 5.0
+@export var ACCELERATION := 40.0
+@export var TOP_ANIM_SPEED := 1.4
 
 var TOP_SPEED_SQ: float:
 	get: return SPEED * SPEED
@@ -13,7 +13,7 @@ func logic_enter() -> void:
 
 func visual_enter() -> void:
 	animation_tree.set("parameters/Movement/transition_request", "Idle")
-	camera_animation_player.play(&"Sprint")
+	camera_animation_player.play(&"Walk")
 
 
 func logic_physics(delta: float) -> void:
@@ -27,21 +27,20 @@ func logic_transitions() -> void:
 		transition.emit(&"FallMovementState")
 		return
 
-	if player.game_velocity.is_zero_approx():
+	if is_zero_approx(player.game_velocity.x) and is_zero_approx(player.game_velocity.z):
 		transition.emit(&"IdleMovementState")
 
-	if !player.input.is_sprinting():
-		# Release sprint -> walk_mode picks Walk or Run.
-		if player.input.is_walk_mode():
-			transition.emit(&"WalkMovementState")
-		else:
-			transition.emit(&"RunMovementState")
+	if player.input.is_sprinting():
+		transition.emit(&"SprintMovementState")
 
-	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
-		transition.emit(&"JumpMovementState")
+	if player.input.is_walk_mode():
+		transition.emit(&"WalkMovementState")
 
 	if player.input.is_crouching():
 		transition.emit(&"CrouchMovementState")
+
+	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
+		transition.emit(&"JumpMovementState")
 
 	if player.input.is_prone_just_pressed():
 		transition.emit(&"ProneMovementState")

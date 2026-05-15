@@ -3,6 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://88a0imp81kyn" path="res://assets/prefab/water/water.tscn" id="1_ji47x"]
 [ext_resource type="Environment" uid="uid://b8030pxcma3ij" path="res://assets/environment/WE_test.tres" id="4_8tace"]
 [ext_resource type="Script" uid="uid://172t455bnixi" path="res://controllers/player/spawner.gd" id="5_ndrii"]
+[ext_resource type="Script" path="res://controllers/player/shoot_handler.gd" id="6_shoot"]
 
 [sub_resource type="Gradient" id="Gradient_naboa"]
 offsets = PackedFloat32Array(0.2, 1)
@@ -904,3 +905,6 @@ shape = SubResource("BoxShape3D_ndrii")
 [node name="PlayerSpawner" type="Node3D" parent="."]
 script = ExtResource("5_ndrii")
 metadata/_custom_type_script = "uid://172t455bnixi"
+
+[node name="ShootHandler" type="Node3D" parent="."]
+script = ExtResource("6_shoot")

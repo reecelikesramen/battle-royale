@@ -23,8 +23,8 @@ script = ExtResource("3_x5rij")
 name = &"vertical"
 fields = PackedStringArray("pos.y", "velocity.y")
 snap_threshold = 2.5
-smooth_rate = 4.0
-deadband = 0.15
+smooth_rate = 12.0
+deadband = 0.03
 
 [sub_resource type="Resource" id="Resource_dednk"]
 script = ExtResource("3_x5rij")
@@ -37,8 +37,14 @@ always_smooth = true
 
 [sub_resource type="Resource" id="Resource_ngq10"]
 script = ExtResource("6_4w2p4")
-quant = 2
+quant = 1
 max_value = 1.0
+
+[sub_resource type="Resource" id="Resource_health"]
+script = ExtResource("6_4w2p4")
+quant = 1
+no_interp = true
+max_value = 100.0
 
 [sub_resource type="Resource" id="Resource_4w2p4"]
 script = ExtResource("6_4w2p4")
@@ -52,7 +58,7 @@ max_value = 8.0
 
 [sub_resource type="Resource" id="Resource_7kikq"]
 script = ExtResource("6_4w2p4")
-quant = 2
+quant = 1
 min_value = -1.0
 max_value = 1.0
 
@@ -68,10 +74,32 @@ quant = 3
 
 [sub_resource type="Resource" id="Resource_kv0la"]
 script = ExtResource("6_4w2p4")
-quant = 2
+quant = 1
 max_value = 1.0
 
 [sub_resource type="Resource" id="Resource_5k8u3"]
+script = ExtResource("6_4w2p4")
+quant = 3
+
+[sub_resource type="Resource" id="Resource_cmd_mfwd"]
+script = ExtResource("6_4w2p4")
+quant = 1
+min_value = -1.0
+max_value = 1.0
+
+[sub_resource type="Resource" id="Resource_cmd_mlr"]
+script = ExtResource("6_4w2p4")
+quant = 1
+min_value = -1.0
+max_value = 1.0
+
+[sub_resource type="Resource" id="Resource_cmd_peeklr"]
+script = ExtResource("6_4w2p4")
+quant = 1
+min_value = -1.0
+max_value = 1.0
+
+[sub_resource type="Resource" id="Resource_cmd_look"]
 script = ExtResource("6_4w2p4")
 quant = 3
 
@@ -86,6 +114,7 @@ state_template = SubResource("Resource_r06js")
 command_template = SubResource("Resource_k7ufs")
 state_fields = Dictionary[StringName, ExtResource("6_4w2p4")]({
 &"crouch_progress": SubResource("Resource_ngq10"),
+&"health": SubResource("Resource_health"),
 &"look": SubResource("Resource_4w2p4"),
 &"movement_state": SubResource("Resource_vkgre"),
 &"peek_progress": SubResource("Resource_7kikq"),
@@ -95,3 +124,9 @@ state_fields = Dictionary[StringName, ExtResource("6_4w2p4")]({
 &"velocity": SubResource("Resource_5k8u3")
 })
 corrections = Array[ExtResource("3_x5rij")]([SubResource("Resource_ia2k4"), SubResource("Resource_j4kbt"), SubResource("Resource_dednk")])
+command_fields = Dictionary[StringName, ExtResource("6_4w2p4")]({
+&"look_abs": SubResource("Resource_cmd_look"),
+&"move_forward_backward": SubResource("Resource_cmd_mfwd"),
+&"move_left_right": SubResource("Resource_cmd_mlr"),
+&"peek_left_right": SubResource("Resource_cmd_peeklr")
+})

@@ -215,7 +215,7 @@ func test_delta_omits_unchanged_child_fields() -> void:
 
 func _make_predictor() -> NetPredictor:
 	var p := NetPredictor.new()
-	p.schema = PlayerSchema.build()
+	p.schema = load("res://entities/player/player_schema.tres") as NetSchema
 	# Trigger the part of _ready that allocates shadow_state + names. Calling
 	# add_child would register with NetReplication, which we want to avoid.
 	p.shadow_state = p.state_template.duplicate(true) as NetState

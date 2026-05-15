@@ -1,13 +1,12 @@
 @tool
 class_name PlayerInput extends NetCommand
 
-# Per-tick player input. Mirrors the field shape of PlayerInputPacket so Phase
-# 5/6 can swap to a schema-driven codec without changing the input-gathering
-# surface. Edge helpers (`is_jump_just_pressed` etc.) live on
-# PlayerInputContext, which wraps two consecutive frames.
-
-@export var sequence_id: int = 0
-@export var timestamp_us: int = 0
+# Per-tick player input. Schema-driven; NetPredictor encodes/decodes via
+# reflection against these @export fields. Infrastructure fields (sequence_id,
+# timestamp_us, last_received_tick) live on NetCommandPacket and are stamped
+# by the predictor — game code never touches them.
+# Edge helpers (`is_jump_just_pressed` etc.) live on PlayerInputContext, which
+# wraps two consecutive frames.
 
 @export var move_forward_backward: float = 0.0
 @export var move_left_right: float = 0.0
@@ -16,8 +15,10 @@ class_name PlayerInput extends NetCommand
 @export var jump: bool = false
 @export var crouch: bool = false
 @export var sprint: bool = false
+@export var walk_mode: bool = false
 @export var prone: bool = false
 
 @export var peek_left_right: float = 0.0
 
-@export var last_received_tick: int = 0
+@export var shoot: bool = false
+@export var scope: bool = false

@@ -5,7 +5,7 @@ pub(super) use super::packet_data::PacketData;
 pub(crate) use super::null::NullPacketWire;
 pub(crate) use super::id_assignment::IdAssignmentPacketWire;
 pub(crate) use super::player_disconnected::PlayerDisconnectedPacketWire;
-pub(crate) use super::player_input::PlayerInputPacketWire;
 pub(crate) use super::net_state::NetStatePacketWire;
+pub(crate) use super::net_command::NetCommandPacketWire;
 pub(crate) use super::net_reliable::NetReliablePacketWire;
 pub(crate) use super::server_tick::ServerTickPacketWire;

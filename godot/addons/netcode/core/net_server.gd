@@ -1,6 +1,6 @@
 extends Node
 
-signal handle_player_input(peer_id: int, input: PlayerInputPacket)
+signal handle_net_command(peer_id: int, packet: NetCommandPacket)
 signal handle_net_reliable(peer_id: int, packet: NetReliablePacket)
 
 var peer_ids: Array[int]
@@ -44,8 +44,8 @@ func on_peer_disconnected(peer_id: int) -> void:
 
 
 func on_server_packet(peer_id: int, packet) -> void:
-	if packet is PlayerInputPacket:
-		handle_player_input.emit(peer_id, packet)
+	if packet is NetCommandPacket:
+		handle_net_command.emit(peer_id, packet)
 	elif packet is NetReliablePacket:
 		handle_net_reliable.emit(peer_id, packet)
 	else:

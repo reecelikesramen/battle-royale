@@ -6,7 +6,7 @@ extends PanelContainer
 var props = {}
 
 var player: PlayerController:
-	get: return NetClient.player
+	get: return owner as PlayerController
 
 func _enter_tree() -> void:
 	# Phase 9b: chat now travels over NetReliableHub instead of a dedicated

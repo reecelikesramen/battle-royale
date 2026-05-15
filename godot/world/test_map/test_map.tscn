@@ -6,6 +6,7 @@
 [ext_resource type="Texture2D" uid="uid://cewyuaqy0fesh" path="res://assets/texture/grid.jpg" id="4_lquwl"]
 [ext_resource type="Script" uid="uid://172t455bnixi" path="res://controllers/player/spawner.gd" id="6_7mycd"]
 [ext_resource type="Script" uid="uid://c7dd7u2jrsmuy" path="res://entities/grenade/grenade_spawner.gd" id="7_gspawn"]
+[ext_resource type="Script" path="res://controllers/player/shoot_handler.gd" id="8_shoot"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_1bvp3"]
 material = ExtResource("2_h2yge")
@@ -667,3 +668,6 @@ metadata/_custom_type_script = "uid://172t455bnixi"
 
 [node name="GrenadeSpawner" type="Node3D" parent="." unique_id=1379427468]
 script = ExtResource("7_gspawn")
+
+[node name="ShootHandler" type="Node3D" parent="." unique_id=1379427469]
+script = ExtResource("8_shoot")

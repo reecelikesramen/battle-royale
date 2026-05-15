@@ -7,7 +7,7 @@ extends CharacterBody3D
 #   - correction smoothing (driven by schema.corrections; render_state flows
 #     into _apply_state),
 #   - server-side input fan-out (NetPredictor subscribes to
-#     NetServer.handle_player_input itself and filters by owner_id).
+#     NetServer.handle_net_command itself and filters by (schema_id, entity_id, owner_id)).
 # What stays here: input gathering, the dual-context (VISUAL/GAME) state
 # machines + their movement helpers, camera glue, and proxy interp wiring.
 
@@ -90,6 +90,14 @@ var _is_toggle_crouched := false
 var _is_toggle_peeked_left := false
 var _is_toggle_peeked_right := false
 
+# Sprint key (shift) is dual-purpose: tap = toggle walk_mode, hold past
+# SPRINT_HOLD_THRESHOLD_MS = sprint. Tracked entirely client-side; only the
+# resulting cmd.sprint / cmd.walk_mode bits cross the wire.
+const SPRINT_HOLD_THRESHOLD_MS := 130
+var _walk_mode := false
+var _shift_press_time_ms: int = -1
+var _shift_did_sprint := false
+
 
 func _enter_tree() -> void:
 	# NetPredictor is a static .tscn child with schema preset; we only fill in
@@ -99,6 +107,19 @@ func _enter_tree() -> void:
 	var net: NetPredictor = $NetPredictor
 	net.owner_id = _owner_id
 	net.entity_id = _owner_id
+	# Server-only: when NetLagCompensator rewinds/restores shadow_state, push
+	# pos onto the CharacterBody3D so ShootHandler's raycast intersects rewound
+	# bodies. Live state restoration also fires this; harmless when shadow == scene.
+	if NetSession.is_server:
+		net.shadow_state_applied.connect(_on_shadow_state_applied)
+
+
+func _on_shadow_state_applied() -> void:
+	var s: PlayerState = _net.shadow_state as PlayerState
+	if s == null:
+		return
+	global_position = s.pos
+	game_body.global_position = s.pos
 
 
 func _ready():
@@ -163,7 +184,20 @@ func _send_grenade_throw() -> void:
 # -> apply_corrections (authority); consume queue -> simulate per frame ->
 # apply_state -> broadcast (server); proxy_apply (proxy).
 
-func _gather_command(delta: float) -> PlayerInputPacket:
+# Populate shadow/render state at spawn so they match the scene before tick 1.
+# Without this, NetState defaults (pos=0, movement_state=0) disagree with the
+# scene (MAP_SPAWN, INITIAL_STATE) until tick 1's _simulate overwrites them.
+# NetPredictor calls this twice — once for shadow_state, once for render_state.
+func _seed_state(state: PlayerState) -> void:
+	state.pos = Constants.MAP_SPAWN
+	state.velocity = Vector3.ZERO
+	state.movement_state = %MovementStateMachine.state_to_id.get(
+			%MovementStateMachine.INITIAL_STATE.name, 0)
+	state.peek_state = %PeekStateMachine.state_to_id.get(
+			%PeekStateMachine.INITIAL_STATE.name, 0)
+
+
+func _gather_command(delta: float) -> PlayerInput:
 	# Integrate accumulated mouse delta into look. _free_look_abs decays back to
 	# zero when free-look is released so the camera resnaps.
 	var look := _free_look_abs if Input.is_action_pressed("free_look") else _look_abs
@@ -177,9 +211,7 @@ func _gather_command(delta: float) -> PlayerInputPacket:
 	else:
 		_free_look_abs = look
 
-	var cmd := PlayerInputPacket.new()
-	cmd.sequence_id = _net.input_sequence.next()
-	cmd.timestamp_us = Time.get_ticks_usec()
+	var cmd := PlayerInput.new()
 	cmd.move_forward_backward = Input.get_axis("move_forward", "move_backward")
 	cmd.move_left_right = Input.get_axis("move_left", "move_right")
 	if TOGGLE_PEEK:
@@ -204,9 +236,29 @@ func _gather_command(delta: float) -> PlayerInputPacket:
 		cmd.crouch = _is_toggle_crouched
 	else:
 		cmd.crouch = Input.is_action_pressed("crouch")
-	cmd.sprint = Input.is_action_pressed("sprint")
+	# Tap-vs-hold shift: tap toggles walk_mode, hold engages sprint after threshold.
+	var shift_pressed := Input.is_action_pressed("sprint")
+	var shift_just_pressed := Input.is_action_just_pressed("sprint")
+	var shift_just_released := Input.is_action_just_released("sprint")
+	var now_ms := Time.get_ticks_msec()
+	if shift_just_pressed:
+		_shift_press_time_ms = now_ms
+		_shift_did_sprint = false
+	var sprint_active := false
+	if shift_pressed and _shift_press_time_ms >= 0 \
+			and now_ms - _shift_press_time_ms >= SPRINT_HOLD_THRESHOLD_MS:
+		sprint_active = true
+		_shift_did_sprint = true
+	if shift_just_released:
+		if not _shift_did_sprint:
+			_walk_mode = not _walk_mode
+		_shift_press_time_ms = -1
+		_shift_did_sprint = false
+	cmd.sprint = sprint_active
+	cmd.walk_mode = _walk_mode
 	cmd.prone = Input.is_action_pressed("prone")
-	cmd.last_received_tick = _net.last_received_tick
+	cmd.shoot = Input.is_action_pressed("shoot")
+	cmd.scope = Input.is_action_pressed("scope")
 	return cmd
 
 
@@ -214,8 +266,12 @@ func _gather_command(delta: float) -> PlayerInputPacket:
 # edge detection, so we bind the context (prev / current) before stepping.
 # Used in authority live ticks, server ticks, and replay after snapshot ack —
 # must therefore be idempotent for a given (state, cmd) pair.
-func _simulate(state: PlayerState, cmd: PlayerInputPacket, delta: float) -> void:
-	input.prev_input_packet = _net.previous_cmd
+func _simulate(state: PlayerState, cmd: PlayerInput, delta: float) -> void:
+	# Tick 1: NetPredictor.previous_cmd is null until the framework records it
+	# at the end of the first authority tick. Use current cmd as its own
+	# predecessor so edge helpers (is_jump_just_pressed etc.) return false
+	# instead of null-dereffing prev_input_packet.
+	input.prev_input_packet = _net.previous_cmd if _net.previous_cmd != null else cmd
 	input.input_packet = cmd
 
 	context = Enums.IntegrationContext.GAME
@@ -270,10 +326,6 @@ func _apply_state(state: PlayerState) -> void:
 	if NetSession.is_server:
 		global_position = state.pos
 		velocity = state.velocity
-		# Server debug camera view: rotate the player body from look yaw so the
-		# spectator sees players facing the right direction. Pitch lives on the
-		# camera node which the server doesn't render through; only yaw matters
-		# for body orientation.
 		global_transform.basis = Basis.from_euler(Vector3(0, state.look.y, 0))
 		# Sync visual SMs so AnimationTree transitions fire (crouch/prone/peek
 		# pose visible on server-side render). _visualize is gated off on the
@@ -448,7 +500,10 @@ func update_camera(look_abs: Vector2) -> void:
 	tp_camera.transform.basis = Basis.from_euler(_camera_rotation)
 	tp_camera.rotation.z = 0
 
-	global_transform.basis = Basis.from_euler(_player_rotation)
+	if is_authority:
+		global_transform.basis = Basis.from_euler(_player_rotation)
+	else:
+		global_transform.basis = Basis.from_euler(Vector3(0, look_abs.y, 0))
 
 	# reset input integration
 	_x_mouse_input = 0.0

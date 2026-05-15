@@ -1,6 +1,7 @@
 extends MovementState
 
 @export var SPEED := 3.0
+@export var CROUCH_RUN_SPEED := 4.0
 @export var ACCELERATION := 50.0
 @export_range(1, 6, 0.1) var CROUCH_SPEED := 4.0
 @export_range(1, 6, 0.1) var UNCROUCH_SPEED := 6.0
@@ -34,7 +35,13 @@ func logic_enter() -> void:
 	# replayed transition can resume mid-crouch from the snapshot's progress —
 	# which _load_simulation_state restored on the state node before replay started.
 	if not player.is_replaying_inputs:
-		progress = 0.0
+		# Coming from prone, you're already below crouch height — skip the
+		# crouch-down anim and start at full crouch so the visual blends prone->crouch
+		# directly via AnimationTree's Movement transition.
+		if previous_state != null and previous_state.name == &"ProneMovementState":
+			progress = _crouch_anim_length
+		else:
+			progress = 0.0
 		_wants_to_uncrouch = false
 	#if player.is_authority:
 		#print("[CR-ENTER f=%d] replay=%s progress=%.4f wants_uncrouch=%s" % [
@@ -56,6 +63,11 @@ func visual_exit() -> void:
 
 
 func logic_physics(delta: float) -> void:
+	# Speed gate: holding sprint while crouched = crouch-run (PUBG-style).
+	# Set BEFORE update_movement so the new top speed applies this tick.
+	var target_speed := CROUCH_RUN_SPEED if player.input.is_sprinting() else SPEED
+	player.set_parameters(target_speed, ACCELERATION)
+
 	player.update_gravity(delta, Enums.IntegrationContext.GAME)
 	player.update_movement(delta, Enums.IntegrationContext.GAME)
 	player.update_velocity(Enums.IntegrationContext.GAME)
@@ -86,16 +98,28 @@ func logic_physics(delta: float) -> void:
 
 func logic_transitions() -> void:
 	_wants_to_uncrouch = !player.input.is_crouching()
-	
+
 	# TODO: make work with crouch jump
 	if not player.on_floor(Enums.IntegrationContext.GAME) and player.game_position.y < player.last_grounded_height - UNCROUCH_FALL_DISTANCE:
 		_wants_to_uncrouch = true
+
+	# Direct crouch -> prone (skip uncrouch path).
+	if player.input.is_prone_just_pressed():
+		transition.emit(&"ProneMovementState")
+		return
+
+	# Jump from crouch: ceiling-blocked stays blocked, otherwise jump and
+	# auto-stand on landing (Jump._land_target gates on is_crouching()).
+	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
+		if not (_crouch_shapecast and _crouch_shapecast.is_colliding()):
+			transition.emit(&"JumpMovementState")
+			return
 
 	if _wants_to_uncrouch and progress <= 0.0:
 		# Block uncrouch if hitting ceiling
 		if _crouch_shapecast and _crouch_shapecast.is_colliding():
 			return
-			
+
 		transition.emit(&"IdleMovementState")
 
 

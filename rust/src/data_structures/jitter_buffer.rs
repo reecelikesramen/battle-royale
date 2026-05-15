@@ -21,6 +21,8 @@ struct TimestampedPacket {
     #[var]
     timestamp_us: i64,
     #[var]
+    sequence_id: i64,
+    #[var]
     packet: Variant,
 }
 
@@ -91,6 +93,7 @@ impl JitterBuffer {
             base,
             delta: 0.0,
             timestamp_us,
+            sequence_id: sequence_id as i64,
             packet,
         });
 

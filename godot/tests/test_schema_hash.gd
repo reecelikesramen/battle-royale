@@ -60,7 +60,7 @@ func test_net_replication_pins_first_hash() -> void:
 
 
 func _make_schema() -> NetSchema:
-	# Hand-roll a small, deterministic schema. Avoid PlayerSchema.build() so
+	# Hand-roll a small, deterministic schema. Avoid load("res://entities/player/player_schema.tres") as NetSchema so
 	# changes to it don't break these tests.
 	var schema := NetSchema.new()
 	schema.id = 4242

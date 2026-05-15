@@ -1,17 +1,20 @@
 class_name PlayerInputContext extends RefCounted
 
-# Per-tick edge-detection wrapper over two consecutive PlayerInputPacket
-# frames. Phase 4 keeps this on the wire-packet type; later phases may swap
-# to the typed PlayerInput Resource once it owns the simulation path.
+# Per-tick edge-detection wrapper over two consecutive PlayerInput frames.
+# Phase 6: now typed against the schema-driven PlayerInput Resource — wire
+# bytes are stamped/decoded by NetPredictor; game code only sees typed cmds.
 
-var input_packet: PlayerInputPacket = null
-var prev_input_packet: PlayerInputPacket = null
+var input_packet: PlayerInput = null
+var prev_input_packet: PlayerInput = null
 
 func is_sprinting() -> bool:
 	return input_packet.sprint
 
 func is_sprint_just_pressed() -> bool:
 	return input_packet.sprint and not prev_input_packet.sprint
+
+func is_walk_mode() -> bool:
+	return input_packet.walk_mode
 
 func is_crouching() -> bool:
 	return input_packet.crouch
@@ -36,3 +39,15 @@ func is_peeking_left() -> bool:
 
 func is_peeking_right() -> bool:
 	return input_packet.peek_left_right > 0
+
+func is_shooting() -> bool:
+	return input_packet.shoot
+
+func is_shoot_just_pressed() -> bool:
+	return input_packet.shoot and not prev_input_packet.shoot
+
+func is_scoping() -> bool:
+	return input_packet.scope
+
+func is_scope_just_pressed() -> bool:
+	return input_packet.scope and not prev_input_packet.scope

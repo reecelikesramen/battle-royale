@@ -1,12 +1,12 @@
 extends TestBase
 
-# Phase 5 sanity: PlayerSchema.build() produces the channels NetPredictor
+# Phase 5 sanity: player_schema.tres carries the channels NetPredictor
 # reconcile reads, and lookup helpers return the right entries (or null).
 
 func test_player_schema_carries_class_refs() -> void:
-	var schema := PlayerSchema.build()
-	assert_not_null(schema, "build() returned null")
-	assert_eq(schema.id, PlayerSchema.SCHEMA_ID, "schema_id mismatch")
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
+	assert_not_null(schema, "schema load returned null")
+	assert_eq(schema.id, 1, "schema_id mismatch")
 	assert_not_null(schema.state_template, "state_template missing")
 	assert_not_null(schema.command_template, "command_template missing")
 	assert_eq(schema.state_template.get_script(), PlayerState, "state_template wrong class")
@@ -14,13 +14,13 @@ func test_player_schema_carries_class_refs() -> void:
 
 
 func test_player_schema_tick_rates() -> void:
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	assert_eq(schema.tick_hz, 120)
 	assert_eq(schema.snapshot_hz, 30)
 
 
 func test_find_correction_returns_named_channel() -> void:
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	var horiz := schema.find_correction(&"horizontal")
 	assert_not_null(horiz, "horizontal channel missing")
 	assert_eq(horiz.snap_threshold, 1.5)
@@ -29,19 +29,19 @@ func test_find_correction_returns_named_channel() -> void:
 
 
 func test_find_correction_returns_null_for_unknown() -> void:
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	assert_null(schema.find_correction(&"nope"))
 
 
 func test_find_correction_all_three_present() -> void:
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	assert_not_null(schema.find_correction(&"horizontal"))
 	assert_not_null(schema.find_correction(&"vertical"))
 	assert_not_null(schema.find_correction(&"velocity_horizontal"))
 
 
 func test_correction_field_paths() -> void:
-	var schema := PlayerSchema.build()
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	var horiz := schema.find_correction(&"horizontal")
 	assert_eq(horiz.fields.size(), 1)
 	assert_eq(horiz.fields[0], "pos.xz")
