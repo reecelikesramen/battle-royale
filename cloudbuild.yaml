@@ -40,20 +40,20 @@ steps:
         mkdir -p rust/target/release
         mkdir -p rust/target/debug
 
-        STAGE=$(mktemp -d)
-        gsutil -m cp gs://${_BUCKET}/rust-libs/${_TAG_NAME}/* "$STAGE/"
+        STAGE=$$(mktemp -d)
+        gsutil -m cp gs://${_BUCKET}/rust-libs/${_TAG_NAME}/* "$$STAGE/"
 
-        cp "$STAGE/librust.so"     ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.linux.x86_64.so
-        cp "$STAGE/rust.dll"       ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.windows.x86_64.dll
-        cp "$STAGE/librust.dylib"  ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.macos.universal.dylib
+        cp "$$STAGE/librust.so"     ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.linux.x86_64.so
+        cp "$$STAGE/rust.dll"       ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.windows.x86_64.dll
+        cp "$$STAGE/librust.dylib"  ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.macos.universal.dylib
 
         # The gdextension manifest's debug-mode entries point at the in-tree
         # rust/target/debug/ paths used during local dev. Headless export uses
         # release; populate debug paths too so godot --editor --quit-after
         # (import step) doesn't error.
-        cp "$STAGE/librust.so" rust/target/release/librust.so
-        cp "$STAGE/librust.so" rust/target/debug/librust.so
-        rm -rf "$STAGE"
+        cp "$$STAGE/librust.so" rust/target/release/librust.so
+        cp "$$STAGE/librust.so" rust/target/debug/librust.so
+        rm -rf "$$STAGE"
 
         ls -la ${_PROJECT_PATH}/addons/netcode/bin/
 
