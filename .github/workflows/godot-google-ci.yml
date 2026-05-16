@@ -115,14 +115,20 @@ jobs:
           path: prebuilt/${{ matrix.updater-name }}
           key: launcher-updater-${{ matrix.target }}-${{ hashFiles('launcher-updater/**', 'Cargo.toml', 'Cargo.lock') }}
 
-      # ===== Toolchain + deps run regardless of cache hit; launcher always builds =====
+      # ===== Toolchain + deps =====
+      # Skip entirely if every build cache hit AND we don't need to run tests
+      # on this runner. Linux always installs the toolchain because the
+      # launcher regression tests run there unconditionally; Windows/macOS
+      # short-circuit straight to the staging step on a full cache hit.
 
       - name: Setup Rust
+        if: runner.os == 'Linux' || steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust deps
+        if: runner.os == 'Linux' || steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
