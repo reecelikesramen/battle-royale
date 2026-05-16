@@ -198,7 +198,7 @@ steps:
         
         # Extract to get PCK
         cd build/mac
-        unzip -q ${_EXPORT_NAME}.zip || true
+        unzip -q -o ${_EXPORT_NAME}.zip || true
         
         # Copy base PCK (from app bundle)
         if [ -f "${_PROJECT_NAME}.app/Contents/Resources/${_PROJECT_NAME}.pck" ]; then
@@ -275,7 +275,10 @@ steps:
         # Note: the launcher is currently placed alongside the .app rather than
         # inside it. Sprint 8 will codesign + notarize a proper Launcher.app.
         if [ -f "build/mac/${_EXPORT_NAME}.zip" ]; then
-          (cd build/mac && unzip -q ${_EXPORT_NAME}.zip && cp ../../launchers/mac/launcher ./launcher && cp ../../launchers/mac/launcher-updater ./launcher-updater && rm -f ${_EXPORT_NAME}.zip && zip -r ${_EXPORT_NAME}.zip "${_PROJECT_NAME}.app" launcher launcher-updater)
+          # Append launcher binaries to the mac zip in place — no extract/repack.
+          # `zip -j` adds files at the zip root (siblings of the .app bundle)
+          # rather than under their on-disk path.
+          (cd launchers/mac && zip -jq ../../build/mac/${_EXPORT_NAME}.zip launcher launcher-updater)
         fi
         mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
         mv build/mac/mac-base.pck release/ 2>/dev/null || true
@@ -289,10 +292,17 @@ steps:
   # See infrastructure/README.md "Codesigning" section.
 
   # ============ UPLOAD RELEASE ARTIFACTS ============
+  # Parallel composite uploads chunk files >150MB into pieces uploaded in
+  # parallel, then GCS server-side composes them. Cuts upload time roughly
+  # in half for the platform zips. Safe here because our downloaders (the
+  # launcher's reqwest, refresh.sh's curl) use plain HTTP — the crcmod
+  # warning only affects `gsutil cp` downloads, which we don't use.
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'upload-release'
     args:
       - '-m'
+      - '-o'
+      - 'GSUtil:parallel_composite_upload_threshold=150M'
       - 'cp'
       - '-r'
       - 'release/*'

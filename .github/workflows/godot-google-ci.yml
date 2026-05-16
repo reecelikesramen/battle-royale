@@ -12,9 +12,6 @@ on:
         description: 'Tag to build (e.g., v1.0.0)'
         required: true
         type: string
-  # Keep cache warm
-  schedule:
-    - cron: '0 0 * * 0'  # Weekly on Sunday
 
 # Serialize workflow runs that share a commit. A tagged release on `main`
 # triggers TWO runs at the same SHA (one for the branch push, one for the
@@ -25,9 +22,8 @@ on:
 # delivered before the tag ref — so main's workflow registers first, runs
 # first, primes the rust-lib + rust-cache, and the tag run hits cache.
 #
-# `github.sha` is the same for both runs (same commit). For schedule /
-# workflow_dispatch where there's no concurrent peer, `run_id` keeps each
-# run isolated.
+# `github.sha` is the same for both runs (same commit). For workflow_dispatch
+# where there's no concurrent peer, `run_id` keeps each run isolated.
 concurrency:
   group: build-${{ github.sha || github.run_id }}
   cancel-in-progress: false
@@ -92,14 +88,32 @@ jobs:
         shell: bash
         run: mkdir -p prebuilt
 
-      # Cache the gdextension cdylib. Launcher binary is small so it always
-      # rebuilds; gates here check only the lib's source hash.
+      # Cache the gdextension cdylib. Gates on rust/ source hash so unrelated
+      # launcher/server-agent edits don't invalidate the slow C++ build.
       - name: Cache built library
         id: cache-lib
         uses: actions/cache@v4
         with:
           path: prebuilt/${{ matrix.library-name }}
           key: rust-lib-${{ matrix.target }}-${{ hashFiles('rust/src/**', 'rust/Cargo.toml', 'Cargo.toml', 'Cargo.lock') }}
+
+      # Cache the launcher binary. Source rarely changes between releases,
+      # so a tag bump that only touches game/PCK content can skip the
+      # launcher compile entirely. Key includes Cargo.lock + Cargo.toml so a
+      # dep bump (Slint, reqwest, etc.) invalidates.
+      - name: Cache built launcher
+        id: cache-launcher
+        uses: actions/cache@v4
+        with:
+          path: prebuilt/${{ matrix.launcher-name }}
+          key: launcher-${{ matrix.target }}-${{ hashFiles('launcher/**', 'Cargo.toml', 'Cargo.lock') }}
+
+      - name: Cache built launcher-updater
+        id: cache-updater
+        uses: actions/cache@v4
+        with:
+          path: prebuilt/${{ matrix.updater-name }}
+          key: launcher-updater-${{ matrix.target }}-${{ hashFiles('launcher-updater/**', 'Cargo.toml', 'Cargo.lock') }}
 
       # ===== Toolchain + deps run regardless of cache hit; launcher always builds =====
 
@@ -165,15 +179,18 @@ jobs:
           restore-keys: |
             vcpkg-buildtrees-${{ runner.os }}-
 
-      # sccache wraps cl.exe — caches C++ object files across runs.
+      # sccache wraps both cl.exe (vcpkg C++) AND rustc itself on Windows.
+      # rustc wrap helps the launcher/updater builds when their cache misses
+      # but dep tree is unchanged — caches individual crate compiles instead
+      # of rebuilding the whole slint/reqwest tree from scratch.
       - name: Setup sccache (Windows)
-        if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && (steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true')
         uses: mozilla-actions/sccache-action@v0.0.6
 
       # Expose GH Actions cache tokens to env so vcpkg's `x-gha` binary-cache
       # backend can use them. These aren't normally in env for subsequent steps.
       - name: Export GHA cache env (Windows)
-        if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && (steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true')
         uses: actions/github-script@v7
         with:
           script: |
@@ -199,12 +216,24 @@ jobs:
           SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && 'true' || '' }}
           CMAKE_C_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
           CMAKE_CXX_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
+          # Wrap rustc with sccache on Windows so upstream-crate compiles get
+          # object-level caching. Linux/macOS are fast enough that the wrap
+          # overhead isn't worth it.
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --package rust
 
       - name: Build launcher (launcher crate)
+        if: steps.cache-launcher.outputs.cache-hit != 'true'
+        env:
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && 'true' || '' }}
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --package launcher
 
       - name: Build launcher-updater
+        if: steps.cache-updater.outputs.cache-hit != 'true'
+        env:
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && 'true' || '' }}
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --package launcher-updater
 
       - name: Build server-agent (Linux only)
@@ -223,24 +252,29 @@ jobs:
         shell: bash
         run: |
           mkdir -p target/release prebuilt
-          LIB=${{ matrix.library-name }}
-          BUILT=target/${{ matrix.target }}/release/$LIB
-          CACHED=prebuilt/$LIB
-          # On cache hit: lib is at CACHED (from actions/cache restore), no rebuild.
-          # On cache miss: build wrote it to BUILT; promote it to CACHED so the
-          # post-save step finds the file.
-          if [ -f "$BUILT" ]; then
-            cp "$BUILT" "$CACHED"
-          elif [ ! -f "$CACHED" ]; then
-            echo "ERROR: gdextension lib missing at both $BUILT and $CACHED" >&2
-            ls -la target/${{ matrix.target }}/release/ || true
-            ls -la prebuilt/ || true
-            exit 1
-          fi
-          # Final staging dir for downstream upload steps.
-          cp "$CACHED" target/release/$LIB
-          cp target/${{ matrix.target }}/release/${{ matrix.launcher-name }} target/release/
-          cp target/${{ matrix.target }}/release/${{ matrix.updater-name }} target/release/
+          # Each cacheable binary may be at one of two places:
+          #   1. prebuilt/<name>       (restored from actions/cache on hit)
+          #   2. target/<tgt>/release/ (just produced by cargo on miss)
+          # Promote build output → prebuilt (so post-save persists it), then
+          # copy prebuilt → target/release/ for the upload steps below.
+          # Fail loudly if neither location holds the file.
+          promote() {
+            local name="$1"
+            local built="target/${{ matrix.target }}/release/$name"
+            local cached="prebuilt/$name"
+            if [ -f "$built" ]; then
+              cp "$built" "$cached"
+            elif [ ! -f "$cached" ]; then
+              echo "ERROR: $name missing at both $built and $cached" >&2
+              ls -la "target/${{ matrix.target }}/release/" || true
+              ls -la prebuilt/ || true
+              exit 1
+            fi
+            cp "$cached" "target/release/$name"
+          }
+          promote "${{ matrix.library-name }}"
+          promote "${{ matrix.launcher-name }}"
+          promote "${{ matrix.updater-name }}"
           if [ "$RUNNER_OS" = "Linux" ]; then
             cp target/${{ matrix.target }}/release/server-agent target/release/server-agent
           fi

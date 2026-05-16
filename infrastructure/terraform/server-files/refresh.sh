@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Runs as ExecStartPre for the game server. Fetches the current
-# versions-v2.json, verifies its ed25519 signature, downloads the latest
+# versions.json, verifies its ed25519 signature, downloads the latest
 # Linux dedicated-server build if not already on disk, and unpacks it
 # into /opt/battle-royale/.
 #
@@ -16,8 +16,8 @@ BUCKET="$(awk -F= '/^BUCKET=/ {print $2}' "$META_FILE")"
 
 cd "$INSTALL"
 
-manifest=$(curl -fsSL "https://storage.googleapis.com/${BUCKET}/versions-v2.json?t=$(date +%s)")
-sig=$(curl -fsSL "https://storage.googleapis.com/${BUCKET}/versions-v2.json.sig?t=$(date +%s)" \
+manifest=$(curl -fsSL "https://storage.googleapis.com/${BUCKET}/versions.json?t=$(date +%s)")
+sig=$(curl -fsSL "https://storage.googleapis.com/${BUCKET}/versions.json.sig?t=$(date +%s)" \
   --output /tmp/manifest.sig --write-out '%{http_code}')
 [[ "$sig" == "200" ]] || { echo "sig fetch failed: $sig" >&2; exit 1; }
 

@@ -93,7 +93,7 @@ pub fn verify_signature_with_key(
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Manifest> {
-    let m: Manifest = serde_json::from_slice(bytes).context("parse versions-v2.json")?;
+    let m: Manifest = serde_json::from_slice(bytes).context("parse versions.json")?;
     if m.schema != 2 {
         bail!("unsupported manifest schema: {}", m.schema);
     }
