@@ -20,9 +20,9 @@ missing=()
 for cmd in curl jq unzip openssl; do
   command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
 done
-if [ ${#missing[@]} -gt 0 ]; then
+if [ $${#missing[@]} -gt 0 ]; then
   apt-get update -qq
-  apt-get install -y -qq "${missing[@]}"
+  apt-get install -y -qq "$${missing[@]}"
 fi
 
 # ── User + dirs ────────────────────────────────────────────────────────────
