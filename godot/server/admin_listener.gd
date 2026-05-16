@@ -73,6 +73,22 @@ func _handle_command(c: StreamPeerTCP, line: String) -> void:
 			print("admin_listener: shutdown_for_update target=%s drain=%ds" % [target, drain_s])
 			_reply(c, '{"ok":true}')
 			_announce_and_quit(drain_s, target)
+		"ping":
+			# Probed by server-agent's ready_state thread every few seconds.
+			# `ready` flips true once the GNS server socket is bound — wake-fn
+			# uses this (via the GCS state object the agent writes) to gate the
+			# main-menu Wake button's "Server online" state on actual game
+			# readiness, not just VM-status RUNNING.
+			var version := ""
+			if FileAccess.file_exists("res://VERSION.txt"):
+				version = FileAccess.get_file_as_string("res://VERSION.txt").strip_edges()
+			var resp := {
+				"ok": true,
+				"ready": NetSession.is_server and NetSession.is_connected,
+				"version": version,
+				"sha": Constants.get_build_sha(),
+			}
+			_reply(c, JSON.stringify(resp))
 		_:
 			_reply(c, '{"ok":false,"error":"unknown_cmd"}')
 

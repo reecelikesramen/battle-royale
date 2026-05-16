@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 mod idle;
 mod metadata;
+mod ready_state;
 mod release;
 
 #[derive(Parser, Debug)]
@@ -52,6 +53,27 @@ fn main() -> Result<()> {
                 eprintln!("release-watcher exited: {e:#}");
             }
         });
+    }
+
+    // Spawn the ready-state thread. It pings the game over the loopback
+    // admin socket and mirrors readiness + version into a GCS object the
+    // wake function reads. BUCKET comes in via EnvironmentFile from the
+    // systemd unit (battle-royale-agent.service → /etc/battle-royale/meta.env).
+    match std::env::var("BUCKET") {
+        Ok(bucket) if !bucket.is_empty() => {
+            let md = metadata::Metadata::fetch().context("metadata for ready-state watcher")?;
+            std::thread::spawn(move || {
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(15))
+                    .build()
+                    .expect("build http client");
+                let mut token = metadata::AccessToken::default();
+                if let Err(e) = ready_state::watch_loop(&client, &md, &mut token, &bucket) {
+                    eprintln!("ready-state watcher exited: {e:#}");
+                }
+            });
+        }
+        _ => eprintln!("ready-state: BUCKET env var unset; not publishing readiness"),
     }
 
     loop {

@@ -7,6 +7,11 @@ Wants=network-online.target
 Type=simple
 User=gameserver
 Group=gameserver
+# meta.env is dropped by startup.sh and carries BUCKET=… so the agent's
+# ready_state thread knows where to write `server-state.json` (used by the
+# wake function to gate the main-menu Wake button's "online" colour on
+# actual game readiness, not just VM-RUNNING).
+EnvironmentFile=/etc/battle-royale/meta.env
 ExecStart=/opt/battle-royale/server-agent --idle-secs 600 --poll-secs 60
 Restart=always
 RestartSec=5s

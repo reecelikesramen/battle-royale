@@ -17,6 +17,23 @@ resource "google_storage_bucket_iam_member" "server_can_read_builds" {
   member = "serviceAccount:${google_service_account.game_server.email}"
 }
 
+# Write the ready-state heartbeat (Sprint 6 follow-up). The server-agent's
+# ready_state thread writes gs://<bucket>/server-state.json every 15s; wake-fn
+# reads it to gate the menu Wake button on actual game readiness, not just
+# VM-RUNNING. Scoped via IAM condition so the agent can't touch any other
+# object in the bucket (it already has bucket-wide read for releases).
+resource "google_storage_bucket_iam_member" "server_can_write_state" {
+  bucket = google_storage_bucket.game_builds.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.game_server.email}"
+
+  condition {
+    title       = "server-state object only"
+    description = "Agent may only create/overwrite server-state.json."
+    expression  = "resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.game_builds.name}/objects/server-state.json\")"
+  }
+}
+
 # Write custom metrics (Sprint 6).
 resource "google_project_iam_member" "server_metric_writer" {
   project = var.project_id

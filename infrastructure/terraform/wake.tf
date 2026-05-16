@@ -41,6 +41,22 @@ resource "google_project_iam_member" "wake_fn_start" {
   }
 }
 
+# Read the ready-state heartbeat. Wake-fn gates its `running` flag on this
+# object so the menu "Server online" colour reflects actual game readiness
+# rather than VM-status RUNNING. Path-scoped — wake-fn can't read any other
+# bucket contents.
+resource "google_storage_bucket_iam_member" "wake_fn_read_state" {
+  bucket = google_storage_bucket.game_builds.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.wake_fn.email}"
+
+  condition {
+    title       = "server-state object only"
+    description = "Wake-fn may only read server-state.json."
+    expression  = "resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.game_builds.name}/objects/server-state.json\")"
+  }
+}
+
 # ─── The function ─────────────────────────────────────────────────────────────
 resource "google_cloudfunctions2_function" "wake" {
   name        = "wake"
@@ -67,6 +83,10 @@ resource "google_cloudfunctions2_function" "wake" {
       PROJECT_ID    = var.project_id
       INSTANCE_NAME = "battle-royale-server"
       INSTANCE_ZONE = local.server_zone
+      # Ready-state heartbeat the agent publishes — wake-fn uses this to
+      # report `running` only when the game is actually accepting clients.
+      STATE_BUCKET = google_storage_bucket.game_builds.name
+      STATE_OBJECT = "server-state.json"
       # WAKE_SECRET intentionally unset by default; set via terraform.tfvars +
       # a separate google_secret_manager_secret if you need auth.
     }
@@ -74,6 +94,7 @@ resource "google_cloudfunctions2_function" "wake" {
 
   depends_on = [
     google_project_iam_member.wake_fn_start,
+    google_storage_bucket_iam_member.wake_fn_read_state,
     google_project_service.enabled,
   ]
 }
