@@ -316,7 +316,7 @@ steps:
         # Double-click of Battle Royale.app then opens the launcher UI directly
         # instead of running the raw game in a Terminal session. Gatekeeper
         # approval covers the whole bundle in one right-click → Open.
-        BUILD_SHA_FILE="$PWD/BUILD_SHA" _EXPORT_NAME=${_EXPORT_NAME} \
+        BUILD_SHA_FILE="$$PWD/BUILD_SHA" _EXPORT_NAME=${_EXPORT_NAME} \
           bash infrastructure/cloudbuild-steps/build-mac-app.sh
         mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
         mv build/mac/mac-base.pck release/ 2>/dev/null || true
