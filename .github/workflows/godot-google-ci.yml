@@ -61,9 +61,12 @@ jobs:
         with:
           lfs: false
 
-      # Ensure cache path exists for validation
+      # Stage dir lives outside target/ so Swatinem/rust-cache (which prunes
+      # workspace-crate outputs from target/ during its post-save) can't clobber
+      # the cached cdylib before our post-save runs.
       - name: Prepare cache directory
-        run: mkdir -p target/release
+        shell: bash
+        run: mkdir -p prebuilt
 
       # Cache the gdextension cdylib. Launcher binary is small so it always
       # rebuilds; gates here check only the lib's source hash.
@@ -71,7 +74,7 @@ jobs:
         id: cache-lib
         uses: actions/cache@v4
         with:
-          path: target/release/${{ matrix.library-name }}
+          path: prebuilt/${{ matrix.library-name }}
           key: rust-lib-${{ matrix.target }}-${{ hashFiles('rust/src/**', 'rust/Cargo.toml', 'Cargo.toml', 'Cargo.lock') }}
 
       # ===== Toolchain + deps run regardless of cache hit; launcher always builds =====
@@ -184,19 +187,23 @@ jobs:
       - name: Stage release artifacts
         shell: bash
         run: |
-          mkdir -p target/release
-          # On cache hit, lib is already at target/release/<name> (no rebuild).
-          # On cache miss, build wrote it to target/<target>/release/<name>; copy it.
-          SRC=target/${{ matrix.target }}/release/${{ matrix.library-name }}
-          DST=target/release/${{ matrix.library-name }}
-          if [ -f "$SRC" ]; then
-            cp "$SRC" "$DST"
-          elif [ ! -f "$DST" ]; then
-            echo "ERROR: gdextension lib missing at both $SRC and $DST" >&2
+          mkdir -p target/release prebuilt
+          LIB=${{ matrix.library-name }}
+          BUILT=target/${{ matrix.target }}/release/$LIB
+          CACHED=prebuilt/$LIB
+          # On cache hit: lib is at CACHED (from actions/cache restore), no rebuild.
+          # On cache miss: build wrote it to BUILT; promote it to CACHED so the
+          # post-save step finds the file.
+          if [ -f "$BUILT" ]; then
+            cp "$BUILT" "$CACHED"
+          elif [ ! -f "$CACHED" ]; then
+            echo "ERROR: gdextension lib missing at both $BUILT and $CACHED" >&2
             ls -la target/${{ matrix.target }}/release/ || true
-            ls -la target/release/ || true
+            ls -la prebuilt/ || true
             exit 1
           fi
+          # Final staging dir for downstream upload steps.
+          cp "$CACHED" target/release/$LIB
           cp target/${{ matrix.target }}/release/${{ matrix.launcher-name }} target/release/
           if [ "$RUNNER_OS" = "Linux" ]; then
             cp target/${{ matrix.target }}/release/server-agent target/release/server-agent
