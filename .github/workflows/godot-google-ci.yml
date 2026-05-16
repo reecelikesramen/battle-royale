@@ -197,6 +197,27 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      # GHA cache backend is occasionally down (we hit a 400 from the cache
+      # edge service mid-build). If sccache can't talk to it, the rustc/cl.exe
+      # wrappers exit non-zero and kill the build for no good reason. Probe
+      # once up-front and expose a flag the later steps gate on.
+      - name: Probe sccache (Windows)
+        id: sccache_probe
+        if: runner.os == 'Windows' && (steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true')
+        shell: pwsh
+        continue-on-error: true
+        env:
+          SCCACHE_GHA_ENABLED: 'true'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          sccache --start-server 2>&1 | Out-String | Write-Host
+          if ($LASTEXITCODE -eq 0) {
+            "ok=true"  | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Warning "sccache server failed to start (GHA cache likely degraded); building without rustc wrapper."
+            "ok=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
       - name: Build gdextension (rust crate)
         if: steps.cache-lib.outputs.cache-hit != 'true'
         env:
@@ -213,27 +234,28 @@ jobs:
           CL: ${{ runner.os == 'Windows' && '/MP' || '' }}
           # sccache wraps the C/C++ compiler for GNS's vendored build (Windows only;
           # macOS/Linux protobuf paths are smaller and not worth the overhead).
-          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && 'true' || '' }}
-          CMAKE_C_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
-          CMAKE_CXX_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'true' || '' }}
+          CMAKE_C_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
+          CMAKE_CXX_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
           # Wrap rustc with sccache on Windows so upstream-crate compiles get
           # object-level caching. Linux/macOS are fast enough that the wrap
-          # overhead isn't worth it.
-          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
+          # overhead isn't worth it. Gated on the probe so a GHA cache outage
+          # doesn't kill the build — we'd rather pay the recompile.
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --package rust
 
       - name: Build launcher (launcher crate)
         if: steps.cache-launcher.outputs.cache-hit != 'true'
         env:
-          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && 'true' || '' }}
-          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'true' || '' }}
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --package launcher
 
       - name: Build launcher-updater
         if: steps.cache-updater.outputs.cache-hit != 'true'
         env:
-          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && 'true' || '' }}
-          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'true' || '' }}
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --package launcher-updater
 
       - name: Build server-agent (Linux only)
