@@ -99,19 +99,22 @@ fn stop_self(
     md: &metadata::Metadata,
     token: &metadata::AccessToken,
 ) -> Result<()> {
-    // Drain the game process first via systemctl. The systemd unit's
-    // TimeoutStopSec gives it 60s; the game receives SIGTERM and exits.
-    let _ = std::process::Command::new("systemctl")
-        .args(["stop", "battle-royale-server.service"])
-        .status();
-
+    // No explicit `systemctl stop` first: the agent runs as `gameserver`,
+    // which can't talk to systemd's privileged bus and used to fail with
+    // "Interactive authentication required". `instances.stop` triggers an
+    // ACPI shutdown; systemd then drives the normal stop sequence and the
+    // game gets SIGTERM with the unit's TimeoutStopSec grace window.
     let url = format!(
         "https://compute.googleapis.com/compute/v1/projects/{}/zones/{}/instances/{}/stop",
         md.project_id, md.zone, md.instance_name
     );
+    // Empty body needs an explicit Content-Length: 0 or the compute API
+    // rejects with 411 (reqwest omits the header when there's no body).
     let resp = client
         .post(&url)
         .bearer_auth(token.value())
+        .header(reqwest::header::CONTENT_LENGTH, "0")
+        .body("")
         .send()
         .context("instances.stop")?;
     if !resp.status().is_success() {
