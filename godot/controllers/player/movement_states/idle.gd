@@ -6,17 +6,17 @@ func visual_enter() -> void:
 
 
 func logic_physics(delta: float) -> void:
-	player.update_gravity(delta, Enums.IntegrationContext.GAME)
-	player.update_movement(delta, Enums.IntegrationContext.GAME)
-	player.update_velocity(Enums.IntegrationContext.GAME)
+	player.update_gravity(delta)
+	player.update_movement(delta)
+	player.update_velocity()
 
 
 func logic_transitions() -> void:
-	if not player.on_floor(Enums.IntegrationContext.GAME):
+	if not player.on_floor():
 		transition.emit(&"FallMovementState")
 		return
 
-	if !is_zero_approx(player.game_velocity.x) or !is_zero_approx(player.game_velocity.z):
+	if !is_zero_approx(player.velocity.x) or !is_zero_approx(player.velocity.z):
 		# Run is the default ground locomotion. Walk on toggle, Sprint on hold.
 		if player.input.is_sprinting_forward():
 			transition.emit(&"SprintMovementState")
@@ -35,8 +35,5 @@ func logic_transitions() -> void:
 		transition.emit(&"ProneMovementState")
 
 
-func visual_physics(delta: float) -> void:
-	if !is_remote_player:
-		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
-		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
-		player.update_velocity(Enums.IntegrationContext.VISUAL)
+func visual_physics(_delta: float) -> void:
+	pass

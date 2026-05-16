@@ -69,6 +69,7 @@ script = ExtResource("4_gstate")
 [resource]
 script = ExtResource("1_schema")
 id = 2
+archetype = 1
 state_template = SubResource("GrenadeStateTemplate")
 tick_hz = 60
 snapshot_hz = 60

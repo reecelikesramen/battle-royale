@@ -8,7 +8,7 @@ func logic_transitions() -> void:
 	if %MovementStateMachine.current_state not in [&"IdleMovementState", &"CrouchMovementState", &"WalkMovementState"]:
 		return
 	
-	if player.game_velocity.length() > MAX_VELOCITY:
+	if player.velocity.length() > MAX_VELOCITY:
 		return
 	
 	if player.input.is_peeking_left() or player.input.is_peeking_right():

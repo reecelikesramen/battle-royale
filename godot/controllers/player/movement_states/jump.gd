@@ -11,39 +11,37 @@ func logic_enter() -> void:
 	# bumped up to 3.5. Sprint/run still clamp to 3.5 — momentum above the cap is
 	# preserved by low AIR_FRICTION rather than by raising the wish-dir target.
 	player.set_parameters(minf(SPEED, player._speed), ACCELERATION)
-	player.game_velocity.y += JUMP_VELOCITY
+	player.velocity.y += JUMP_VELOCITY
 	_enter_time = Time.get_ticks_usec()
 
 
 func visual_enter() -> void:
-	if !is_remote_player and player.input.is_jump_just_pressed():
-		player.velocity.y += JUMP_VELOCITY
 	animation_tree.set("parameters/Movement/transition_request", "Jump")
 	camera_animation_player.stop()
 
 
 func logic_physics(delta: float) -> void:
-	player.update_gravity(delta, Enums.IntegrationContext.GAME)
-	player.update_movement(delta, Enums.IntegrationContext.GAME)
-	player.update_velocity(Enums.IntegrationContext.GAME)
+	player.update_gravity(delta)
+	player.update_movement(delta)
+	player.update_velocity()
 
 
 func logic_transitions() -> void:
 	var enough_time := Time.get_ticks_usec() - _enter_time > 100_000
-	if enough_time and player.on_floor(Enums.IntegrationContext.GAME):
+	if enough_time and player.on_floor():
 		transition.emit(_land_target())
 
 	if player.input.is_prone_just_pressed():
 		transition.emit(&"ProneMovementState")
 
-	if player.game_position.y < player.last_grounded_height:
+	if player.global_position.y < player.last_grounded_height:
 		transition.emit(&"FallMovementState")
 
 
 func _land_target() -> StringName:
 	if player.input.is_crouching():
 		return &"CrouchMovementState"
-	var moving := !is_zero_approx(player.game_velocity.x) or !is_zero_approx(player.game_velocity.z)
+	var moving := !is_zero_approx(player.velocity.x) or !is_zero_approx(player.velocity.z)
 	if not moving:
 		return &"IdleMovementState"
 	if player.input.is_sprinting_forward():
@@ -53,8 +51,5 @@ func _land_target() -> StringName:
 	return &"RunMovementState"
 
 
-func visual_physics(delta: float) -> void:
-	if !is_remote_player:
-		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
-		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
-		player.update_velocity(Enums.IntegrationContext.VISUAL)
+func visual_physics(_delta: float) -> void:
+	pass

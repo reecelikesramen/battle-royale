@@ -51,10 +51,10 @@ func visual_enter() -> void:
 
 
 func logic_physics(delta: float) -> void:
-	player.update_gravity(delta, Enums.IntegrationContext.GAME)
-	player.update_movement(delta, Enums.IntegrationContext.GAME)
-	player.update_velocity(Enums.IntegrationContext.GAME)
-	
+	player.update_gravity(delta)
+	player.update_movement(delta)
+	player.update_velocity()
+
 	if player.is_replaying_inputs:
 		return
 	
@@ -103,7 +103,7 @@ func logic_transitions() -> void:
 		_wants_to_unprone = true
 
 	# TODO: make work with jump prone
-	if not player.on_floor(Enums.IntegrationContext.GAME) and player.game_position.y < player.last_grounded_height - UNPRONE_FALL_DISTANCE:
+	if not player.on_floor() and player.global_position.y < player.last_grounded_height - UNPRONE_FALL_DISTANCE:
 		_wants_to_unprone = true
 
 	# Rising-edge bump on starting to stand up (shared crouch/prone tiredness).
@@ -119,12 +119,7 @@ func logic_transitions() -> void:
 		transition.emit(&"IdleMovementState")
 
 
-func visual_physics(delta: float) -> void:
-	if !is_remote_player:
-		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
-		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
-		player.update_velocity(Enums.IntegrationContext.VISUAL)
-
+func visual_physics(_delta: float) -> void:
 	# Sync animation to logic progress via TimeSeek
 	animation_tree.set("parameters/ProneTimeSeek/seek_request", progress)
 

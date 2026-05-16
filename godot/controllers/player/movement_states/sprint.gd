@@ -21,17 +21,17 @@ func visual_enter() -> void:
 
 
 func logic_physics(delta: float) -> void:
-	player.update_gravity(delta, Enums.IntegrationContext.GAME)
-	player.update_movement(delta, Enums.IntegrationContext.GAME)
-	player.update_velocity(Enums.IntegrationContext.GAME)
+	player.update_gravity(delta)
+	player.update_movement(delta)
+	player.update_velocity()
 
 
 func logic_transitions() -> void:
-	if not player.on_floor(Enums.IntegrationContext.GAME):
+	if not player.on_floor():
 		transition.emit(&"FallMovementState")
 		return
 
-	if player.game_velocity.is_zero_approx():
+	if player.velocity.is_zero_approx():
 		transition.emit(&"IdleMovementState")
 
 	# Drop out of sprint if either shift released or forward input released. Sprint
@@ -43,7 +43,7 @@ func logic_transitions() -> void:
 		else:
 			transition.emit(&"RunMovementState")
 
-	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
+	if player.input.is_jump_just_pressed() and player.on_floor():
 		transition.emit(&"JumpMovementState")
 
 	if player.input.is_crouching():
@@ -53,11 +53,7 @@ func logic_transitions() -> void:
 		transition.emit(&"ProneMovementState")
 
 
-func visual_physics(delta: float) -> void:
-	if !is_remote_player:
-		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
-		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
-		player.update_velocity(Enums.IntegrationContext.VISUAL)
+func visual_physics(_delta: float) -> void:
 	_set_animation_speed(player.velocity.length_squared())
 
 

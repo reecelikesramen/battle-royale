@@ -5,6 +5,19 @@ class_name NetCorrection extends Resource
 # which we hard-set the visual to the shadow state, the exponential smoothing
 # rate below threshold, and a deadband under which we leave the visual alone.
 
+# Phase 4: how the channel is consumed by NetPredictor.
+#   RENDER_LERP — each tick computes a fresh err = shadow - render and lerps
+#     render toward shadow with magnitude-scaled alpha. No state carried
+#     between ticks. Default mode; correct for animation-progress scalars and
+#     server-state-only entities.
+#   SMOOTHED_OFFSET — framework owns a persistent visible-vs-canonical offset
+#     on the predicted body. Offset is captured once on reconcile from the
+#     pre-rewind visible pos, then exponentially decayed each tick at
+#     smooth_rate. snap_threshold zeros the offset hard when exceeded.
+#     Only valid on schemas with command_template (predicted entities) and
+#     on field 'pos' for now. See netcode-synchronizer.md §8 / §9.1.
+enum Mode { RENDER_LERP, SMOOTHED_OFFSET }
+
 
 # Godot's engine writes @export vars directly to the script var — _set is only
 # called for *dynamic* (unknown-to-the-class) properties, so we can't intercept
@@ -79,4 +92,14 @@ func _do_deferred_emit_changed() -> void:
 @export var always_smooth: bool = false:
 	set(v):
 		always_smooth = v
+		_schedule_emit_changed()
+
+## Phase 4: consumption mode. RENDER_LERP (default) lerps render_state toward
+## shadow_state every tick. SMOOTHED_OFFSET hands the channel to the framework's
+## visible-offset path (predicted body only; pos field only — see Mode enum).
+## Schema validation enforces the restrictions; runtime _corrections_pass skips
+## SMOOTHED_OFFSET channels so the per-tick lerp doesn't erase the offset.
+@export var mode: Mode = Mode.RENDER_LERP:
+	set(v):
+		mode = v
 		_schedule_emit_changed()

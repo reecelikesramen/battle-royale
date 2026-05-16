@@ -76,7 +76,7 @@ func logic_transitions() -> void:
 	# Check if we need to force unpeak due to movement state or velocity
 	if %MovementStateMachine.current_state not in [&"IdleMovementState", &"CrouchMovementState", &"WalkMovementState"]:
 		_force_unpeak = true
-	elif player.game_velocity.length() > MAX_VELOCITY:
+	elif player.velocity.length() > MAX_VELOCITY:
 		_force_unpeak = true
 	elif _target_direction() == 0:
 		_force_unpeak = true
@@ -86,12 +86,7 @@ func logic_transitions() -> void:
 		transition.emit(&"NotPeekState")
 
 
-func visual_physics(delta: float) -> void:
-	if !is_remote_player:
-		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
-		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
-		player.update_velocity(Enums.IntegrationContext.VISUAL)
-	
+func visual_physics(_delta: float) -> void:
 	# Set peek direction: -1.0 for left, 1.0 for right
 	var add_amount := -1.0 if progress < 0 else 1.0
 	animation_tree.set("parameters/Add Peek/add_amount", add_amount)

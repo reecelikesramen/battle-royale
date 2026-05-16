@@ -73,9 +73,9 @@ func logic_physics(delta: float) -> void:
 	var target_speed := CROUCH_RUN_SPEED if player.input.is_sprinting() else SPEED
 	player.set_parameters(target_speed, ACCELERATION)
 
-	player.update_gravity(delta, Enums.IntegrationContext.GAME)
-	player.update_movement(delta, Enums.IntegrationContext.GAME)
-	player.update_velocity(Enums.IntegrationContext.GAME)
+	player.update_gravity(delta)
+	player.update_movement(delta)
+	player.update_velocity()
 
 	if player.is_replaying_inputs:
 		return
@@ -129,7 +129,7 @@ func logic_transitions() -> void:
 	_wants_to_uncrouch = !player.input.is_crouching()
 
 	# TODO: make work with crouch jump
-	if not player.on_floor(Enums.IntegrationContext.GAME) and player.game_position.y < player.last_grounded_height - UNCROUCH_FALL_DISTANCE:
+	if not player.on_floor() and player.global_position.y < player.last_grounded_height - UNCROUCH_FALL_DISTANCE:
 		_wants_to_uncrouch = true
 
 	# Rising-edge bump: when the player commits to standing back up, fatigue
@@ -146,7 +146,7 @@ func logic_transitions() -> void:
 
 	# Jump from crouch: ceiling-blocked stays blocked, otherwise jump and
 	# auto-stand on landing (Jump._land_target gates on is_crouching()).
-	if player.input.is_jump_just_pressed() and player.on_floor(Enums.IntegrationContext.GAME):
+	if player.input.is_jump_just_pressed() and player.on_floor():
 		if not (_crouch_shapecast and _crouch_shapecast.is_colliding()):
 			transition.emit(&"JumpMovementState")
 			return
@@ -159,12 +159,7 @@ func logic_transitions() -> void:
 		transition.emit(&"IdleMovementState")
 
 
-func visual_physics(delta: float) -> void:
-	if !is_remote_player:
-		player.update_gravity(delta, Enums.IntegrationContext.VISUAL)
-		player.update_movement(delta, Enums.IntegrationContext.VISUAL)
-		player.update_velocity(Enums.IntegrationContext.VISUAL)
-		
+func visual_physics(_delta: float) -> void:
 	# Sync animation to logic progress via TimeSeek
 	animation_tree.set("parameters/CrouchTimeSeek/seek_request", progress)
 	#if player.is_authority:

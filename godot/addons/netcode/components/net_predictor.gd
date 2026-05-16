@@ -22,7 +22,30 @@ func _get_configuration_warnings() -> PackedStringArray:
 			warnings.append(
 					"NetPredictor.body path '%s' does not resolve to a CharacterBody3D / RigidBody3D / AnimatableBody3D / Node3D — rewind will be a no-op."
 					% body)
+	# Phase 4: SMOOTHED_OFFSET pos channels need a resolved body to write the
+	# visible pos onto. If schema declares one but body is unset, the offset
+	# path runs as a no-op at runtime — silent loss of smoothing.
+	if body.is_empty() and _schema_has_smoothed_offset_pos_channel(schema):
+		warnings.append(
+				"NetPredictor.schema declares a SMOOTHED_OFFSET correction channel for 'pos', but NetPredictor.body is unset — the offset path is a no-op without a body to write onto.")
 	return warnings
+
+
+# Editor-time helper. Walks corrections looking for any SMOOTHED_OFFSET channel
+# that claims the 'pos' field (full-field or axis-suffix). Static-ish on the
+# schema; no autoload reads.
+static func _schema_has_smoothed_offset_pos_channel(s: NetSchema) -> bool:
+	if s == null:
+		return false
+	for c in s.corrections:
+		if c == null or c.mode != NetCorrection.Mode.SMOOTHED_OFFSET:
+			continue
+		for path in c.fields:
+			var dot := path.find(".")
+			var fname: String = path.substr(0, dot) if dot >= 0 else path
+			if fname == "pos":
+				return true
+	return false
 
 # Sprint 1: hook-driven tick dispatcher. NetPredictor owns _physics_process and
 # routes per-role into host-implemented callbacks defined on its parent (the
@@ -150,6 +173,21 @@ enum BodyKind { NONE, CHAR_BODY, RIGID_BODY, ANIMATABLE_BODY, NODE3D }
 var _body: Node = null
 var _body_kind: BodyKind = BodyKind.NONE
 
+# Phase 4: framework-owned visible-vs-canonical position offset for predicted
+# entities. After _simulate the body sits at the canonical pos (shadow.pos);
+# the offset is decayed each tick and added back when writing the visible pos.
+# Captured on reconcile from the pre-rewind visible pos so a corrected snapshot
+# eases the rendered body back toward canonical instead of teleporting. Zero
+# (default) means visible == canonical — no smoothing in effect.
+# See netcode-synchronizer.md §8.3 / §8.6.
+var _smoothing_offset_pos: Vector3 = Vector3.ZERO
+
+# Runtime cache: does this entity's schema declare any SMOOTHED_OFFSET channel
+# targeting 'pos'? Computed at _ready so _authority_tick / _reconcile_replay
+# can early-out without walking corrections every tick. Recomputed when schema
+# changes would require a re-register anyway.
+var _has_smoothed_offset_pos_channel: bool = false
+
 # Template accessors. The actual state/command instances (shadow_state etc.)
 # are constructed in _ready via duplicate(true), so the schema's templates
 # stay pristine for future clones.
@@ -246,6 +284,11 @@ func _ready() -> void:
 	# doesn't drop the body wiring on the floor. NONE kind = no-op rewind.
 	_resolve_body()
 
+	# Phase 4: precompute the SMOOTHED_OFFSET-on-pos flag so the per-tick path
+	# is a single bool check. Validation guarantees Phase 4 channels target
+	# 'pos' only and live on predicted schemas.
+	_has_smoothed_offset_pos_channel = _schema_has_smoothed_offset_pos_channel(schema)
+
 	# Hosts that need to seed scene-derived defaults into shadow/render (spawn
 	# position, initial state-machine ids, etc.) implement _seed_state(state).
 	# Called after schema registration so the field set is finalized but before
@@ -255,12 +298,13 @@ func _ready() -> void:
 		host._seed_state(shadow_state)
 		host._seed_state(render_state)
 
-	# Auto-subscribe to the server's input fan-out when this predictor has a
-	# command_template. Server fans NetCommandPacket to all predictors; each
+	# Auto-subscribe to the server's input fan-out when this predictor runs a
+	# PREDICTED schema. Server fans NetCommandPacket to all predictors; each
 	# filters by (schema_id, entity_id, peer_id == owner_id), decodes payload
 	# into a typed NetCommand, and enqueues for the next _server_tick. Clients
-	# never see the signal so the connect is a no-op for them.
-	if command_template != null and NetSession.is_server:
+	# never see the signal so the connect is a no-op for them. REPLICATED and
+	# LOCAL_ONLY archetypes never fan out inputs.
+	if schema != null and schema.archetype == NetSchema.Archetype.PREDICTED and NetSession.is_server:
 		NetServer.handle_net_command.connect(_on_server_net_command)
 		_subscribed_to_input = true
 
@@ -520,15 +564,11 @@ var unacked_inputs := SequenceRingBuffer.new()
 const INPUT_REDUNDANCY: int = 3
 var input_redundancy_ring: Array = []
 
-# Server-authoritative shadow state. Player simulates two parallel
-# integrations: VISUAL (smoothed for camera) and GAME (authoritative).
-var game_transform: Transform3D = Transform3D()
-var game_position: Vector3:
-	get: return game_transform.origin
-	set(value): game_transform.origin = value
-var game_velocity := Vector3.ZERO
-var game_movement_state_id: int = 0
-var game_sequence_id: int = 65535
+# Cursor: sequence_id of the latest input acked by a server snapshot we've
+# reconciled against. Drives the is_newer gate in handle_net_state_packet so
+# we replay only when a fresher ack arrives. Starts at 65535 (pre-rollover
+# sentinel; first ack at seq >= 0 reads as "newer" via PacketSequence).
+var _last_reconciled_input_seq: int = 65535
 
 # Frames between forced full snapshots. A delta is encoded against the last
 # state we broadcast; on packet loss the client diverges until the next
@@ -1020,9 +1060,13 @@ func handle_net_state_packet(packet) -> void:
 
 	if NetSession.is_server:
 		return
-	if is_local_authority:
+	# Phase 6.1: REPLICATED has no authority client — every receiver buffers for
+	# interp. PREDICTED's local authority prunes its unacked ring + reconciles;
+	# everyone else buffers.
+	var is_predicted: bool = schema != null and schema.archetype == NetSchema.Archetype.PREDICTED
+	if is_predicted and is_local_authority:
 		unacked_inputs.prune_up_to(last_input_seq)
-		if PacketSequence.is_newer(last_input_seq, game_sequence_id):
+		if PacketSequence.is_newer(last_input_seq, _last_reconciled_input_seq):
 			_reconcile_replay(last_input_seq)
 	else:
 		# duplicate() so subsequent in-place decode doesn't clobber buffered entries.
@@ -1141,8 +1185,17 @@ func _rewind_body(state: NetState) -> void:
 # logic_enter does `if not is_replaying_inputs: progress = 0` would reset
 # their animation progress on every snapshot ack, causing a visible snap-back.
 func _reconcile_replay(new_sequence_id: int) -> void:
-	game_sequence_id = new_sequence_id
+	_last_reconciled_input_seq = new_sequence_id
 	is_replaying_inputs = true
+	# Phase 4: capture the visible pos *before* rewind so we can convert it
+	# into a decaying offset after replay. Pre-reconcile the body was at
+	# shadow.pos + _smoothing_offset_pos (set at end of last _authority_tick);
+	# we want the post-reconcile rendered body to start there and ease back to
+	# the new shadow.pos, not teleport.
+	var pre_visible_pos: Vector3 = Vector3.ZERO
+	var has_offset_path: bool = _body != null and _has_smoothed_offset_pos_channel and state_field_names.has(&"pos")
+	if has_offset_path:
+		pre_visible_pos = (_body as Node3D).global_position
 	# Framework-owned body rewind: snap body transform/velocity to shadow
 	# before host code runs. No-op when `body` is unset (current behavior;
 	# host still owns body management via _load_simulation_state).
@@ -1150,7 +1203,7 @@ func _reconcile_replay(new_sequence_id: int) -> void:
 		_rewind_body(shadow_state)
 	if host and host.has_method(&"_load_simulation_state"):
 		host._load_simulation_state(shadow_state)
-	var inputs := unacked_inputs.get_starting_at(game_sequence_id)
+	var inputs := unacked_inputs.get_starting_at(_last_reconciled_input_seq)
 	if not inputs.is_empty():
 		previous_cmd = inputs[0]
 	var dt := NetTimeline.tick_delta()
@@ -1159,6 +1212,18 @@ func _reconcile_replay(new_sequence_id: int) -> void:
 			host._simulate(shadow_state, inputs[i], dt)
 			previous_cmd = inputs[i]
 	is_replaying_inputs = false
+	# Phase 4: offset = where the player *saw* the body − where the corrected
+	# shadow says it should be. Per-axis snap-clamp zeros axes whose
+	# divergence exceeds their channel's snap_threshold (large desyncs teleport
+	# cleanly instead of dragging a visible offset that takes seconds to
+	# decay). reset_physics_interpolation fires unconditionally — the body's
+	# pose just jumped discontinuously to its new visible spot.
+	if has_offset_path:
+		var new_pos: Vector3 = shadow_state.get(&"pos")
+		_smoothing_offset_pos = pre_visible_pos - new_pos
+		_walk_smoothing_offset_pos_axes(0.0, false)
+		(_body as Node3D).global_position = new_pos + _smoothing_offset_pos
+		_call_reset_physics_interp_on_body()
 	#if is_local_authority:
 		#var dbg_shadow_crouch_post: float = shadow_state.get(&"crouch_progress") if &"crouch_progress" in state_field_names else -1.0
 		#var dbg_shadow_move_post: int = shadow_state.get(&"movement_state") if &"movement_state" in state_field_names else -1
@@ -1312,8 +1377,12 @@ func apply_shadow_state_to_scene() -> void:
 func _physics_process(delta: float) -> void:
 	if schema == null or shadow_state == null:
 		return
+	# Phase 6.1: LOCAL_ONLY entities skip all network branches — they exist only
+	# for state lifecycle + host hook plumbing on the local peer.
+	if schema.archetype == NetSchema.Archetype.LOCAL_ONLY:
+		return
 	if NetSession.is_server:
-		# Per-entity tick-rate gate. Skip _server_tick on intermediate ticks so
+		# Per-entity tick-rate gate. Skip server tick on intermediate ticks so
 		# low-priority entities (props, projectiles) cost a fraction of what
 		# players cost. Effective dt scales with the gate so time-based fields
 		# advance correctly.
@@ -1321,29 +1390,54 @@ func _physics_process(delta: float) -> void:
 		if _server_tick_ctr < _server_tick_every:
 			return
 		_server_tick_ctr = 0
-		_server_tick(delta * float(_server_tick_every))
-	elif is_local_authority:
+		var scaled_dt: float = delta * float(_server_tick_every)
+		# PREDICTED drains the input jitter buffer and simulates against client
+		# commands. REPLICATED has no input stream — the host's _capture_state
+		# advances game logic from server-side authority each gated tick.
+		if schema.archetype == NetSchema.Archetype.PREDICTED:
+			_server_tick(scaled_dt)
+		else:
+			_replicator_server_tick(scaled_dt)
+	elif schema.archetype == NetSchema.Archetype.PREDICTED and is_local_authority:
 		_authority_tick(delta)
 	else:
+		# REPLICATED on any client + PREDICTED on remote clients both interp.
 		_proxy_tick(delta)
 
 
-# Local authority: gather input, advance shadow, sync visuals, run visual
-# physics, then lerp the scene back toward shadow per schema.corrections.
+# Phase 6.1 (fold from NetReplicator): server-side tick for REPLICATED schemas.
+# No input queue to drain; host's `_capture_state(state, delta)` advances game
+# logic and copies the result into shadow_state. `delta` is the scaled tick-
+# gate delta — host treats it as a single logical simulation step regardless
+# of the underlying physics rate. last_input_seq sentinel = 0 since the wire
+# packet always carries the field (PREDICTED uses it for ack pruning).
+func _replicator_server_tick(delta: float) -> void:
+	if host == null:
+		return
+	if host.has_method(&"_capture_state"):
+		host._capture_state(shadow_state, delta)
+	server_broadcast_snapshot(0)
+
+
+# Local authority: gather input, advance shadow, sync visuals, capture render
+# state, lerp non-pos channels toward shadow, then write visible pos via the
+# Phase 4 smoothing-offset path (when configured).
 #
-# Order matters because the player has *two* physics integrators — game (in
-# _simulate via the GAME integration context) and visual (in _visualize via
-# the VISUAL context's move_and_slide). The visual integrator mutates the
-# CharacterBody3D's pos/velocity directly each tick. To smooth scene toward
-# shadow without the visual integrator stomping the lerp, we let visual
-# physics run *first*, capture the resulting scene state into render_state,
-# lerp render_state toward shadow_state on the configured channels, then call
-# back into _apply_corrections so the host writes the smoothed values to
-# scene. This matches the pre-refactor behavior: visual physics is allowed to
-# drift each tick, and corrections pull it back.
+# Phase 4 inserts two body writes around _simulate:
+#   1. Pre-_simulate canonical snap (body.global_position = shadow.pos) so
+#      move_and_slide integrates from the authoritative origin, not last
+#      tick's visible position.
+#   2. Post-_apply_corrections visible write (body.global_position = shadow.pos
+#      + _smoothing_offset_pos), so the renderer samples shadow+offset and
+#      the camera (grandchild of body) follows naturally.
+# Decay + per-axis snap-clamp on the offset run between those two writes.
 #
-# Hosts that don't have separate visual physics (replicate-only entities,
-# pure-state predictors) can skip the _capture_render_state / _apply_corrections
+# Both writes are gated on `body` being set AND a SMOOTHED_OFFSET pos channel
+# existing on the schema. Default-empty body keeps current behavior (the host
+# is responsible for body manipulation in its hooks).
+#
+# Hosts without scene-graph integration (replicate-only entities, pure-state
+# predictors) can skip the _capture_render_state / _apply_corrections
 # pair; render_state then defaults to a shadow snapshot and no scene write
 # happens via the corrections path.
 func _authority_tick(delta: float) -> void:
@@ -1370,6 +1464,17 @@ func _authority_tick(delta: float) -> void:
 	for redundant in input_redundancy_ring:
 		NetSession.send_packet(redundant.to_payload())
 
+	# Phase 4: canonical-pos snap before _simulate. The visible body sits at
+	# shadow.pos + offset between ticks (see end of this function); if we leave
+	# it there, move_and_slide integrates from the wrong start and the next
+	# shadow.pos diverges from the truth. Snap to canonical so _simulate runs
+	# in the authoritative frame, then we re-write the visible pos at the end.
+	# Gated on `body` resolved + a SMOOTHED_OFFSET pos channel existing — Phase 4
+	# default-empty body keeps current behavior. Offset stays at zero so the
+	# write is a no-op when nothing has been captured (pre-reconcile state).
+	if _body != null and _has_smoothed_offset_pos_channel and state_field_names.has(&"pos"):
+		(_body as Node3D).global_position = shadow_state.get(&"pos")
+
 	if host.has_method(&"_simulate"):
 		host._simulate(shadow_state, cmd, delta)
 		previous_cmd = cmd
@@ -1389,6 +1494,20 @@ func _authority_tick(delta: float) -> void:
 	_corrections_pass(delta)
 	if host.has_method(&"_apply_corrections"):
 		host._apply_corrections(render_state)
+
+	# Phase 4: decay the offset toward zero (per-channel exp rate), snap-clamp
+	# any axis that drifted past its snap_threshold, deadband-zero tiny axes,
+	# then re-write the visible pos onto the body. Renderer samples shadow+offset
+	# this frame; camera (grandchild of body, by convention) auto-inherits the
+	# offset. No reset_physics_interpolation per tick — both consecutive end-of-
+	# tick poses follow shadow+offset, so physics interp is continuous. Reset
+	# only fires when a snap-clamp event makes the offset jump (handled inside
+	# the helper).
+	if _body != null and _has_smoothed_offset_pos_channel and state_field_names.has(&"pos"):
+		var snapped: bool = _walk_smoothing_offset_pos_axes(delta, true)
+		(_body as Node3D).global_position = shadow_state.get(&"pos") + _smoothing_offset_pos
+		if snapped:
+			_call_reset_physics_interp_on_body()
 
 
 # Field-wise copy of a NetState. duplicate() would also work but bypasses
@@ -1468,6 +1587,13 @@ func _corrections_pass(delta: float) -> void:
 	var touched: Dictionary = {}
 	if schema != null:
 		for c in schema.corrections:
+			# Phase 4: SMOOTHED_OFFSET channels are owned by the framework's
+			# visible-offset path in _authority_tick / _reconcile_replay. The
+			# render→shadow lerp would erase the offset; mark the axes touched
+			# so the snap-untouched pass below doesn't stomp them either.
+			if c != null and c.mode == NetCorrection.Mode.SMOOTHED_OFFSET:
+				_mark_smoothed_offset_axes_touched(c, touched)
+				continue
 			_apply_correction_channel(c, delta, touched)
 	for fname in state_field_names:
 		if not touched.has(fname):
@@ -1485,6 +1611,84 @@ func _corrections_pass(delta: float) -> void:
 				snap_axes += ch
 		if snap_axes != "":
 			render_state.set(fname, _write_axes(rv, sv, snap_axes))
+
+
+# Phase 4: SMOOTHED_OFFSET channels participate in the touched-axis bookkeeping
+# (the framework owns the field's actual movement, but render_state must still
+# reflect shadow_state on those axes — the post-loop snap-untouched pass relies
+# on this). Mirrors the deadband path in _apply_correction_channel: snap
+# render_state to shadow on the claimed axes, record the touched set.
+func _mark_smoothed_offset_axes_touched(c: NetCorrection, touched: Dictionary) -> void:
+	if c.fields.is_empty():
+		return
+	for path in c.fields:
+		var parsed := _parse_field_path(path)
+		var field: String = parsed.field
+		var rv = render_state.get(field)
+		var sv = shadow_state.get(field)
+		var axes: String = parsed.axes if parsed.axes != "" else _axes_for_value(rv)
+		render_state.set(field, _write_axes(rv, sv, axes))
+		if not touched.has(field):
+			touched[field] = {}
+		for ch in axes:
+			touched[field][ch] = true
+
+
+# Phase 4: walk SMOOTHED_OFFSET-on-pos channels and update _smoothing_offset_pos
+# in place. Two callers:
+#   _authority_tick (do_decay = true, decay_delta = physics dt): per-tick
+#       exponential decay toward zero plus snap/deadband per axis.
+#   _reconcile_replay (do_decay = false): snap-clamp only; offset was just
+#       set to (pre_visible - new_shadow) and may exceed threshold on any axis.
+# Returns true if any axis was hard-snapped (caller resets physics interp on
+# the per-tick path; reconcile always resets unconditionally).
+func _walk_smoothing_offset_pos_axes(decay_delta: float, do_decay: bool) -> bool:
+	var snapped: bool = false
+	if schema == null:
+		return false
+	var off: Vector3 = _smoothing_offset_pos
+	for c in schema.corrections:
+		if c == null or c.mode != NetCorrection.Mode.SMOOTHED_OFFSET:
+			continue
+		var decay_alpha: float = 1.0 - exp(-c.smooth_rate * decay_delta) if do_decay else 0.0
+		for path in c.fields:
+			var parsed := _parse_field_path(path)
+			if parsed.field != "pos":
+				continue
+			var axes: String = parsed.axes if parsed.axes != "" else "xyz"
+			for ch in axes:
+				var idx: int = _AXIS_INDEX.get(ch, -1)
+				if idx < 0 or idx > 2:
+					continue
+				var v: float = off[idx]
+				if do_decay:
+					v = lerp(v, 0.0, decay_alpha)
+				if absf(v) > c.snap_threshold:
+					v = 0.0
+					snapped = true
+				elif absf(v) < c.deadband:
+					v = 0.0
+				off[idx] = v
+	_smoothing_offset_pos = off
+	return snapped
+
+
+# Phase 4: per-body-kind reset_physics_interpolation dispatch. Called on
+# discontinuous offset events (reconcile capture, per-tick snap-clamp). NONE /
+# unsupported kinds are a no-op. Mirrors the kind-dispatch in _rewind_body so
+# the framework owns interp-reset discipline regardless of body type.
+func _call_reset_physics_interp_on_body() -> void:
+	if _body == null:
+		return
+	match _body_kind:
+		BodyKind.CHAR_BODY:
+			(_body as CharacterBody3D).reset_physics_interpolation()
+		BodyKind.RIGID_BODY:
+			(_body as RigidBody3D).reset_physics_interpolation()
+		BodyKind.ANIMATABLE_BODY, BodyKind.NODE3D:
+			(_body as Node3D).reset_physics_interpolation()
+		BodyKind.NONE:
+			pass
 
 
 func _apply_correction_channel(c: NetCorrection, delta: float, touched: Dictionary) -> void:

@@ -1,9 +1,23 @@
 @tool
 class_name NetSchema extends Resource
 
-# Inspector-authored config for a NetPredictor (or NetReplicator/NetReliable
-# in later phases). Carries the state + command templates, the tick + snapshot
-# rates, per-field codec metadata, and the reconcile channels.
+# Inspector-authored config for a NetPredictor (or NetReliable in later
+# phases). Carries the state + command templates, the tick + snapshot rates,
+# per-field codec metadata, and the reconcile channels.
+
+
+# Phase 6.1: explicit lifecycle classifier. Replaces the previous implicit
+# command_template-null gate. Three roles:
+#   PREDICTED   — client-driven input + server reconcile. Players, vehicles.
+#                 Requires command_template; runs _authority_tick / _server_tick
+#                 / _proxy_tick branches; SMOOTHED_OFFSET corrections legal.
+#   REPLICATED  — server-state-only. AI, grenades, doors, world props. No
+#                 inputs; server calls host._capture_state each gated tick;
+#                 clients only run _proxy_tick. SMOOTHED_OFFSET illegal.
+#   LOCAL_ONLY  — cosmetic / pure-client. Particles, predicted UI. Framework
+#                 skips network branches entirely; predictor exists for state
+#                 lifecycle + host hook plumbing only.
+enum Archetype { PREDICTED, REPLICATED, LOCAL_ONLY }
 
 
 func _init() -> void:
@@ -130,9 +144,18 @@ static var _revalidate_scheduled: bool = false
 	set(v):
 		state_template = v
 		_schedule_emit_changed()
+## Lifecycle role for this entity. PREDICTED (default) for player-style
+## input-driven entities, REPLICATED for server-state-only entities (no inputs
+## — host implements `_capture_state`), LOCAL_ONLY for pure-client cosmetic
+## predictors. See Archetype enum docs above for the per-role behavior.
+@export var archetype: Archetype = Archetype.PREDICTED:
+	set(v):
+		archetype = v
+		_schedule_emit_changed()
+
 ## Default-valued instance of the NetCommand subclass (input packet). Cloned
 ## by NetPredictor on each tick; defaults seed unused fields. Leave unset
-## for non-input entities (replicate-only via NetReplicator).
+## for REPLICATED / LOCAL_ONLY schemas (server pushes state directly).
 @export var command_template: NetCommand:
 	set(v):
 		command_template = v
@@ -250,6 +273,8 @@ func validate() -> Array[ValidationIssue]:
 	issues.append_array(_validate_quant_ranges())
 	issues.append_array(_validate_correction_field_paths())
 	issues.append_array(_validate_correction_contradictions())
+	issues.append_array(_validate_correction_modes())
+	issues.append_array(_validate_archetype())
 	return issues
 
 
@@ -449,6 +474,63 @@ func _validate_correction_contradictions() -> Array[ValidationIssue]:
 					&"correction_contradiction",
 					"corrections[%s]" % str(c.name),
 					"always_snap and always_smooth are both true; pick one. Runtime will see always_snap win silently."))
+	return issues
+
+
+# Phase 4: SMOOTHED_OFFSET mode has strict structural requirements (only valid
+# on predicted entities, only on the 'pos' field for now). RENDER_LERP is the
+# default and has no extra rules. Flagged as ERROR because a misconfigured
+# SMOOTHED_OFFSET channel silently bypasses the corrections pass at runtime.
+func _validate_correction_modes() -> Array[ValidationIssue]:
+	var issues: Array[ValidationIssue] = []
+	for c in corrections:
+		if c == null or c.mode != NetCorrection.Mode.SMOOTHED_OFFSET:
+			continue
+		var loc: String = "corrections[%s]" % str(c.name)
+		if archetype != Archetype.PREDICTED:
+			issues.append(ValidationIssue.make(
+					ValidationIssue.Severity.ERROR,
+					&"correction_mode_requires_predicted",
+					loc,
+					"mode = SMOOTHED_OFFSET is only valid on PREDICTED schemas (input-driven entities with command_template). Set archetype = PREDICTED or switch the channel to RENDER_LERP."))
+		for fi in c.fields.size():
+			var path: String = c.fields[fi]
+			if path == "":
+				continue
+			var parsed := _split_field_path(path)
+			var fname: String = parsed.field
+			# Phase 4 scope: only 'pos' is offset-able. Extend this set when
+			# generalizing to velocity / rotation (see netcode-synchronizer.md §10).
+			if fname != "pos":
+				issues.append(ValidationIssue.make(
+						ValidationIssue.Severity.ERROR,
+						&"correction_mode_field_not_allowed",
+						"%s.fields[%d]" % [loc, fi],
+						"mode = SMOOTHED_OFFSET only supports field 'pos' (Phase 4 scope). Got '%s'. Split into a RENDER_LERP channel or wait for the generalization."
+								% fname))
+	return issues
+
+
+# Phase 6.1: archetype ↔ template consistency. PREDICTED requires a
+# command_template (codec + input fan-out need it); REPLICATED + LOCAL_ONLY
+# must leave command_template null (stale template is dead config — the
+# subscriber path skips it but the inspector hides what's actually used).
+# Flagged as ERROR for PREDICTED-without-cmd (snapshot codec dies on entity
+# spawn) and WARNING for REPLICATED-with-cmd (will be silently ignored).
+func _validate_archetype() -> Array[ValidationIssue]:
+	var issues: Array[ValidationIssue] = []
+	if archetype == Archetype.PREDICTED and command_template == null:
+		issues.append(ValidationIssue.make(
+				ValidationIssue.Severity.ERROR,
+				&"archetype_missing_command_template",
+				"archetype",
+				"archetype = PREDICTED requires a command_template. Either set one or change archetype to REPLICATED (server-state-only) / LOCAL_ONLY (no network)."))
+	elif archetype != Archetype.PREDICTED and command_template != null:
+		issues.append(ValidationIssue.make(
+				ValidationIssue.Severity.WARNING,
+				&"archetype_dead_command_template",
+				"command_template",
+				"command_template is set but archetype = %s ignores it. Clear command_template or change archetype to PREDICTED." % Archetype.keys()[archetype]))
 	return issues
 
 
@@ -675,6 +757,10 @@ func compute_hash() -> int:
 	parts.append("command_class=%s" % (command_script.resource_path if command_script else ""))
 	parts.append("tick_hz=%d" % tick_hz)
 	parts.append("snapshot_hz=%d" % snapshot_hz)
+	# Phase 6.1: archetype affects framework dispatch (server tick body,
+	# proxy buffer behavior, input subscription). Hash mismatch surfaces
+	# mis-tagged schemas across builds before they cause silent divergence.
+	parts.append("archetype=%d" % int(archetype))
 	# Walk fields in sorted key order so the hash is independent of dictionary
 	# insertion order. The wire codec walks state_field_names (script
 	# declaration order, also deterministic) but for hashing we just need

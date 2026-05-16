@@ -37,7 +37,7 @@ func test_find_correction_all_three_present() -> void:
 	var schema := load("res://entities/player/player_schema.tres") as NetSchema
 	assert_not_null(schema.find_correction(&"horizontal"))
 	assert_not_null(schema.find_correction(&"vertical"))
-	assert_not_null(schema.find_correction(&"velocity_horizontal"))
+	assert_not_null(schema.find_correction(&"velocity"))
 
 
 func test_correction_field_paths() -> void:
@@ -45,12 +45,15 @@ func test_correction_field_paths() -> void:
 	var horiz := schema.find_correction(&"horizontal")
 	assert_eq(horiz.fields.size(), 1)
 	assert_eq(horiz.fields[0], "pos.xz")
+	assert_eq(horiz.mode, NetCorrection.Mode.SMOOTHED_OFFSET)
 
 	var vert := schema.find_correction(&"vertical")
 	assert_eq(vert.fields[0], "pos.y")
+	assert_eq(vert.mode, NetCorrection.Mode.SMOOTHED_OFFSET)
 
-	var vel_h := schema.find_correction(&"velocity_horizontal")
-	assert_eq(vel_h.fields[0], "velocity.xz")
+	var vel := schema.find_correction(&"velocity")
+	assert_eq(vel.fields[0], "velocity")
+	assert_true(vel.always_snap)
 
 
 # ---- validate() ----
@@ -64,6 +67,10 @@ class _ProbeState extends NetState:
 func _probe_schema() -> NetSchema:
 	var s := NetSchema.new()
 	s.id = 4242
+	# Phase 6.1: REPLICATED keeps the probe consistent without needing a
+	# command_template. Tests that care about archetype validation set it
+	# explicitly per test.
+	s.archetype = NetSchema.Archetype.REPLICATED
 	s.state_template = _ProbeState.new()
 	var fpos := NetStateField.new()
 	var fhp := NetStateField.new()
@@ -182,6 +189,48 @@ func test_validate_flags_contradictory_correction() -> void:
 	var hit: ValidationIssue = _find_issue(s.validate(), &"correction_contradiction")
 	assert_not_null(hit)
 	assert_eq(hit.severity, ValidationIssue.Severity.ERROR)
+
+
+func test_validate_archetype_predicted_requires_command_template() -> void:
+	var s := _probe_schema()
+	s.archetype = NetSchema.Archetype.PREDICTED
+	# command_template is null (probe schema never sets one) — must ERROR.
+	var hit: ValidationIssue = _find_issue(s.validate(), &"archetype_missing_command_template")
+	assert_not_null(hit, "PREDICTED + null command_template should error")
+	assert_eq(hit.severity, ValidationIssue.Severity.ERROR)
+
+
+func test_validate_archetype_replicated_with_command_template_warns() -> void:
+	var s := _probe_schema()
+	# Probe is REPLICATED by default; attach a stale command_template.
+	var cmd := NetCommand.new()
+	s.command_template = cmd
+	var hit: ValidationIssue = _find_issue(s.validate(), &"archetype_dead_command_template")
+	assert_not_null(hit, "REPLICATED + non-null command_template should warn")
+	assert_eq(hit.severity, ValidationIssue.Severity.WARNING)
+
+
+func test_validate_smoothed_offset_only_on_predicted() -> void:
+	var s := _probe_schema()
+	# Probe is REPLICATED — SMOOTHED_OFFSET on pos is illegal.
+	var c := NetCorrection.new()
+	c.name = &"smooth_pos"
+	c.fields = PackedStringArray(["pos"])
+	c.mode = NetCorrection.Mode.SMOOTHED_OFFSET
+	s.corrections = [c]
+	var hit: ValidationIssue = _find_issue(s.validate(), &"correction_mode_requires_predicted")
+	assert_not_null(hit, "SMOOTHED_OFFSET on REPLICATED should error")
+	assert_eq(hit.severity, ValidationIssue.Severity.ERROR)
+
+
+func test_player_schema_archetype_is_predicted() -> void:
+	var schema := load("res://entities/player/player_schema.tres") as NetSchema
+	assert_eq(schema.archetype, NetSchema.Archetype.PREDICTED, "player must be PREDICTED")
+
+
+func test_grenade_schema_archetype_is_replicated() -> void:
+	var schema := load("res://entities/grenade/grenade_schema.tres") as NetSchema
+	assert_eq(schema.archetype, NetSchema.Archetype.REPLICATED, "grenade must be REPLICATED")
 
 
 func test_validate_strings_filters_by_severity() -> void:

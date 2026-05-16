@@ -3,13 +3,16 @@ extends CharacterBody3D
 
 # PlayerController hosts NetPredictor's hook callbacks. The NetPredictor child
 # node (authored in player.tscn) owns the physics tick and per-role dispatch
-# (authority / server / proxy). The framework now also owns:
+# (authority / server / proxy). The framework now owns:
 #   - correction smoothing (driven by schema.corrections; render_state flows
 #     into _apply_state),
 #   - server-side input fan-out (NetPredictor subscribes to
-#     NetServer.handle_net_command itself and filters by (schema_id, entity_id, owner_id)).
-# What stays here: input gathering, the dual-context (VISUAL/GAME) state
-# machines + their movement helpers, camera glue, and proxy interp wiring.
+#     NetServer.handle_net_command itself and filters by (schema_id, entity_id, owner_id)),
+#   - body rewind + visible-vs-canonical pos offset (Phase 4): NetPredictor.body
+#     points at this controller (= "."), framework canonical-snaps before
+#     _simulate and writes a smoothed visible pos after _apply_corrections.
+# What stays here: input gathering, the logic+visual state machines + their
+# movement helpers, camera glue, and proxy interp wiring.
 
 signal reconcile_network_debug(delta_pos: Vector3, delta_vel: Vector3, unacked_inputs: SequenceRingBuffer)
 
@@ -34,7 +37,6 @@ const THROW_POWER := 12.0
 @onready var animation_player: AnimationPlayer = $AnimationPlayer
 @onready var animation_tree: AnimationTree = $AnimationTree
 @onready var camera_animation_player: AnimationPlayer = $CameraAnimationPlayer
-@onready var game_body: CharacterBody3D = $GameController
 @onready var crouch_shapecast: ShapeCast3D = %CrouchShapeCast3D
 
 var is_authority: bool:
@@ -45,31 +47,12 @@ var is_replaying_inputs: bool:
 
 var last_grounded_height: float = 0.0
 
-var context := Enums.IntegrationContext.VISUAL
 var input := PlayerInputContext.new()
 
 # NetPredictor child node owns the tick. Authored in player.tscn so the schema
 # is inspector-set and the framework lifecycle attaches automatically. Hooks
 # below are duck-typed by NetPredictor via has_method().
 @onready var _net: NetPredictor = $NetPredictor
-
-# Proxy properties so state machines and external scripts keep reading
-# `player.game_*` while the data lives on NetPredictor.
-var game_transform: Transform3D:
-	get: return _net.game_transform
-	set(v): _net.game_transform = v
-var game_position: Vector3:
-	get: return _net.game_transform.origin
-	set(v): _net.game_position = v
-var game_velocity: Vector3:
-	get: return _net.game_velocity
-	set(v): _net.game_velocity = v
-var game_movement_state_id: int:
-	get: return _net.game_movement_state_id
-	set(v): _net.game_movement_state_id = v
-var game_sequence_id: int:
-	get: return _net.game_sequence_id
-	set(v): _net.game_sequence_id = v
 
 var _owner_id: int
 
@@ -161,28 +144,24 @@ func _enter_tree() -> void:
 
 
 func _on_shadow_state_applied() -> void:
+	# Server-side lag-comp rewind / restore: push pos+velocity onto the root
+	# body so any non-analytical query at the rewound tick sees the right pose.
+	# (ShootHandler / Grenade hit detection are analytical against
+	# shadow_state.pos, so this is belt-and-suspenders today; kept for any
+	# future physics-based path that wants the scene rewound.)
 	var s: PlayerState = _net.shadow_state as PlayerState
 	if s == null:
 		return
 	global_position = s.pos
-	game_body.global_position = s.pos
-	# Predictor's sim transform also needs to follow — otherwise the next
-	# _simulate writes state.pos = game_position (= stale value, e.g. graveyard
-	# after respawn) and the snapshot reverts the world back.
-	game_position = s.pos
-	game_velocity = s.velocity
+	velocity = s.velocity
 
 
 func _ready():
 	print("Player #%d spawned, named %s!" % [_owner_id, name])
 
-	add_collision_exception_with(game_body)
-	game_body.add_collision_exception_with(self)
 	crouch_shapecast.add_exception(self)
 
 	global_position = Constants.MAP_SPAWN
-	game_position = global_position
-	game_body.global_position = game_position
 
 	if is_authority:
 		camera.make_current()
@@ -191,8 +170,6 @@ func _ready():
 		call_deferred("remove_child", %GUI)
 		call_deferred("remove_child", $EscapeMenu)
 		camera.call_deferred("remove_child", $CameraController/Camera3D/ReflectionProbe)
-		if not NetSession.is_server:
-			call_deferred("remove_child", $GameController)
 
 
 func _unhandled_input(event):
@@ -362,7 +339,7 @@ func _update_tiredness_release_gate() -> void:
 	if cur == &"CrouchMovementState" or cur == &"ProneMovementState":
 		_movement_started_us = 0
 		return
-	var horiz: float = Vector2(game_velocity.x, game_velocity.z).length()
+	var horiz: float = Vector2(velocity.x, velocity.z).length()
 	if horiz > 0.1:
 		if _movement_started_us == 0:
 			_movement_started_us = Time.get_ticks_usec()
@@ -470,9 +447,8 @@ func _simulate(state: PlayerState, cmd: PlayerInput, delta: float) -> void:
 	if state.health <= 0:
 		state.pos = Constants.GRAVEYARD
 		state.velocity = Vector3.ZERO
-		game_position = Constants.GRAVEYARD
-		game_velocity = Vector3.ZERO
-		game_transform.origin = Constants.GRAVEYARD
+		global_position = Constants.GRAVEYARD
+		velocity = Vector3.ZERO
 		state.look = cmd.look_abs
 		# state.movement_state / peek_state / *_progress all stay at last value
 		# so the proxy/visual representation doesn't churn on the graveyard.
@@ -484,13 +460,16 @@ func _simulate(state: PlayerState, cmd: PlayerInput, delta: float) -> void:
 	input.prev_input_packet = _net.previous_cmd if _net.previous_cmd != null else cmd
 	input.input_packet = cmd
 
-	context = Enums.IntegrationContext.GAME
-	game_transform.basis = Basis.from_euler(Vector3(0, cmd.look_abs.y, 0))
+	# Body yaw drives wish-dir math in update_movement; pitch lives on the
+	# camera (not the body). Phase 4 has already canonical-snapped the body to
+	# shadow.pos before this hook ran, so move_and_slide integrates from the
+	# authoritative origin.
+	global_basis = Basis.from_euler(Vector3(0, cmd.look_abs.y, 0))
 	%MovementStateMachine.run_logic(delta)
 	%PeekStateMachine.run_logic(delta)
 
-	state.pos = game_position
-	state.velocity = game_velocity
+	state.pos = global_position
+	state.velocity = velocity
 	state.look = cmd.look_abs
 	state.movement_state = %MovementStateMachine.get_logic_state_id()
 	state.peek_state = %PeekStateMachine.get_logic_state_id()
@@ -499,17 +478,10 @@ func _simulate(state: PlayerState, cmd: PlayerInput, delta: float) -> void:
 	state.peek_progress = %PeekStateMachine.peek_progress
 
 
-# Snap the sim representation (game_* + state machine logic pointers) to
-# state ahead of replay. Without this, replay's first _simulate call would
-# advance forward from the last predicted tick instead of the freshly-acked
-# server tick.
+# Snap the state-machine + animation-progress representation to state ahead of
+# replay. Framework rewinds the body (transform + velocity) before this hook
+# runs, so all we restore here is non-body sim state.
 func _load_simulation_state(state: PlayerState) -> void:
-	game_transform.origin = state.pos
-	game_transform.basis = Basis.from_euler(Vector3(0, state.look.y, 0))
-	game_velocity = state.velocity
-	game_movement_state_id = state.movement_state
-
-	context = Enums.IntegrationContext.GAME
 	# Restore animation progress BEFORE set_logic_state_by_id. Reconcile
 	# semantics: the replay must start from the *server-confirmed* state, not
 	# the client's stale prediction. Without this restore, replay's first
@@ -540,8 +512,6 @@ func _apply_state(state: PlayerState) -> void:
 	if state.health <= 0:
 		global_position = Constants.GRAVEYARD
 		velocity = Vector3.ZERO
-		game_position = Constants.GRAVEYARD
-		game_velocity = Vector3.ZERO
 		return
 	if NetSession.is_server:
 		global_position = state.pos
@@ -559,30 +529,27 @@ func _apply_state(state: PlayerState) -> void:
 		animation_tree.set("parameters/Add Peek/add_amount",
 				-1.0 if state.peek_progress < 0.0 else 1.0)
 		return
-	context = Enums.IntegrationContext.VISUAL
 	update_camera(state.look)
 	%MovementStateMachine.sync_visual()
 	%PeekStateMachine.sync_visual()
 
 
-# Animation / visual SM physics. Runs after _apply_state; reads input bound by
-# _simulate. Skipped on the server (headless).
+# Animation-progress / SFX advance. Phase 5: visual_physics no longer runs
+# move_and_slide — the framework writes the visible pos via the smoothing
+# offset path. State scripts retain visual_physics only for animation seek
+# updates (CrouchTimeSeek, ProneTimeSeek, etc.). Skipped on the server.
 func _visualize(delta: float, _state: PlayerState) -> void:
 	if NetSession.is_server:
 		return
-	context = Enums.IntegrationContext.VISUAL
 	%MovementStateMachine.run_visual(delta)
 	%PeekStateMachine.run_visual(delta)
 
 
 # Bridge scene -> typed Resource for the framework's corrections pass. Called
-# *after* visual physics has mutated global_position / velocity, so render
-# captures the visual-integrated state. The framework then lerps this toward
-# shadow_state per schema.corrections, and we get the smoothed result back via
-# _apply_corrections.
+# after _visualize, before _corrections_pass. Phase 5: pos/velocity are owned
+# by the framework's SMOOTHED_OFFSET path (see schema.corrections) so the host
+# only captures animation-progress / state-machine ids.
 func _capture_render_state(state: PlayerState) -> void:
-	state.pos = global_position
-	state.velocity = velocity
 	state.look = _look_abs
 	state.movement_state = %MovementStateMachine.get_logic_state_id()
 	state.peek_state = %PeekStateMachine.get_logic_state_id()
@@ -591,11 +558,10 @@ func _capture_render_state(state: PlayerState) -> void:
 	state.peek_progress = %PeekStateMachine.peek_progress
 
 
-# Write the framework-smoothed render_state back to the scene. Symmetric to
-# _capture_render_state. Skipped on the server (no smoothing path there).
-# Emits the debug signal here so subscribers see the same pre/post deltas the
-# old hand-coded loop produced.
-func _apply_corrections(state: PlayerState) -> void:
+# Phase 5: framework writes the visible body pos via the smoothing-offset
+# path; this hook is debug-only. Emit the reconcile signal so the network
+# debug overlay still sees pre-corrections deltas.
+func _apply_corrections(_state: PlayerState) -> void:
 	if NetSession.is_server:
 		return
 	var shadow: PlayerState = _net.shadow_state as PlayerState
@@ -604,31 +570,6 @@ func _apply_corrections(state: PlayerState) -> void:
 				shadow.pos - global_position,
 				shadow.velocity - velocity,
 				_net.unacked_inputs)
-	#if is_authority:
-		#var pre_pos := global_position
-		#var pre_vel := velocity
-		#var delta_xz := Vector2(state.pos.x - pre_pos.x, state.pos.z - pre_pos.z).length()
-		#var delta_y := absf(state.pos.y - pre_pos.y)
-		#var delta_v := (state.velocity - pre_vel).length()
-		## CORR-APPLY: ONLY when corrections actually moved the scene. At 0 ping should be silent.
-		#if delta_xz > 0.0005 or delta_y > 0.0005 or delta_v > 0.0005:
-			#print("[CORR-APPLY f=%d] dxz=%.4f dy=%.4f dv=%.4f" % [
-					#Engine.get_physics_frames(), delta_xz, delta_y, delta_v])
-		## Consolidated 2 Hz dump.
-		#if Engine.get_physics_frames() % 30 == 0 and shadow != null:
-			#print("[DUMP f=%d] live_crouch=%.4f render_crouch=%.4f shadow_crouch=%.4f move_st=%d peek=%.4f peek_st=%d shadow.move=%d shadow.pos=%.2f,%.2f,%.2f scene.pos=%.2f,%.2f,%.2f vis_st=%s log_st=%s" % [
-					#Engine.get_physics_frames(),
-					#%MovementStateMachine.crouch_progress,
-					#state.crouch_progress,
-					#shadow.crouch_progress, state.movement_state,
-					#state.peek_progress, state.peek_state,
-					#shadow.movement_state,
-					#shadow.pos.x, shadow.pos.y, shadow.pos.z,
-					#global_position.x, global_position.y, global_position.z,
-					#%MovementStateMachine._visual_state.name,
-					#%MovementStateMachine._logic_state.name])
-	global_position = state.pos
-	velocity = state.velocity
 
 
 # Remote proxy: framework has already fetched the interp pair from the state
@@ -700,14 +641,11 @@ func set_parameters(speed: float, acceleration: float, strafe_scale: float = 1.0
 	_strafe_scale = strafe_scale
 
 
-func on_floor(ctx: Enums.IntegrationContext) -> bool:
-	if ctx == Enums.IntegrationContext.VISUAL:
-		return is_on_floor()
-	else:
-		var _on_floor := game_body.is_on_floor()
-		if _on_floor:
-			last_grounded_height = game_body.global_position.y
-		return _on_floor
+func on_floor() -> bool:
+	var grounded := is_on_floor()
+	if grounded:
+		last_grounded_height = global_position.y
+	return grounded
 
 
 # persistent local vars for performance
@@ -741,25 +679,20 @@ func update_camera(look_abs: Vector2) -> void:
 	_y_mouse_input = 0.0
 
 
-func update_gravity(delta: float, ctx: Enums.IntegrationContext) -> void:
-	if ctx == Enums.IntegrationContext.VISUAL:
-		velocity += get_gravity() * delta
-	else:
-		game_velocity += get_gravity() * delta
+func update_gravity(delta: float) -> void:
+	velocity += get_gravity() * delta
 
 
-func update_movement(delta: float, ctx: Enums.IntegrationContext) -> void:
+func update_movement(delta: float) -> void:
 	var _input_dir := Vector2(
 		input.input_packet.move_left_right * _strafe_scale,
 		input.input_packet.move_forward_backward,
 	)
 
-	var _basis := transform.basis if ctx == Enums.IntegrationContext.VISUAL else game_transform.basis
-	var wish_dir := (_basis * Vector3(_input_dir.x, 0, _input_dir.y)).normalized()
+	var wish_dir := (transform.basis * Vector3(_input_dir.x, 0, _input_dir.y)).normalized()
 
-	var grounded := on_floor(ctx)
-	var vel := velocity if ctx == Enums.IntegrationContext.VISUAL else game_velocity
-	var horizontal_vel := Vector3(vel.x, 0, vel.z)
+	var grounded := on_floor()
+	var horizontal_vel := Vector3(velocity.x, 0, velocity.z)
 	var speed := horizontal_vel.length()
 	var friction := FRICTION if grounded else AIR_FRICTION
 
@@ -774,27 +707,12 @@ func update_movement(delta: float, ctx: Enums.IntegrationContext) -> void:
 	elif grounded and speed < STOP_SPEED:
 		horizontal_vel = Vector3.ZERO
 
-	if ctx == Enums.IntegrationContext.VISUAL:
-		velocity.x = horizontal_vel.x
-		velocity.z = horizontal_vel.z
-	else:
-		game_velocity.x = horizontal_vel.x
-		game_velocity.z = horizontal_vel.z
+	velocity.x = horizontal_vel.x
+	velocity.z = horizontal_vel.z
 
 
-const MAX_SLIDES := 4 # Engine.max_physics_steps_per_frame
-
-func update_velocity(ctx: Enums.IntegrationContext) -> void:
-	if ctx == Enums.IntegrationContext.VISUAL:
-		move_and_slide()
-	else:
-		game_body.velocity = game_velocity
-		game_body.global_transform = game_transform
-
-		game_body.move_and_slide()
-
-		game_velocity = game_body.velocity
-		game_transform = game_body.global_transform
+func update_velocity() -> void:
+	move_and_slide()
 
 
 func despawn() -> void:
@@ -811,7 +729,6 @@ func _set_dead_visual(dead: bool) -> void:
 		return
 	_dead_visual_state = dead
 	var vc: Node = get_node_or_null("VisualCollider")
-	var gc: Node = get_node_or_null("GameController")
 	# First-person hands (under camera) — hide them too so dead spectator camera
 	# isn't waving floating hands. (Local death also drops a full-screen black
 	# overlay in the HUD, so this is mostly belt-and-suspenders.)
@@ -819,8 +736,6 @@ func _set_dead_visual(dead: bool) -> void:
 	var los: Node = get_node_or_null("CameraController/Camera3D/LineOfSightMesh")
 	if vc != null:
 		vc.visible = not dead
-	if gc != null:
-		gc.visible = not dead
 	if fp_hands != null:
 		fp_hands.visible = not dead
 	if los != null:
