@@ -1,8 +1,20 @@
 # NetSynchronizer — Body-Aware Prediction Extension
 
-Status: design draft. Companion to `netcode-design.md`. No implementation yet.
+Status: **Phases 1 + 2 shipped. Phase 3 (player single-body migration) replanned as Phase 4 after discovering the dual-body smoothing dependency.** Companion to `netcode-design.md`. Active on branch `refactor/netcode-synchronizer` (worktree at `/Users/rholmdahl/Documents/game/first-test-synchronizer`).
 
 This doc proposes extending `NetPredictor` (or extracting a `NetSynchronizer` peer) so the framework owns body-rewind semantics across multiple body shapes — eliminating the host's dual-`CharacterBody3D` workaround for prediction-with-replay without forcing a hand-rolled `move_and_slide` reimplementation.
+
+## Phase tracker
+
+| Phase | Status | Commit | Scope |
+|---|---|---|---|
+| 1. NetPredictor.body export + framework rewind primitive | ✅ done | `b826a8b` | Opt-in `body: NodePath`, `BodyKind` enum, `_rewind_body` for CharacterBody3D / RigidBody3D / AnimatableBody3D / Node3D, wired into `_reconcile_replay`. No behavior change for existing entities (default empty path). |
+| 2. Grenade → NetReplicator | ✅ done | `f483cc3` | Grenade moved off NetPredictor + manual broadcast. NetReplicator gained server-tick gating; `_capture_state(state, delta)` contract. |
+| 3. ~~Player single-body migration (naive)~~ | ❌ halted | — | Tracing revealed visual `move_and_slide` in `_visualize` is the smoothing mechanism, not redundant work. Original Phase 3 plan would lose reconcile smoothing. Replaced by Phase 4 below. |
+| 4. Framework-owned visual smoothing offset | 🚧 planned | — | Add `_smoothing_offset_pos` + decay + body-shuffle to NetPredictor so single-body prediction preserves reconcile smoothing. See §8 below. |
+| 5. Player migration to single body | 🚧 planned | — | After Phase 4: set `body = ^"."` on player, drop GameController + duplicate animation tracks + `_visualize` move_and_slide + cache proxy props. See §10. |
+
+**Test parity (Phase 1 + 2):** 117/118 in worktree, identical to main. The 1 pre-existing failure (`test_player_input_fields_user_authored: missing field: last_received_tick`) is unrelated to this work.
 
 ---
 
@@ -317,62 +329,238 @@ What stays:
 
 ---
 
-## 8. Migration plan
+## 8. Phase 4 — framework-owned visual smoothing offset
 
-### Phase 1: framework opt-in (no behavior change)
+### 8.1 What killed the naive Phase 3
 
-- Add `body: NodePath` export + `_resolve_body` + `_rewind_body` to `NetPredictor`
-- Wire `_reconcile_replay` to call `_rewind_body` when `_body != null`
-- Add editor validation: warn if `body` resolves to a non-supported type
-- All existing entities (player, grenade) keep `body` empty → zero behavior change
-- Ship + verify nothing regresses
+The original Phase 3 plan (set `body = ^"."` on player, drop `_visualize`'s `move_and_slide`, framework rewinds root body during reconcile) **looks** like it should work because §1 of this doc established that intra-tick body churn is invisible to render.
 
-### Phase 2: grenade migrates to NetReplicator (orthogonal cleanup)
+Reading the actual code path during a reconcile event showed the problem: **the visual `move_and_slide` in `_visualize` is the smoothing mechanism, not redundant work.**
 
-- Switch grenade.tscn to use NetReplicator instead of NetPredictor
-- Replace manual `_net.server_broadcast_snapshot(0)` with `_capture_state` hook
-- Schema stays the same; framework calls `_capture_state` each gated tick
-- Verify wire format unchanged
+The dual-body trick today:
 
-### Phase 3: player migrates to single body
+1. `_simulate` (GAME ctx) runs `game_body.move_and_slide()` → `shadow.pos`. This is the canonical predicted trajectory.
+2. `_visualize` (VISUAL ctx) runs `move_and_slide()` on the root body **independently** — same wishdir, same gravity, same friction, but starting from the root's *own* previous position.
+3. `_capture_render_state` reads the root body into `render_state`.
+4. `_corrections_pass` lerps `render_state` toward `shadow_state` per `NetCorrection` channel config.
+5. `_apply_corrections` writes `render_state` back to the root body.
 
-- Set `NetPredictor.body = ^"."` (the root)
-- Refactor `_simulate` to use root body's `move_and_slide` directly
-- Refactor `_load_simulation_state` to only restore SM state (framework does body)
-- Drop `_visualize`'s call to `move_and_slide` (visual integration redundant once shadow drives the only physics)
-- Delete `GameController` from scene + its collider + duplicate animation tracks
-- Adjust correction lerp targets if they were tuned for dual integration
-- Smoke test reconcile under bad-net presets (`broadband`, `wifi-light`, packet loss)
+At 0 ping the two bodies produce identical trajectories (deterministic given identical inputs), so render = shadow, corrections lerp is identity, no work happens — visually identical to single-body.
 
-### Phase 4 (optional, future)
+**Under reconcile:** `_reconcile_replay` rewinds `game_body` to the acked pos and replays K inputs → `game_body` teleports to new-predicted-current. **Root body is untouched.** Next tick the root continues from where the player was *seeing* themselves (= old-predicted), the corrections pass sees the delta against new-shadow, and the lerp pulls the root toward shadow over many ticks. That's the smoothing.
+
+Naive Phase 3 collapses this: with one body, `_capture_render_state` reads `body.global_position` which is the *post-reconcile* position. `render_state = shadow_state` always → corrections are identity → reconcile becomes a visible visual snap. Players would see themselves teleport on every snapshot mismatch.
+
+### 8.2 The visual-offset pattern (CS:GO / Source equivalent)
+
+Replace the parallel-body smoothing with a single vector of state on `NetPredictor`:
+
+```gdscript
+# Authority-only state, additive to shadow.pos when writing the body.
+var _smoothing_offset_pos: Vector3 = Vector3.ZERO
+```
+
+**Per-tick invariant** (authority): `body.global_position = shadow.pos + _smoothing_offset_pos`. At 0 ping with no reconcile the offset stays zero — body sits exactly at shadow, identical to single-body behavior.
+
+**Per-tick decay:**
+
+```gdscript
+_smoothing_offset_pos = _smoothing_offset_pos.lerp(
+    Vector3.ZERO,
+    1.0 - exp(-decay_rate * delta))
+```
+
+**Reconcile preservation** — this is the load-bearing move:
+
+```gdscript
+# In _reconcile_replay, BEFORE the framework rewinds the body:
+var pre_visible_pos: Vector3 = body.global_position
+
+# Framework rewinds body to shadow_acked + runs replay loop.
+# After replay: shadow.pos = new_predicted_current, body.pos = new_predicted_current.
+
+# Compute offset that preserves visible pose:
+_smoothing_offset_pos = pre_visible_pos - shadow.pos
+
+# Optional safety: huge desyncs hard-snap instead of dragging
+if _smoothing_offset_pos.length() > snap_threshold:
+    _smoothing_offset_pos = Vector3.ZERO
+
+# Body returns to where the player was seeing themselves:
+body.global_position = shadow.pos + _smoothing_offset_pos
+```
+
+Over the next N ticks the offset decays to zero → body smoothly converges from old-predicted toward new-predicted trajectory. This is **structurally identical** to today's dual-body smoothing, just stored as one vector instead of as a parallel scene-graph trajectory.
+
+### 8.3 Per-tick rhythm — the one subtle bit
+
+`move_and_slide()` reads `body.global_position` as its integration start. If we leave the body at `shadow.pos + offset` (visible pos), the next `_simulate` integrates from the wrong start and `shadow.pos` diverges from the canonical predicted trajectory.
+
+The framework does a tiny body shuffle around each `_simulate`:
+
+```gdscript
+func _authority_tick(delta):
+    # Snap body to canonical so move_and_slide integrates from the truth
+    body.global_position = shadow.pos
+    # Host integrates: writes velocity, calls move_and_slide, updates shadow.pos
+    host._simulate(shadow, cmd, delta)
+    # body now at new shadow.pos
+    
+    # Decay offset
+    _smoothing_offset_pos = _smoothing_offset_pos.lerp(
+        Vector3.ZERO, 1.0 - exp(-decay_rate * delta))
+    
+    # Snap body back to visible
+    body.global_position = shadow.pos + _smoothing_offset_pos
+    body.reset_physics_interpolation()
+    
+    # Host animations / visual SMs — body pos is now visible-pos
+    host._apply_state(shadow)
+    host._visualize(delta, shadow)
+```
+
+Two cheap property writes per tick. Compared to dual-body the savings are:
+
+- 1 body removed from broadphase
+- 1 `move_and_slide()` removed per tick (the VISUAL one)
+- 0 animation-track duplication
+- 0 `add_collision_exception_with` bookkeeping
+- 0 host-side `game_*` proxy properties
+
+Net win in CPU and scene complexity. The dual-body wasn't paying for itself except as the smoothing mechanism, and the offset variable replicates that mechanism in 5 lines.
+
+### 8.4 Framework-owned vs game-owned
+
+**Framework owns:**
+- `_smoothing_offset_pos` lifecycle (init, decay, reconcile capture, snap-clamp)
+- The body-position shuffle around `_simulate`
+- `reset_physics_interpolation()` calls at the shuffle points
+- Snap-on-huge-divergence threshold
+
+**Game still owns:**
+- `_simulate` body — velocity math, gravity, `move_and_slide()` call (framework can't know which integrator)
+- `_apply_state` — animations, camera glue, visual SM sync
+- Schema config — decay rate + snap threshold (lives in a `NetCorrection` channel for `pos`)
+- Per-field opt-in semantics
+
+**No game-specific code for the smoothing itself.** Every predicted entity (player, future vehicles, anything client-authoritative-with-prediction) gets it free.
+
+### 8.5 Integration with existing `NetCorrection` config
+
+The existing channel resource already has the right knobs:
+
+```
+NetCorrection {
+    name: "horizontal"
+    fields: ["pos.xz"]
+    snap_threshold: 2.0   # offset magnitude beyond which we hard-snap
+    smooth_rate: 8.0      # exponential decay rate
+    deadband: 0.005       # below this, just zero the offset
+}
+```
+
+The framework reinterprets these as offset-decay knobs when a new mode flag (`SMOOTHED_OFFSET` vs the existing `RENDER_LERP`) is set on the channel. Existing math (`exp(-smooth_rate * delta)` lerp factor, snap_threshold gate) carries over with semantics preserved — just driven from one offset variable instead of a separate render_state field.
+
+Open question: do we add a `mode` enum on `NetCorrection` or default predicted entities to `SMOOTHED_OFFSET` and leave server-state-only entities on `RENDER_LERP`? Probably explicit enum on the channel; predicted player and future vehicles set it; grenade (server-state) leaves it.
+
+### 8.6 Concrete framework changes for Phase 4
+
+In `addons/netcode/components/net_predictor.gd`:
+
+1. Add `var _smoothing_offset_pos: Vector3 = Vector3.ZERO` (authority-only).
+2. Add the body shuffle around `_simulate` inside `_authority_tick` (~10 lines).
+3. In `_reconcile_replay`: capture `pre_visible_pos` before the existing `_rewind_body` call; after the replay loop, compute `_smoothing_offset_pos = pre_visible_pos - shadow.pos`, snap-clamp, and re-write body.
+4. Per-tick decay step inside `_authority_tick`.
+5. Editor warning when a `SMOOTHED_OFFSET` correction channel exists but `body` is unset.
+
+In `addons/netcode/resources/net_correction.gd`:
+
+1. Add `enum Mode { RENDER_LERP, SMOOTHED_OFFSET }` and `@export var mode: Mode = Mode.RENDER_LERP`.
+2. Update validation: `SMOOTHED_OFFSET` channels must only reference fields named in a fixed set (`pos` for now; later `velocity` / `rotation_quat` if generalized).
+
+Optional generalization for later: `_smoothing_offsets: Dictionary[StringName, Variant]` keyed by field name so velocity / rotation can opt in. Keep Phase 4 scoped to `pos` only.
+
+---
+
+## 9. Phase 5 — player migration to single body
+
+After Phase 4 lands, the player migrates with these specific deletions:
+
+In `godot/controllers/player/player.tscn`:
+
+- Set `NetPredictor.body = NodePath(".")` (= root PlayerController)
+- Delete the `[node name="GameController"]` block and all child nodes (`GameCollider`, `PlaceholderMesh`, `CrouchShapeCast3D`)
+- Delete duplicate animation tracks in Crouch / PeekLeft / PeekRight / Prone2 / RESET animations:
+  - `GameController/GameCollider:shape:height`
+  - `GameController/GameCollider:position`
+  - `GameController/GameCollider:rotation`
+  - `GameController/GameCollider/PlaceholderMesh:mesh:height`
+
+In `godot/controllers/player/player.gd`:
+
+- Delete `@onready var game_body` + all `add_collision_exception_with(game_body)` calls
+- Delete `game_transform` / `game_position` / `game_velocity` / `game_movement_state_id` / `game_sequence_id` proxy properties (NetPredictor will drop these too — see below)
+- Refactor `_simulate`: use `self` (root) for `move_and_slide`, write `state.pos = global_position`
+- Refactor `_load_simulation_state`: keep only state-machine + animation-progress restoration (drop the body-pos / basis / velocity writes — framework owns)
+- Drop `_visualize`'s `MovementStateMachine.run_visual` movement integration calls; keep AnimationTree sync, peek SM, etc.
+- Drop `_capture_render_state`'s `state.pos = global_position` / `state.velocity = velocity` (framework owns smoothing-offset path); keep animation-progress captures
+- Drop `_apply_corrections`'s `global_position = state.pos` write (framework writes body via offset path)
+- Drop `Enums.IntegrationContext.GAME` vs `VISUAL` distinction in movement helpers (`update_movement`, `update_gravity`, `on_floor`, `update_velocity` collapse to one path)
+
+In `addons/netcode/components/net_predictor.gd`:
+
+- Delete the `game_transform` / `game_position` / `game_velocity` / `game_movement_state_id` / `game_sequence_id` host-cache vars (only player used them; Phase 5 removes that use)
+
+In `godot/entities/player/player_schema.tres`:
+
+- Add `mode = SMOOTHED_OFFSET` to the `pos` correction channel
+- Tune `smooth_rate` and `snap_threshold` against bad-net presets
+
+**Smoke tests for Phase 5:**
+
+- 0 ping: no visible difference vs current behavior
+- `broadband` preset: small reconciles smooth invisibly
+- `wifi-light` preset: larger reconciles smooth without snap unless > snap_threshold
+- Hard packet loss: large desyncs snap cleanly (offset exceeds threshold → zeroed)
+- First-person view: camera moves with body (= visible pos = shadow + offset). No view jitter on reconcile.
+- Third-person: visible body smooth, no obvious teleport
+
+---
+
+## 10. Phase 6 (future, optional)
 
 - Explicit archetype enum on `NetSchema` (PREDICTED / SERVER_STATE_ONLY) replacing the inferred `command_template != null` check
 - Fold `NetReplicator` back into `NetPredictor` (mode flag on schema) so there's one component
-- Generalize `_rewind_body` strategies into a `NetBodyAdapter` Resource for the rare case where a host wants custom rewind (e.g. AnimatableBody3D with custom interpolation easing into rewind pose)
+- Generalize `_rewind_body` strategies into a `NetBodyAdapter` Resource for AnimatableBody3D / Node3D custom rewinds
+- Per-field smoothing offset (extend `_smoothing_offset_pos: Vector3` → `_smoothing_offsets: Dictionary`) for velocity + rotation smoothing
 
 ---
 
-## 9. Risks & open questions
+## 11. Risks & open questions
 
-### Resolved
+### Resolved by Phase 1/2 shipping
 
-- **"Body will visibly jitter during replay"** → false; render samples post-physics, intermediate replay states are invisible
-- **"Need to reimplement move_and_slide"** → no; framework only does teleport + flag refresh, host still calls `move_and_slide`
+- **"Body will visibly jitter during replay"** → confirmed false; intermediate replay states never render
+- **"Need to reimplement move_and_slide"** → confirmed no; framework only does teleport + flag refresh, host still calls `move_and_slide`
+- **`reset_physics_interpolation` after CharacterBody3D rewind** → tests pass; mesh interp uses post-rewind as reference
+- **Jolt + `PhysicsServer3D.body_set_state` on RigidBody3D** → grenade migration runs with no visible artifact at 0 ping
 
-### Open
+### Discovered while planning Phase 3 (now reflected in Phase 4 design)
 
-- **Jolt + `PhysicsServer3D.body_set_state` interaction.** Need to verify Jolt respects mid-physics-tick state writes on RigidBody3D without continuous-collision-detection objections. Test by rewinding a moving grenade and checking next step's collision response.
-- **`reset_physics_interpolation` after CharacterBody3D rewind** — confirm the mesh interp uses the post-rewind pose as the new "previous" reference, not the pre-rewind pose.
-- **Dummy `move_and_slide` cost on rewind.** Probably <50µs per call; profile under 16-player load. If hot, alternative is a raycast-only floor probe.
-- **Lag-comp rewind ownership.** `NetLagCompensator` currently emits `shadow_state_applied` and the host pushes scene-graph updates. With body-aware synchronizer, lag-comp should call `_rewind_body` directly and the host signal becomes optional (for state-machine restoration only).
-- **Soft-determinism under single-body.** Dual-body insulated the visual from sim divergence between platforms. Single-body means platform-specific `move_and_slide` differences show as correction lerps. Should be visually negligible given the existing snap+smooth thresholds, but worth measuring once after migration.
-- **Visual smoothing across reconciles.** Today: visual body integrates between server snapshots, then corrections nudge it. After migration: shadow body integrates each tick, render_state = shadow with correction lerp folded in via `corrections[]` channels. Functionally equivalent, but the smoothing tunables (`smooth_rate`, `snap_threshold`) may need re-tuning since the input to the smoother is different (pure shadow rather than visual-physics-output).
+- **Dual-body is load-bearing for reconcile smoothing.** Visual `move_and_slide` in `_visualize` IS the smoothing mechanism, not redundant work. Single-body migration must replace it with explicit offset bookkeeping.
+
+### Open for Phase 4 / Phase 5
+
+- **First-person camera with offset.** Camera is child of root body. With offset applied, the camera position offsets too — the player view smoothly converges instead of snapping. Theoretically an improvement over today's setup, but requires real-world validation under bad-net presets.
+- **`is_on_floor()` reads outside `_physics_process`.** State machines run inside `_simulate` during the canonical-pos window, so they're safe. But anything reading body pos *outside* `_physics_process` (UI, debug overlay) sees visible-pos. Need to audit reads.
+- **Velocity smoothing.** Visible velocity won't match visible motion in the ticks following a reconcile. At decay rate 8/s the offset converges in ~250ms so probably invisible, but worth testing.
+- **Soft-determinism under single-body.** Dual-body insulated visual from sim divergence between platforms. Single-body means platform-specific `move_and_slide` differences show up as offset values. Should be visually negligible given snap/smooth thresholds, but measure once after migration.
+- **Lag-comp rewind ownership.** `NetLagCompensator` currently emits `shadow_state_applied` and the host pushes scene-graph updates. With body-aware synchronizer + smoothing offset, lag-comp should call `_rewind_body` directly without invoking the smoothing path (lag-comp rewinds are temporary, server-side, not visible-pose-relevant).
 - **State machine `logic_state` / `visual_state` split.** Stays. Even without dual body, this split is what keeps replay from yanking the animation pose backwards each reconcile. State machines drive AnimationTree parameters; pose is sampled at render time off the visual_state's ID.
-- **Schema-level archetype declaration.** Tempting to add `@export var archetype: Archetype` to `NetSchema` for explicitness, but doing so doubles up with the existing `command_template != null` signal. Hold off until Phase 4 — keep two signals only if they diverge in meaning.
 
 ---
 
-## 10. Non-goals
+## 12. Non-goals
 
 - Replacing `CharacterBody3D` with a Rust kinematic controller — possible long-term, but `move_and_slide` is "good enough" given soft-determinism tolerance
 - Per-body custom integration loops inside the framework — host owns physics calls
@@ -382,10 +570,14 @@ What stays:
 
 ---
 
-## 11. Decision summary (recommendation)
+## 13. Decision summary
 
-**Add `body: NodePath` to `NetPredictor`.** Composition over inheritance. Works across `CharacterBody3D` / `RigidBody3D` / `AnimatableBody3D` / `Node3D`. Default-empty preserves the current dual-body player. Opt-in migration: grenade first (cleanup, no semantic change), then player (drops `GameController`, halves animation tracks, removes broadphase entry).
+**Phase 1 + 2 are shipped** (`b826a8b`, `f483cc3`). NetPredictor has the body-rewind primitive; grenade has migrated to NetReplicator + framework-driven tick gating.
 
-Subclass route (`NetCharacterBody3D extends CharacterBody3D`) rejected: single-inheritance lock-in on the host, combinatorial parallel classes for each body shape, inverted ownership (body owns prediction lifecycle rather than the prediction component owning body discipline).
+**Phase 4 is the next active piece**: add the visual smoothing offset to NetPredictor + a `SMOOTHED_OFFSET` mode on NetCorrection. ~80-120 lines of framework code, no host changes required to land it. Player keeps dual-body until Phase 5.
 
-Implementation order: Phase 1 (framework opt-in, no regression), then Phase 2 (grenade — low risk), then Phase 3 (player — main payoff).
+**Phase 5 migrates the player to single body** with `body = ^"."` and offset-smoothed reconcile. ~200 lines of player.gd deleted, several scene-graph deletions. Behavior preserved by Phase 4's smoothing mechanism.
+
+Subclass route (`NetCharacterBody3D extends CharacterBody3D`) remains rejected: single-inheritance lock-in on the host, combinatorial parallel classes for each body shape, inverted ownership.
+
+When picking up the work post-compaction: Phase 4 framework code is the next concrete step. Start in `addons/netcode/components/net_predictor.gd` (`_authority_tick` + `_reconcile_replay` + new `_smoothing_offset_pos` field) and `addons/netcode/resources/net_correction.gd` (mode enum + validation). Don't touch player.gd / player.tscn until Phase 4 lands and tests confirm zero regression at default-empty body.
