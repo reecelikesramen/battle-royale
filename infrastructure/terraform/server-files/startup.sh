@@ -12,10 +12,17 @@ BUCKET='${bucket}'
 PROJECT_ID='${project_id}'
 
 # ── Packages ───────────────────────────────────────────────────────────────
+# Probe every required tool individually. Gating only on `jq` left us on a
+# VM where jq was present but unzip wasn't, so refresh.sh blew up at the
+# release-extract step with `unzip: command not found`.
 export DEBIAN_FRONTEND=noninteractive
-if ! command -v jq >/dev/null 2>&1; then
+missing=()
+for cmd in curl jq unzip openssl; do
+  command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+done
+if [ ${#missing[@]} -gt 0 ]; then
   apt-get update -qq
-  apt-get install -y -qq curl jq unzip openssl
+  apt-get install -y -qq "${missing[@]}"
 fi
 
 # ── User + dirs ────────────────────────────────────────────────────────────
