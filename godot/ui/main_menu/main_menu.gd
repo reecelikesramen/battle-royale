@@ -1,7 +1,17 @@
 extends Control
 
+const WAKE_PROBE_INTERVAL_S := 15.0
+# Green-on-disabled style used when the server is up; the disabled-but-coloured
+# look tells the player "you can't click this, but it's not broken — it's a
+# confirmation that the server is online".
+const SERVER_ONLINE_COLOR := Color(0.35, 0.75, 0.35)
+
 var ip_regex = RegEx.new()
 var num_regex = RegEx.new()
+var _wake_probe_http: HTTPRequest
+var _wake_action_http: HTTPRequest
+var _wake_probe_timer: Timer
+var _wake_in_progress := false
 
 func _enter_tree() -> void:
 	NetSession.on_connect_to_server.connect(_on_connect_to_server)
@@ -31,7 +41,107 @@ func _ready() -> void:
 	if num_regex.compile("^\\d+$") != OK:
 		push_error("Numeric regex failed to compile")
 
+	_setup_wake_status_probe()
+
 	_maybe_autoconnect()
+
+
+# ───────────────────────────── Wake-server probe ────────────────────────────
+# Polls the wake Cloud Function with GET (read-only, no side effects) to colour
+# the WakeButton. POST is reserved for the actual wake action — only fires on
+# button press, so background polls never accidentally start the VM.
+func _setup_wake_status_probe() -> void:
+	if Constants.WAKE_FUNCTION_URL.is_empty():
+		%WakeButton.text = "Wake server (not configured)"
+		return
+	_wake_probe_http = HTTPRequest.new()
+	add_child(_wake_probe_http)
+	_wake_probe_http.request_completed.connect(_on_wake_probe_completed)
+
+	_wake_probe_timer = Timer.new()
+	_wake_probe_timer.wait_time = WAKE_PROBE_INTERVAL_S
+	_wake_probe_timer.autostart = false
+	_wake_probe_timer.timeout.connect(_wake_probe_request)
+	add_child(_wake_probe_timer)
+
+	_wake_probe_request()
+	_wake_probe_timer.start()
+
+
+func _wake_probe_request() -> void:
+	if _wake_in_progress:
+		return
+	if _wake_probe_http.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	var err := _wake_probe_http.request(
+		Constants.WAKE_FUNCTION_URL,
+		PackedStringArray(),
+		HTTPClient.METHOD_GET,
+		""
+	)
+	if err != OK:
+		_set_wake_button_state("offline", "Wake server")
+
+
+func _on_wake_probe_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	if response_code != 200:
+		_set_wake_button_state("offline", "Wake server")
+		return
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		_set_wake_button_state("offline", "Wake server")
+		return
+	if parsed.get("running", false):
+		_set_wake_button_state("running", "Server online")
+	else:
+		_set_wake_button_state("offline", "Wake server")
+
+
+# `state` ∈ {"offline", "starting", "running"}.
+func _set_wake_button_state(state: String, text: String) -> void:
+	%WakeButton.text = text
+	match state:
+		"running":
+			# Disabled-but-coloured: user can't click (no work to do), but the
+			# green tint communicates "server is up and connect will work".
+			%WakeButton.disabled = true
+			%WakeButton.modulate = SERVER_ONLINE_COLOR
+		"starting":
+			%WakeButton.disabled = true
+			%WakeButton.modulate = Color(1.0, 0.85, 0.3)
+		"offline":
+			%WakeButton.disabled = _wake_in_progress
+			%WakeButton.modulate = Color.WHITE
+
+
+func _on_wake_button_pressed() -> void:
+	if _wake_in_progress:
+		return
+	_wake_in_progress = true
+	_set_wake_button_state("starting", "Waking server...")
+	if _wake_action_http == null:
+		_wake_action_http = HTTPRequest.new()
+		add_child(_wake_action_http)
+		_wake_action_http.request_completed.connect(_on_wake_action_completed)
+	var err := _wake_action_http.request(
+		Constants.WAKE_FUNCTION_URL,
+		PackedStringArray(),
+		HTTPClient.METHOD_POST,
+		""
+	)
+	if err != OK:
+		_wake_in_progress = false
+		_set_wake_button_state("offline", "Wake server (request failed)")
+
+
+func _on_wake_action_completed(_result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray) -> void:
+	_wake_in_progress = false
+	if response_code != 200:
+		_set_wake_button_state("offline", "Wake server (HTTP %d)" % response_code)
+		return
+	# VM boot + game-server warmup takes ~30-60s. Keep polling on the existing
+	# 15s timer; when the probe sees `running: true` the button flips green.
+	_set_wake_button_state("starting", "Server starting, ~45s...")
 
 
 # Skip the menu and connect immediately. Honors any of:

@@ -31,10 +31,16 @@ def wake(request):
     instance = compute.instances().get(project=PROJECT_ID, zone=ZONE, instance=INSTANCE_NAME).execute()
     status = instance.get("status", "UNKNOWN")
 
+    # GET = read-only status probe. Used by the main menu to colour the Wake
+    # button without ever auto-starting the VM. Only POST actually starts.
+    if request.method == "GET":
+        body = {"vm_status": status, "running": status == "RUNNING"}
+        return (json.dumps(body) + "\n", 200, {"Content-Type": "application/json"})
+
     if status == "RUNNING":
-        body = {"status": "already_running", "eta_seconds": 0}
+        body = {"status": "already_running", "eta_seconds": 0, "vm_status": status}
         return (json.dumps(body) + "\n", 200, {"Content-Type": "application/json"})
 
     compute.instances().start(project=PROJECT_ID, zone=ZONE, instance=INSTANCE_NAME).execute()
-    body = {"status": "starting", "eta_seconds": 45}
+    body = {"status": "starting", "eta_seconds": 45, "vm_status": status}
     return (json.dumps(body) + "\n", 200, {"Content-Type": "application/json"})
