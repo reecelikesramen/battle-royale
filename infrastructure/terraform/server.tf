@@ -24,6 +24,16 @@ resource "google_project_iam_member" "server_metric_writer" {
   member  = "serviceAccount:${google_service_account.game_server.email}"
 }
 
+# Read custom metrics back. The server-agent queries the players_connected
+# metric every 60s to decide whether to fire idle shutdown — without viewer
+# the read returns 403 and the agent treats every poll as "unknown → active",
+# so idle never accumulates and the VM never auto-stops.
+resource "google_project_iam_member" "server_metric_reader" {
+  project = var.project_id
+  role    = "roles/monitoring.viewer"
+  member  = "serviceAccount:${google_service_account.game_server.email}"
+}
+
 # Stop self (Sprint 6 idle shutdown). Scoped via IAM condition so the SA can
 # only act on this specific instance — exfiltrated tokens can't manage the
 # rest of the project.
