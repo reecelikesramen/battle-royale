@@ -251,6 +251,7 @@ steps:
     args:
       - -c
       - |
+        set -euo pipefail
         mkdir -p release
 
         # Bundle the launcher binary alongside each platform's game files.
@@ -277,7 +278,7 @@ steps:
         # Double-click of Battle Royale.app then opens the launcher UI directly
         # instead of running the raw game in a Terminal session. Gatekeeper
         # approval covers the whole bundle in one right-click → Open.
-        bash infrastructure/cloudbuild-steps/build-mac-app.sh
+        _EXPORT_NAME=${_EXPORT_NAME} bash infrastructure/cloudbuild-steps/build-mac-app.sh
         mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
         mv build/mac/mac-base.pck release/ 2>/dev/null || true
         mv build/mac/${_TAG_NAME}.pck release/mac-${_TAG_NAME}.pck 2>/dev/null || true

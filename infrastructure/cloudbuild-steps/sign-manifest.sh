@@ -45,4 +45,24 @@ if [[ "$SIG_BYTES" -ne 64 ]]; then
   echo "ERROR: expected 64-byte ed25519 signature, got $SIG_BYTES" >&2
   exit 1
 fi
+
+# Self-verify: sign+verify against the committed pubkey using the same
+# openssl invocation refresh.sh runs on the VM. Catches signer/verifier
+# divergence (e.g. trailing-newline stripping, encoding mismatch) before
+# we publish a manifest the production fleet can't validate.
+if [[ -f "$PUB_KEY_FILE" ]]; then
+  PUB_PEM=$(mktemp)
+  trap 'shred -u "$KEY_PEM" "$PUB_PEM" 2>/dev/null || rm -f "$KEY_PEM" "$PUB_PEM"' EXIT
+  {
+    printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'
+    cat "$PUB_KEY_FILE"
+  } | openssl pkey -pubin -inform DER -pubout -outform PEM > "$PUB_PEM"
+  if ! openssl pkeyutl -verify -pubin -inkey "$PUB_PEM" \
+       -rawin -in versions.json -sigfile versions.json.sig >/dev/null; then
+    echo "ERROR: post-sign self-verify FAILED — pubkey at $PUB_KEY_FILE does not match signing key, or the manifest was modified between sign and verify." >&2
+    exit 1
+  fi
+  echo "Self-verify OK (pubkey matches signing key)"
+fi
+
 echo "Signed versions.json -> versions.json.sig (64 bytes)"

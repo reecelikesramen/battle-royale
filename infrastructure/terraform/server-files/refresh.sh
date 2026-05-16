@@ -16,7 +16,15 @@ BUCKET="$(awk -F= '/^BUCKET=/ {print $2}' "$META_FILE")"
 
 cd "$INSTALL"
 
-manifest=$(curl -fsSL "https://storage.googleapis.com/${BUCKET}/versions.json?t=$(date +%s)")
+# Fetch manifest to a file (NOT via command substitution, which strips
+# trailing newlines and breaks the signature, since the signer signs the
+# raw bytes including any trailing \n that the manifest generator emits).
+MANIFEST_FILE=$(mktemp)
+PUB_PEM=$(mktemp)
+trap 'rm -f "$PUB_PEM" "$MANIFEST_FILE" /tmp/manifest.sig' EXIT
+
+curl -fsSL "https://storage.googleapis.com/${BUCKET}/versions.json?t=$(date +%s)" \
+  -o "$MANIFEST_FILE"
 sig=$(curl -fsSL "https://storage.googleapis.com/${BUCKET}/versions.json.sig?t=$(date +%s)" \
   --output /tmp/manifest.sig --write-out '%{http_code}')
 [[ "$sig" == "200" ]] || { echo "sig fetch failed: $sig" >&2; exit 1; }
@@ -24,14 +32,10 @@ sig=$(curl -fsSL "https://storage.googleapis.com/${BUCKET}/versions.json.sig?t=$
 # Verify ed25519 signature using the public key baked at install time.
 PUB_RAW=/etc/battle-royale/manifest_pub.ed25519
 # Convert raw 32-byte pubkey to PEM SubjectPublicKeyInfo for openssl pkeyutl.
-PUB_PEM=$(mktemp); trap 'rm -f "$PUB_PEM"' EXIT
 {
   printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'
   cat "$PUB_RAW"
 } | openssl pkey -pubin -inform DER -pubout -outform PEM > "$PUB_PEM"
-
-MANIFEST_FILE=$(mktemp); trap 'rm -f "$PUB_PEM" "$MANIFEST_FILE" /tmp/manifest.sig' EXIT
-printf '%s' "$manifest" > "$MANIFEST_FILE"
 
 if ! openssl pkeyutl -verify -pubin -inkey "$PUB_PEM" -rawin -in "$MANIFEST_FILE" -sigfile /tmp/manifest.sig; then
   echo "manifest signature verify FAILED — refusing to update" >&2
