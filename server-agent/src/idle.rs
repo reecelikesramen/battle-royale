@@ -75,6 +75,15 @@ pub fn current_players(
         .bearer_auth(token.value())
         .send()
         .context("monitoring timeseries query")?;
+    // 404 here means the custom metric descriptor doesn't exist yet — Cloud
+    // Monitoring creates the descriptor lazily the first time MetricsReporter
+    // writes a point. "Never written" is a stronger signal of zero players
+    // than a transient network error, so count it as 0 rather than bailing
+    // (which would otherwise force the agent into the defensive note_active
+    // branch and prevent idle accumulation indefinitely).
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(0);
+    }
     if !resp.status().is_success() {
         anyhow::bail!("monitoring query returned {}", resp.status());
     }
