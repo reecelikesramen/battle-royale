@@ -13,7 +13,7 @@ class FakeHost:
 	var last_to = null
 	var last_alpha: float = 0.0
 
-	func _capture_state(state: NetState) -> void:
+	func _capture_state(state: NetState, _delta: float) -> void:
 		captured_count += 1
 		(state as PlayerState).pos = Vector3(captured_count, 0.0, 0.0)
 

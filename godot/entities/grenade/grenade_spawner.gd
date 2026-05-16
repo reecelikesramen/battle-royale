@@ -67,7 +67,7 @@ func _on_spawn_requested(schema_id: int, entity_id: int, scene_path: String, _ow
 		return
 	var grenade: Grenade = _grenade_scene.instantiate()
 	grenade.name = "Grenade_%d" % entity_id
-	var predictor: NetPredictor = grenade.get_node("NetPredictor")
+	var predictor: NetReplicator = grenade.get_node("NetReplicator")
 	predictor.entity_id = entity_id
 	add_child(grenade)
 	print("[GRENADE] instantiated id=%d (is_server=%s)" % [entity_id, NetSession.is_server])

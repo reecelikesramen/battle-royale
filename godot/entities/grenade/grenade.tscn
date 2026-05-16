@@ -1,7 +1,7 @@
 [gd_scene format=3]
 
 [ext_resource type="Script" path="res://entities/grenade/grenade.gd" id="1_grenade"]
-[ext_resource type="Script" path="res://addons/netcode/components/net_predictor.gd" id="2_npred"]
+[ext_resource type="Script" path="res://addons/netcode/components/net_replicator.gd" id="2_nrepl"]
 [ext_resource type="Resource" path="res://entities/grenade/grenade_schema.tres" id="3_schema"]
 
 [sub_resource type="StandardMaterial3D" id="BodyMat"]
@@ -42,8 +42,8 @@ continuous_cd = true
 contact_monitor = false
 script = ExtResource("1_grenade")
 
-[node name="NetPredictor" type="Node" parent="."]
-script = ExtResource("2_npred")
+[node name="NetReplicator" type="Node" parent="."]
+script = ExtResource("2_nrepl")
 schema = ExtResource("3_schema")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]

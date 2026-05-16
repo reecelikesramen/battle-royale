@@ -26,27 +26,10 @@ var thrower_id: int = -1
 const THROWER_ARM_DISTANCE := 1.5
 var _armed_for_thrower: bool = false
 
-@onready var _net: NetPredictor = $NetPredictor
+@onready var _net: NetReplicator = $NetReplicator
 @onready var _shape: CollisionShape3D = $CollisionShape3D
 @onready var _body: MeshInstance3D = $Body
 @onready var _explosion: MeshInstance3D = $Explosion
-
-# Per-entity tick-rate gate. Server runs grenade game-logic + snapshot capture
-# + broadcast every Nth physics tick, derived from project physics rate / the
-# schema's tick_hz. This is how variable-rate entities work — players run hot
-# (120Hz), grenades / world props run cooler (60Hz / 30Hz / etc.) so the server
-# spends its CPU on what matters. Read at _ready so schema reload doesn't
-# require a script restart.
-#
-# Note: Jolt's underlying RigidBody3D integration still runs at the global
-# physics rate (currently 120Hz). For *true* simulation-rate reduction (no
-# RigidBody integration on skipped ticks) the body would need to be ported to
-# Node3D + manual ballistic integration with PhysicsServer raycasts. Worth
-# doing for true performance scaling but out of scope for this pass — the
-# wins here are already substantial: half the snapshot encodes, half the
-# blast/direct-hit broadphase, half the wire bytes.
-var _tick_every: int = 1
-var _tick_ctr: int = 0
 
 
 func _ready() -> void:
@@ -60,66 +43,59 @@ func _ready() -> void:
 		freeze = true
 		freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 		_shape.disabled = true
-	# Schema's tick_hz declares the entity's logical simulation rate. Physics
-	# runs at the project rate; gate this script's _physics_process to fire
-	# only every (physics_hz / tick_hz) ticks.
-	var physics_hz: int = ProjectSettings.get_setting("physics/common/physics_ticks_per_second", 120)
-	var sim_hz: int = _net.schema.tick_hz if _net != null and _net.schema != null else physics_hz
-	_tick_every = maxi(1, physics_hz / maxi(1, sim_hz))
 
 
-func _physics_process(delta: float) -> void:
-	if Engine.is_editor_hint():
-		return
-	if _net.shadow_state == null:
-		return
-	if not NetSession.is_server:
-		return
-	# Per-entity tick gate. Skip the cheap path early.
-	_tick_ctr += 1
-	if _tick_ctr < _tick_every:
-		return
-	_tick_ctr = 0
-	# `delta` is one physics step; the gate accumulates _tick_every steps
-	# between firings, so the effective dt for time-based fields is scaled.
-	var dt: float = delta * float(_tick_every)
-	var s: GrenadeState = _net.shadow_state as GrenadeState
-	match s.state:
+# Server hook: NetReplicator calls this once per gated physics tick
+# (physics_hz / schema.tick_hz = 60Hz for grenades at 120Hz physics). The
+# scaled `dt` is the wall-time covered by this firing, so time-based fields
+# (fuse, explosion progress) advance regardless of the underlying physics
+# rate. Game logic + scene→state copy + visual update + queue_free all live
+# here; the framework broadcasts after this returns.
+#
+# Players run hot at 120Hz; grenades / props / ambient world objects run
+# cooler so the server spends CPU on what matters. Jolt's RigidBody3D still
+# integrates at the global physics rate — true sim-rate reduction would
+# require porting to Node3D + manual ballistic integration, out of scope.
+func _capture_state(state: GrenadeState, dt: float) -> void:
+	match state.state:
 		STATE_FLYING:
-			s.pos = global_position
-			s.velocity = linear_velocity
-			s.rotation_quat = global_basis.get_rotation_quaternion()
-			s.fuse_remaining -= dt
+			state.pos = global_position
+			state.velocity = linear_velocity
+			state.rotation_quat = global_basis.get_rotation_quaternion()
+			state.fuse_remaining -= dt
 			_maybe_arm_for_thrower(global_position)
 			_apply_direct_hits(global_position)
-			if s.fuse_remaining <= 0.0:
-				s.fuse_remaining = 0.0
-				s.state = STATE_EXPLODING
-				s.explosion_progress = 0.0
-				s.velocity = Vector3.ZERO
+			if state.fuse_remaining <= 0.0:
+				state.fuse_remaining = 0.0
+				state.state = STATE_EXPLODING
+				state.explosion_progress = 0.0
+				state.velocity = Vector3.ZERO
 				freeze = true
 				freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 				if not _blast_applied:
 					_apply_blast_damage(global_position)
 					_blast_applied = true
 		STATE_EXPLODING:
-			s.explosion_progress += dt / EXPLOSION_DURATION
-			if s.explosion_progress >= 1.0:
-				s.explosion_progress = 1.0
-				s.state = STATE_DONE
+			state.explosion_progress += dt / EXPLOSION_DURATION
+			if state.explosion_progress >= 1.0:
+				state.explosion_progress = 1.0
+				state.state = STATE_DONE
 		STATE_DONE:
 			pass
-	# One broadcast per gated tick — matches schema.tick_hz on the wire.
-	_net.server_broadcast_snapshot(0)
-	_render_visuals(s)
-	if s.state == STATE_DONE:
+	_render_visuals(state)
+	# queue_free defers to end-of-frame, so the framework's broadcast call
+	# (which fires AFTER this hook returns) still sees the live entity. The
+	# DONE state on the wire reaches clients and their own _proxy_apply
+	# triggers their queue_free in sync.
+	if state.state == STATE_DONE:
 		queue_free()
 
 
-# Schema-driven blending: NetPredictor inspects grenade_schema.tres.field_interp,
-# pre-builds the blended state via NetProxyBlender (PREDICTED on pos w/ gravity,
-# SLERP on rotation, DISCRETE on state, LERP on scalars), and hands it here.
-# All this method does is push fields onto the scene.
+# Schema-driven blending: NetReplicator (via NetPredictor base) inspects
+# grenade_schema.tres.field_interp, pre-builds the blended state via
+# NetProxyBlender (PREDICTED on pos w/ gravity, SLERP on rotation, DISCRETE
+# on state, LERP on scalars), and hands it here. All this method does is
+# push fields onto the scene.
 func _proxy_apply(blended: GrenadeState, _from_state: NetState, _to_state: NetState, _delta: float) -> void:
 	global_position = blended.pos
 	global_basis = Basis(blended.rotation_quat)
