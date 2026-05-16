@@ -8,6 +8,10 @@
 #   _PROJECT_NAME  - Godot project name (e.g., "Battle Royale")
 #   _PROJECT_PATH  - Path to Godot project (e.g., godot)
 #   _GODOT_VERSION - Godot version (e.g., 4.5)
+#   _COMMIT_SHA    - Full git SHA of the commit being built. First 12 chars
+#                    become BUILD_SHA, written to build-sha.txt next to every
+#                    platform's game binary. Server + client exchange this
+#                    during the connect handshake and reject on mismatch.
 
 steps:
   # ============ RESTORE .godot CACHE ============
@@ -37,8 +41,12 @@ steps:
         # CI uploads the raw cargo output names (librust.{so,dylib}, rust.dll)
         # under gs://.../rust-libs/<tag>/; rename them into place here.
         mkdir -p ${_PROJECT_PATH}/addons/netcode/bin
-        mkdir -p rust/target/release
-        mkdir -p rust/target/debug
+        # The gdextension manifest's debug paths now point at the WORKSPACE
+        # target (target/debug/), since cargo invoked from any workspace
+        # member writes there — not into rust/target/. Populate that path so
+        # godot --editor --quit-after (the import step on the build runner)
+        # finds the dylib for the addon's debug-mode lookup.
+        mkdir -p target/debug
 
         STAGE=$$(mktemp -d)
         gsutil -m cp gs://${_BUCKET}/rust-libs/${_TAG_NAME}/* "$$STAGE/"
@@ -47,12 +55,10 @@ steps:
         cp "$$STAGE/rust.dll"       ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.windows.x86_64.dll
         cp "$$STAGE/librust.dylib"  ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.macos.universal.dylib
 
-        # The gdextension manifest's debug-mode entries point at the in-tree
-        # rust/target/debug/ paths used during local dev. Headless export uses
-        # release; populate debug paths too so godot --editor --quit-after
-        # (import step) doesn't error.
-        cp "$$STAGE/librust.so" rust/target/release/librust.so
-        cp "$$STAGE/librust.so" rust/target/debug/librust.so
+        # Headless editor uses release paths for the export pipeline, but the
+        # gdextension's debug-mode entries are what godot --editor consults
+        # during the import-assets pass. Populate the workspace debug path.
+        cp "$$STAGE/librust.so" target/debug/librust.so
         rm -rf "$$STAGE"
 
         ls -la ${_PROJECT_PATH}/addons/netcode/bin/
@@ -244,6 +250,32 @@ steps:
           echo "no authenticode-cert secret; skipping Windows codesigning"
         fi
 
+  # ============ COMPUTE BUILD SHA ============
+  # Single cross-platform build identity = first 12 chars of the git commit
+  # SHA that produced this run. Written to BUILD_SHA file in the build root;
+  # zip-builds copies it into each platform dir as `build-sha.txt`. Both
+  # client and server read it at startup and trade it during the in-game
+  # connect handshake — mismatch → kick. Lives outside individual platform
+  # bundles so we can also write it into versions.json (manifest step below).
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'compute-build-sha'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SHORT_SHA="${_COMMIT_SHA}"
+        SHORT_SHA="${SHORT_SHA:0:12}"
+        if [[ -z "$SHORT_SHA" ]]; then
+          # A missing sha would mean every future client fails the handshake
+          # against this release. Fail the build instead of shipping a broken
+          # version-handshake bundle.
+          echo "ERROR: _COMMIT_SHA substitution missing — refusing to build" >&2
+          exit 1
+        fi
+        echo -n "$SHORT_SHA" > BUILD_SHA
+        echo "BUILD_SHA = $SHORT_SHA"
+
   # ============ ZIP BUILDS ============
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'zip-builds'
@@ -264,6 +296,12 @@ steps:
         chmod +x build/linux/launcher build/linux/launcher-updater 2>/dev/null || true
         cp infrastructure/cloudbuild-steps/linux-launcher.desktop build/linux/Battle\ Royale.desktop 2>/dev/null || true
 
+        # Drop build-sha.txt next to the game binary on every platform.
+        # Runtime reads via OS.get_executable_path().get_base_dir().
+        # Mac handled inside build-mac-app.sh (path is inside the .app bundle).
+        cp BUILD_SHA build/windows/build-sha.txt
+        cp BUILD_SHA build/linux/build-sha.txt
+
         # Windows
         (cd build && zip -r ../release/windows.zip windows)
         mv build/windows/windows-base.pck release/ 2>/dev/null || true
@@ -278,10 +316,16 @@ steps:
         # Double-click of Battle Royale.app then opens the launcher UI directly
         # instead of running the raw game in a Terminal session. Gatekeeper
         # approval covers the whole bundle in one right-click → Open.
-        _EXPORT_NAME=${_EXPORT_NAME} bash infrastructure/cloudbuild-steps/build-mac-app.sh
+        BUILD_SHA_FILE="$PWD/BUILD_SHA" _EXPORT_NAME=${_EXPORT_NAME} \
+          bash infrastructure/cloudbuild-steps/build-mac-app.sh
         mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
         mv build/mac/mac-base.pck release/ 2>/dev/null || true
         mv build/mac/${_TAG_NAME}.pck release/mac-${_TAG_NAME}.pck 2>/dev/null || true
+
+        # Promote BUILD_SHA into the release dir so the manifest gen step can
+        # publish it alongside versions.json (gives launcher + wake-fn a
+        # checkable build identity without unzipping a platform bundle).
+        cp BUILD_SHA release/BUILD_SHA
 
         ls -la release/
 

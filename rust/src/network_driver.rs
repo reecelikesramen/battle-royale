@@ -13,7 +13,7 @@ use godot::prelude::*;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::{
     collections::{HashMap, VecDeque},
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, ToSocketAddrs},
     time::{Duration, Instant},
 };
 
@@ -194,10 +194,28 @@ impl NetworkDriver {
     #[func]
     fn start_client(&mut self, ip_address: String, port: i64) {
         godot_print!("Starting client to {}:{}", ip_address, port);
-        let addr = ip_address.parse().unwrap_or_else(|e| {
-            godot_print!("ERROR: Failed to parse IP address '{}': {}", ip_address, e);
-            panic!("Invalid IP address");
-        });
+        // GNS wants a binary `SteamNetworkingIPAddr`, so accept either an IP
+        // literal or a hostname (`playtest.server.pywire.dev`) and resolve
+        // hostnames here via std's blocking DNS — one-shot at connect time.
+        let addr = match ip_address.parse::<IpAddr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                let port_u16: u16 = port.try_into().unwrap_or(0);
+                match (ip_address.as_str(), port_u16).to_socket_addrs() {
+                    Ok(mut it) => match it.next() {
+                        Some(sa) => sa.ip(),
+                        None => {
+                            godot_print!("ERROR: DNS resolved '{}' to no addresses", ip_address);
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        godot_print!("ERROR: Failed to resolve '{}': {}", ip_address, e);
+                        return;
+                    }
+                }
+            }
+        };
         self._start_client(addr, port);
     }
 
@@ -324,6 +342,47 @@ impl NetworkDriver {
             return;
         }
         self._send_packet_to_peer(peer_id as u8, &packet.bind().packet);
+    }
+
+    /// Server-side: forcibly close a peer's connection with an app-defined
+    /// reason code (visible to the client as `end_reason` on the disconnect
+    /// signal). Used by the in-game version handshake to kick mismatched or
+    /// non-responsive clients with a clear reason rather than letting them
+    /// stumble through protocol drift.
+    #[func]
+    fn kick_peer(&mut self, peer_id: i64, reason_code: i64, reason_str: GString) {
+        if !self.is_server {
+            godot_print!("kick_peer: ignored — not running as server");
+            return;
+        }
+        if peer_id < 0 || peer_id > u8::MAX as i64 {
+            godot_print!("kick_peer: out-of-range peer_id {}", peer_id);
+            return;
+        }
+        let pid = peer_id as u8;
+        let server = self.server.as_ref().unwrap_or_else(|| {
+            godot_print!("ERROR: Server not initialized");
+            panic!("Server socket not initialized");
+        });
+        let conn = match self
+            .connected_clients
+            .iter()
+            .find_map(|(c, p)| if *p == pid { Some(*c) } else { None })
+        {
+            Some(c) => c,
+            None => {
+                godot_print!("kick_peer: no connection for peer_id {}", peer_id);
+                return;
+            }
+        };
+        let reason_str = reason_str.to_string();
+        let code: u32 = reason_code.try_into().unwrap_or(1000);
+        // linger=true so the close reason actually reaches the client before
+        // the socket is torn down (GNS otherwise can drop the trailing status
+        // packet on an immediate close).
+        server.close_connection(conn, code, &reason_str, true);
+        // Drop from the live map so subsequent sends don't try to use it.
+        self.connected_clients.remove(&conn);
     }
 
     fn process_debug_messages(&mut self) {
