@@ -30,7 +30,7 @@ concurrency:
 
 env:
   # ============ PROJECT CONFIG ============
-  GODOT_VERSION: "4.5"
+  GODOT_VERSION: "4.6"
   EXPORT_NAME: battle-royale
   PROJECT_NAME: Battle Royale
   PROJECT_PATH: godot
