@@ -9,3 +9,5 @@ pub(crate) use super::net_state::NetStatePacketWire;
 pub(crate) use super::net_command::NetCommandPacketWire;
 pub(crate) use super::net_reliable::NetReliablePacketWire;
 pub(crate) use super::server_tick::ServerTickPacketWire;
+pub(crate) use super::server_hello::ServerHelloPacketWire;
+pub(crate) use super::client_hello::ClientHelloPacketWire;

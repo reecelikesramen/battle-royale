@@ -14,11 +14,18 @@ var _wake_probe_timer: Timer
 var _wake_in_progress := false
 
 func _enter_tree() -> void:
-	NetSession.on_connect_to_server.connect(_on_connect_to_server)
+	# Listen for id-assignment, not raw GNS connect. on_connect_to_server fires
+	# the moment the GNS handshake finishes (before our app-level version
+	# handshake), so jumping to the map there meant a build-mismatched client
+	# would load the map + flop into spectator before the server kicked it.
+	# handle_local_id_assignment only fires after the server admits us
+	# (post-ServerHello/ClientHello), so the scene transition is gated on a
+	# real "you're in the game" signal.
+	NetClient.handle_local_id_assignment.connect(_on_local_id_assigned)
 	NetClient.handle_disconnect_from_server.connect(set_disconnected_message)
 
 func _exit_tree() -> void:
-	NetSession.on_connect_to_server.disconnect(_on_connect_to_server)
+	NetClient.handle_local_id_assignment.disconnect(_on_local_id_assigned)
 	NetClient.handle_disconnect_from_server.disconnect(set_disconnected_message)
 
 # Called when the node enters the scene tree for the first time.
@@ -91,8 +98,17 @@ func _on_wake_probe_completed(_result: int, response_code: int, _headers: Packed
 	if typeof(parsed) != TYPE_DICTIONARY:
 		_set_wake_button_state("offline", "Wake server")
 		return
+	# wake-fn returns `running: true` only when vm_status==RUNNING AND the
+	# server-agent ready-state heartbeat reports the game has bound UDP.
+	# vm_status alone (STAGING/PROVISIONING/RUNNING-without-ready) means the
+	# VM is up but the game isn't yet — show "starting" so the user doesn't
+	# flap from green-to-red between probes.
 	if parsed.get("running", false):
 		_set_wake_button_state("running", "Server online")
+		return
+	var vm_status: String = parsed.get("vm_status", "")
+	if vm_status in ["STAGING", "PROVISIONING", "RUNNING", "REPAIRING"]:
+		_set_wake_button_state("starting", "Server starting...")
 	else:
 		_set_wake_button_state("offline", "Wake server")
 
@@ -238,7 +254,7 @@ func _on_connect_button_pressed() -> void:
 		push_error("Client tried to connect twice")
 
 
-func _on_connect_to_server() -> void:
+func _on_local_id_assigned(_id: int) -> void:
 	get_tree().change_scene_to_file(Constants.MAP_SCENE_PATH)
 
 

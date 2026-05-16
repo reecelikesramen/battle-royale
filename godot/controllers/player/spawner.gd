@@ -5,7 +5,10 @@ const PLAYER: PackedScene = preload("res://controllers/player/player.tscn")
 var players: Dictionary = {}
 
 func _ready() -> void:
-	NetSession.on_peer_connect.connect(spawn_player)
+	# Server-side: use peer_admitted (post-handshake) rather than the raw
+	# on_peer_connect — a build-mismatched peer is kicked before admit, so we
+	# must not spawn for it pre-handshake.
+	NetServer.peer_admitted.connect(spawn_player)
 	NetSession.on_peer_disconnect.connect(despawn_player)
 	NetClient.handle_disconnect_from_server.connect(despawn_all_players)
 	NetClient.handle_local_id_assignment.connect(spawn_player)
