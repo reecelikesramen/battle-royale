@@ -3,12 +3,16 @@ extends MovementState
 @export var SPEED := 9.0
 @export var ACCELERATION := 50.0
 @export var TOP_ANIM_SPEED: float = 1.8
+# Scales raw A/D input. 0.6 puts W+D travel angle around 59° off the lateral
+# axis (≈31° off forward) instead of the unscaled 45°, so sprint strafing
+# trades sideways speed for forward commitment.
+@export var STRAFE_SCALE: float = 0.6
 
 var TOP_SPEED_SQ: float:
 	get: return SPEED * SPEED
 
 func logic_enter() -> void:
-	player.set_parameters(SPEED, ACCELERATION)
+	player.set_parameters(SPEED, ACCELERATION, STRAFE_SCALE)
 
 
 func visual_enter() -> void:
@@ -30,8 +34,10 @@ func logic_transitions() -> void:
 	if player.game_velocity.is_zero_approx():
 		transition.emit(&"IdleMovementState")
 
-	if !player.input.is_sprinting():
-		# Release sprint -> walk_mode picks Walk or Run.
+	# Drop out of sprint if either shift released or forward input released. Sprint
+	# is forward-only — sideways/backward strafing while holding shift falls back
+	# to walk/run.
+	if !player.input.is_sprinting_forward():
 		if player.input.is_walk_mode():
 			transition.emit(&"WalkMovementState")
 		else:

@@ -86,16 +86,31 @@ func _on_client_reliable_packet(packet) -> void:
 	if not _record_and_check(packet.topic, packet.idempotency_key):
 		return
 	received.emit(packet.topic, packet.payload, -1)
-	for cb in _handlers.get(packet.topic, []):
-		cb.call(packet.payload)
+	_dispatch(packet.topic, [packet.payload])
 
 
 func _on_server_reliable_packet(peer_id: int, packet) -> void:
 	if not _record_and_check(packet.topic, packet.idempotency_key):
 		return
 	received.emit(packet.topic, packet.payload, peer_id)
-	for cb in _handlers.get(packet.topic, []):
-		cb.call(peer_id, packet.payload)
+	_dispatch(packet.topic, [peer_id, packet.payload])
+
+
+# Iterates handlers for a topic, pruning any whose target was freed (autoload
+# hub outlives scene-bound subscribers like ShootHandler — without this, a
+# scene reload leaves a stale Callable that crashes on next dispatch).
+func _dispatch(topic: int, args: Array) -> void:
+	var handlers: Array = _handlers.get(topic, [])
+	if handlers.is_empty():
+		return
+	var alive: Array = []
+	for cb in handlers:
+		if not (cb is Callable) or not cb.is_valid():
+			continue
+		alive.append(cb)
+		cb.callv(args)
+	if alive.size() != handlers.size():
+		_handlers[topic] = alive
 
 
 # Returns true if (topic, idem_key) is new and should be delivered. False if

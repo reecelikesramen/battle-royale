@@ -1,0 +1,48 @@
+[gd_scene format=3 uid="uid://codf7lf0di1jo"]
+
+[ext_resource type="Environment" uid="uid://b8030pxcma3ij" path="res://assets/environment/WE_test.tres" id="1_8qm8h"]
+[ext_resource type="Script" uid="uid://172t455bnixi" path="res://controllers/player/spawner.gd" id="2_6mglc"]
+[ext_resource type="Script" uid="uid://c7dd7u2jrsmuy" path="res://entities/grenade/grenade_spawner.gd" id="3_oy5aw"]
+[ext_resource type="Script" uid="uid://capqyeukop5vl" path="res://controllers/player/shoot_handler.gd" id="4_yrwhe"]
+[ext_resource type="Terrain3DMaterial" uid="uid://ch0b00b8rksr0" path="res://world/playtest_map/terrain3d/playtest_map.res" id="5_yrwhe"]
+[ext_resource type="Terrain3DAssets" uid="uid://dyglb77usrkay" path="res://world/playtest_map/terrain3d/playtest_assets.res" id="6_1h5pq"]
+[ext_resource type="Shape3D" uid="uid://c8t4a7cpr2net" path="res://world/playtest_map/resources/kozari_shape.tres" id="7_vk2od"]
+
+[node name="PlayTestMap" type="Node3D" unique_id=2147210313]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1785416251]
+environment = ExtResource("1_8qm8h")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=504304593]
+transform = Transform3D(0.37028158, 0.062475905, -0.9268163, 0.92143416, -0.15111217, 0.35794494, -0.11769027, -0.98654044, -0.11352146, 0, 54.03824, 0)
+
+[node name="SpectatorCamera3D" type="Camera3D" parent="." unique_id=66692027]
+transform = Transform3D(-0.6451377, 0.21828485, -0.732222, 1.8578787e-09, 0.9583226, 0.28568834, 0.76406634, 0.18430834, -0.61825, 482.5228, 574.84204, 517.2981)
+
+[node name="PlayerSpawner" type="Node3D" parent="." unique_id=546830727]
+script = ExtResource("2_6mglc")
+metadata/_custom_type_script = "uid://172t455bnixi"
+
+[node name="GrenadeSpawner" type="Node3D" parent="." unique_id=211121761]
+script = ExtResource("3_oy5aw")
+
+[node name="ShootHandler" type="Node3D" parent="." unique_id=1089493797]
+script = ExtResource("4_yrwhe")
+
+[node name="Terrain3D" type="Terrain3D" parent="." unique_id=1117596322]
+data_directory = "res://world/playtest_map/terrain3d/regions"
+material = ExtResource("5_yrwhe")
+assets = ExtResource("6_1h5pq")
+collision_mode = 0
+vertex_spacing = 2.0
+show_checkered = true
+show_colormap = true
+top_level = true
+metadata/_edit_lock_ = true
+
+[node name="Ground" type="StaticBody3D" parent="." unique_id=220787048]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 512, 0, 512)
+visible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground" unique_id=1275404238]
+shape = ExtResource("7_vk2od")

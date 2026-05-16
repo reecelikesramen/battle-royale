@@ -825,8 +825,6 @@ metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
 [node name="JumpMovementState" type="Node" parent="MovementStateMachine" unique_id=1382009700]
 script = ExtResource("10_fy606")
-SPEED = 4.0
-ACCELERATION = 8.0
 metadata/_custom_type_script = "uid://q8ak1eaayjdy"
 
 [node name="ProneMovementState" type="Node" parent="MovementStateMachine" unique_id=460739806]

@@ -19,7 +19,7 @@ const TILT_UPPER_LIMIT: float = deg_to_rad(90.0)
 
 @export_group("Movement Tunables")
 @export var FRICTION: float = 8.0
-@export var AIR_FRICTION: float = 0.5
+@export var AIR_FRICTION: float = 0.3
 @export var STOP_SPEED: float = 0.5
 @export var TOGGLE_CROUCH: bool = false
 @export var TOGGLE_PEEK: bool = false
@@ -76,6 +76,10 @@ var _owner_id: int
 # movement parameters
 var _speed := 0.0
 var _acceleration := 0.0
+# Scales raw move_left_right input before wish_dir is built. Sprint sets this
+# below 1.0 so W+D produces a more forward-leaning travel direction (55–60°
+# instead of 45°) rather than full-speed strafing while sprinting.
+var _strafe_scale := 1.0
 
 # x and y mouse input for accumulating mouse movement
 var _x_mouse_input: float
@@ -97,6 +101,48 @@ const SPRINT_HOLD_THRESHOLD_MS := 130
 var _walk_mode := false
 var _shift_press_time_ms: int = -1
 var _shift_did_sprint := false
+
+# Crouch/prone tiredness (CS2-style). Each crouch/prone *edge* (going down,
+# starting to stand up) adds TIREDNESS_BUMP to a shared 0..1 scalar; the value
+# linearly decays to 0 over TIREDNESS_DECAY_SEC seconds of inactivity. Slowdown
+# is quadratic: slowdown(t) = 1 + 2*t*t. With TIREDNESS_BUMP=0.35 a single
+# crouch cycle (down + stand-up) accumulates to ~0.7 = ~2x slowdown on the
+# way up. Two cycles back-to-back saturate at 1.0 = 3x.
+#
+# Peak-hold: every bump AND every completion event (full-crouch, full-prone,
+# full-stood-up) pushes the decay-start anchor `now + TIREDNESS_PEAK_HOLD_SEC`,
+# so tiredness sits at its peak briefly instead of immediately decaying. Without
+# this you'd never actually see 3x — the up-transition would average to ~2.8x.
+const TIREDNESS_DECAY_SEC := 3.0
+const TIREDNESS_BUMP := 0.25
+const TIREDNESS_PEAK_HOLD_SEC := 0.25
+# First crouch/prone is penalty-free both ways (down + up = 2 bumps). The pool
+# refills (and tiredness resets to 0) once decay brings slowdown below 1.05x —
+# tiredness < TIREDNESS_RESET_THRESHOLD corresponds to slowdown = 1 + 2*t² < 1.05.
+const TIREDNESS_INITIAL_FREE_BUMPS := 2
+const TIREDNESS_RESET_THRESHOLD := 0.158
+# Outside crouch/prone, decay is gated until the player either moves fast enough
+# or has been moving continuously long enough. WalkMovementState.SPEED is 2.0;
+# 75% of that is 1.5. Continuous-motion threshold is 0.5s.
+const TIREDNESS_RELEASE_SPEED := 1.5
+const TIREDNESS_RELEASE_CONTINUOUS_US := 500_000
+# Toggle to dump detailed trace prints. Cheap, but spammy — disable for normal play.
+const TIREDNESS_DEBUG := true
+# Sample tiredness in _physics_process every TIREDNESS_LOG_INTERVAL_TICKS so
+# decay is observable even outside crouch/prone state machines.
+const TIREDNESS_LOG_INTERVAL_TICKS := 30  # at 60Hz, ~2 lines/sec
+var _tiredness_base: float = 0.0
+# Decay only begins at-or-after this timestamp. Bumps/completion-holds push it
+# forward; outside any hold, decay runs purely off wall clock.
+var _tiredness_decay_starts_at_us: int = 0
+var _tiredness_log_ctr: int = 0
+# Wall-clock timestamp when the player started moving meaningfully (horiz speed
+# > 0.1 m/s) outside crouch/prone. Reset to 0 when stationary or while in
+# crouch/prone state. Used to gate tiredness decay release.
+var _movement_started_us: int = 0
+# Free-bump pool: while > 0, bump_tiredness is a no-op (logs free-skip). Reset
+# to TIREDNESS_INITIAL_FREE_BUMPS once tiredness decays below RESET_THRESHOLD.
+var _free_bumps_remaining: int = TIREDNESS_INITIAL_FREE_BUMPS
 
 
 func _enter_tree() -> void:
@@ -120,6 +166,11 @@ func _on_shadow_state_applied() -> void:
 		return
 	global_position = s.pos
 	game_body.global_position = s.pos
+	# Predictor's sim transform also needs to follow — otherwise the next
+	# _simulate writes state.pos = game_position (= stale value, e.g. graveyard
+	# after respawn) and the snapshot reverts the world back.
+	game_position = s.pos
+	game_velocity = s.velocity
 
 
 func _ready():
@@ -156,6 +207,8 @@ func _unhandled_input(event):
 func _input(event: InputEvent) -> void:
 	if !is_authority:
 		return
+	if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
+		return
 
 	if event.is_action_pressed("toggle_camera"):
 		if camera.current:
@@ -164,7 +217,8 @@ func _input(event: InputEvent) -> void:
 			camera.make_current()
 
 	if event.is_action_pressed("throw_grenade"):
-		_send_grenade_throw()
+		if not _is_locally_dead():
+			_send_grenade_throw()
 
 
 func _send_grenade_throw() -> void:
@@ -198,6 +252,10 @@ func _seed_state(state: PlayerState) -> void:
 
 
 func _gather_command(delta: float) -> PlayerInput:
+	if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
+		var cmd := PlayerInput.new()
+		cmd.look_abs = _look_abs
+		return cmd
 	# Integrate accumulated mouse delta into look. _free_look_abs decays back to
 	# zero when free-look is released so the camera resnaps.
 	var look := _free_look_abs if Input.is_action_pressed("free_look") else _look_abs
@@ -259,7 +317,144 @@ func _gather_command(delta: float) -> PlayerInput:
 	cmd.prone = Input.is_action_pressed("prone")
 	cmd.shoot = Input.is_action_pressed("shoot")
 	cmd.scope = Input.is_action_pressed("scope")
+	# While dead, drop all actionable input. Look angles stay so we don't snap
+	# the view at the moment of death; server also gates damage/throw on health.
+	if _is_locally_dead():
+		cmd.move_forward_backward = 0.0
+		cmd.move_left_right = 0.0
+		cmd.jump = false
+		cmd.crouch = false
+		cmd.prone = false
+		cmd.sprint = false
+		cmd.walk_mode = false
+		cmd.peek_left_right = 0.0
+		cmd.shoot = false
+		cmd.scope = false
 	return cmd
+
+
+func _physics_process(_delta: float) -> void:
+	if is_authority:
+		_update_tiredness_release_gate()
+
+
+# While outside crouch/prone, refresh the tiredness hold anchor every tick
+# UNTIL the player either reaches TIREDNESS_RELEASE_SPEED (75% of walk top
+# speed) or has been moving continuously for TIREDNESS_RELEASE_CONTINUOUS_US.
+# This keeps the slowdown pinned at peak through small steps / camera nudges
+# right after standing up, so decay only kicks in once the player commits to
+# moving. Crouch/prone states do their own per-tick refresh.
+func _update_tiredness_release_gate() -> void:
+	# Reset-when-cooled: once tiredness has decayed below the threshold (slowdown
+	# < 1.05x), snap tiredness back to 0 and refill the free-bump pool so the
+	# next crouch/prone is penalty-free again. Done outside crouch/prone to avoid
+	# stomping a peak-hold that's about to be re-bumped.
+	var cur: StringName = %MovementStateMachine.current_state
+	if cur != &"CrouchMovementState" and cur != &"ProneMovementState":
+		if _free_bumps_remaining < TIREDNESS_INITIAL_FREE_BUMPS:
+			var t: float = current_tiredness()
+			if t > 0.0 and t < TIREDNESS_RESET_THRESHOLD:
+				_tiredness_base = 0.0
+				_tiredness_decay_starts_at_us = 0
+				_free_bumps_remaining = TIREDNESS_INITIAL_FREE_BUMPS
+				if TIREDNESS_DEBUG:
+					print("[TIRED reset] slowdown cooled below 1.05x (tired=%.3f) — pool refilled" % t)
+	if cur == &"CrouchMovementState" or cur == &"ProneMovementState":
+		_movement_started_us = 0
+		return
+	var horiz: float = Vector2(game_velocity.x, game_velocity.z).length()
+	if horiz > 0.1:
+		if _movement_started_us == 0:
+			_movement_started_us = Time.get_ticks_usec()
+	else:
+		_movement_started_us = 0
+	var released: bool = horiz >= TIREDNESS_RELEASE_SPEED
+	if not released and _movement_started_us != 0:
+		released = Time.get_ticks_usec() - _movement_started_us >= TIREDNESS_RELEASE_CONTINUOUS_US
+	if not released:
+		tiredness_refresh_hold()
+
+
+func _process(_delta: float) -> void:
+	if not TIREDNESS_DEBUG or not is_authority:
+		return
+	_tiredness_log_ctr += 1
+	if _tiredness_log_ctr < TIREDNESS_LOG_INTERVAL_TICKS:
+		return
+	_tiredness_log_ctr = 0
+	# Show tiredness even in idle so we can see decay outside crouch/prone.
+	var t: float = current_tiredness()
+	var now: int = Time.get_ticks_usec()
+	var in_hold: bool = now < _tiredness_decay_starts_at_us
+	var hold_remaining_ms: int = (_tiredness_decay_starts_at_us - now) / 1000 if in_hold else 0
+	print("[TIRED tick] base=%.3f  current=%.3f  slowdown=%.2fx  hold=%s%s" % [
+			_tiredness_base, t, tiredness_slowdown(),
+			"yes" if in_hold else "no",
+			("(%dms left)" % hold_remaining_ms) if in_hold else ""])
+
+
+func _is_locally_dead() -> bool:
+	if _net == null or _net.shadow_state == null:
+		return false
+	return (_net.shadow_state as PlayerState).health <= 0
+
+
+# Wall-clock tiredness; identical on server + client modulo small clock drift
+# (acceptable for transition-speed feel — reconcile will smooth any progress
+# divergence). Replicate in PlayerState if drift becomes visible.
+func current_tiredness() -> float:
+	var now: int = Time.get_ticks_usec()
+	if now < _tiredness_decay_starts_at_us:
+		# Inside a peak-hold window — value is frozen at base.
+		return clampf(_tiredness_base, 0.0, 1.0)
+	var elapsed_s: float = float(now - _tiredness_decay_starts_at_us) / 1_000_000.0
+	var decayed: float = _tiredness_base - (elapsed_s / TIREDNESS_DECAY_SEC)
+	return clampf(decayed, 0.0, 1.0)
+
+
+# Each call adds TIREDNESS_BUMP onto the current (decayed) tiredness, snapshots
+# the new value as the base, and pushes the decay anchor TIREDNESS_PEAK_HOLD_SEC
+# into the future so the new peak holds briefly before decay resumes.
+func bump_tiredness(reason: String = "") -> void:
+	if _free_bumps_remaining > 0:
+		_free_bumps_remaining -= 1
+		if TIREDNESS_DEBUG:
+			print("[TIRED free] reason=%s  no increment (free pool remaining=%d)" % [
+					reason, _free_bumps_remaining])
+		return
+	var before: float = current_tiredness()
+	_tiredness_base = clampf(before + TIREDNESS_BUMP, 0.0, 1.0)
+	_tiredness_decay_starts_at_us = Time.get_ticks_usec() + int(TIREDNESS_PEAK_HOLD_SEC * 1_000_000)
+	if TIREDNESS_DEBUG:
+		print("[TIRED bump] reason=%s  before=%.3f  +%.3f  -> base=%.3f  hold=%.2fs  slowdown=%.2fx" % [
+				reason, before, TIREDNESS_BUMP, _tiredness_base, TIREDNESS_PEAK_HOLD_SEC, tiredness_slowdown()])
+
+
+# Per-tick "freeze" used while a crouch/prone state is active so the peak
+# slowdown actually persists through the whole transition + 0.25s grace after
+# the state exits. Silent (no log) because it fires every tick. Snapshots the
+# (frozen-or-decayed) current value into the base so the next decay window
+# starts from exactly the visible value.
+func tiredness_refresh_hold() -> void:
+	_tiredness_base = current_tiredness()
+	_tiredness_decay_starts_at_us = Time.get_ticks_usec() + int(TIREDNESS_PEAK_HOLD_SEC * 1_000_000)
+
+
+# Loud version — refresh + log. Called at notable boundary events only
+# (full crouch, full prone, fully stood up) for traceability.
+func tiredness_hold_peak(reason: String = "") -> void:
+	var snapshot: float = current_tiredness()
+	tiredness_refresh_hold()
+	if TIREDNESS_DEBUG:
+		print("[TIRED hold] reason=%s  base=%.3f  hold=%.2fs  slowdown=%.2fx" % [
+				reason, snapshot, TIREDNESS_PEAK_HOLD_SEC, tiredness_slowdown()])
+
+
+# Slowdown multiplier in [1.0, 3.0]. slowdown(0)=1, slowdown(0.5)=1.5,
+# slowdown(1)=3. Quadratic. Tune by changing the coefficient.
+func tiredness_slowdown() -> float:
+	var t: float = current_tiredness()
+	return 1.0 + 2.0 * t * t
 
 
 # Advance shadow_state forward by one cmd. State machines read player.input for
@@ -267,6 +462,21 @@ func _gather_command(delta: float) -> PlayerInput:
 # Used in authority live ticks, server ticks, and replay after snapshot ack —
 # must therefore be idempotent for a given (state, cmd) pair.
 func _simulate(state: PlayerState, cmd: PlayerInput, delta: float) -> void:
+	# Dead short-circuit: pin to the graveyard, kill velocity, leave state
+	# machines untouched (no logic ticks while dead so gravity/transitions
+	# don't run). Look stays current so look_abs returning at respawn isn't
+	# jarring. ShootHandler._respawn_player overwrites pos+health, then this
+	# branch stops gating and normal simulation resumes.
+	if state.health <= 0:
+		state.pos = Constants.GRAVEYARD
+		state.velocity = Vector3.ZERO
+		game_position = Constants.GRAVEYARD
+		game_velocity = Vector3.ZERO
+		game_transform.origin = Constants.GRAVEYARD
+		state.look = cmd.look_abs
+		# state.movement_state / peek_state / *_progress all stay at last value
+		# so the proxy/visual representation doesn't churn on the graveyard.
+		return
 	# Tick 1: NetPredictor.previous_cmd is null until the framework records it
 	# at the end of the first authority tick. Use current cmd as its own
 	# predecessor so edge helpers (is_jump_just_pressed etc.) return false
@@ -323,6 +533,16 @@ func _load_simulation_state(state: PlayerState) -> void:
 # + state-machine sync_visual fires here so visual_physics sees the updated
 # visual state when it runs next.
 func _apply_state(state: PlayerState) -> void:
+	_set_dead_visual(state.health <= 0)
+	# Dead players are pinned to the graveyard regardless of role/authority so
+	# reconcile smoothing can't drag the scene through the world toward the
+	# off-map position. Snap directly; visual_physics is short-circuited too.
+	if state.health <= 0:
+		global_position = Constants.GRAVEYARD
+		velocity = Vector3.ZERO
+		game_position = Constants.GRAVEYARD
+		game_velocity = Vector3.ZERO
+		return
 	if NetSession.is_server:
 		global_position = state.pos
 		velocity = state.velocity
@@ -415,7 +635,17 @@ func _apply_corrections(state: PlayerState) -> void:
 # buffer. We blend pos / velocity / look, then drive visual SMs via state ids
 # + progress fields. extrapolation_s > 0 when the buffer is empty in the
 # future direction.
-func _proxy_apply(from_state, to_state, alpha: float, extrapolation_s: float, delta: float) -> void:
+func _proxy_apply(from_state, to_state, alpha: float, extrapolation_s: float, _segment_s: float, delta: float) -> void:
+	# Remote proxy visibility: hide once health hits 0 so other clients see
+	# dead players vanish in lockstep with the death overlay on the victim.
+	var proxy_hp: int = (from_state as PlayerState).health
+	if to_state != null:
+		proxy_hp = (to_state as PlayerState).health if alpha >= 0.5 else proxy_hp
+	_set_dead_visual(proxy_hp <= 0)
+	if proxy_hp <= 0:
+		global_position = Constants.GRAVEYARD
+		velocity = Vector3.ZERO
+		return
 	if to_state == null:
 		var s: PlayerState = from_state as PlayerState
 		global_position = s.pos
@@ -464,9 +694,10 @@ func _proxy_apply(from_state, to_state, alpha: float, extrapolation_s: float, de
 
 # === Movement helpers (called by state machines) =================================
 
-func set_parameters(speed: float, acceleration: float) -> void:
+func set_parameters(speed: float, acceleration: float, strafe_scale: float = 1.0) -> void:
 	_speed = speed
 	_acceleration = acceleration
+	_strafe_scale = strafe_scale
 
 
 func on_floor(ctx: Enums.IntegrationContext) -> bool:
@@ -519,7 +750,7 @@ func update_gravity(delta: float, ctx: Enums.IntegrationContext) -> void:
 
 func update_movement(delta: float, ctx: Enums.IntegrationContext) -> void:
 	var _input_dir := Vector2(
-		input.input_packet.move_left_right,
+		input.input_packet.move_left_right * _strafe_scale,
 		input.input_packet.move_forward_backward,
 	)
 
@@ -569,3 +800,31 @@ func update_velocity(ctx: Enums.IntegrationContext) -> void:
 func despawn() -> void:
 	print("I'm (%s) being despawned!" % name)
 	if is_authority: get_tree().change_scene_to_file(Constants.MAIN_MENU_SCENE_PATH)
+
+
+# Toggle dead visual: hide capsule + collision mesh while dead. CameraController
+# stays active so the local view keeps rendering (over the dead-overlay HUD).
+var _dead_visual_state: bool = false
+
+func _set_dead_visual(dead: bool) -> void:
+	if dead == _dead_visual_state:
+		return
+	_dead_visual_state = dead
+	var vc: Node = get_node_or_null("VisualCollider")
+	var gc: Node = get_node_or_null("GameController")
+	# First-person hands (under camera) — hide them too so dead spectator camera
+	# isn't waving floating hands. (Local death also drops a full-screen black
+	# overlay in the HUD, so this is mostly belt-and-suspenders.)
+	var fp_hands: Node = get_node_or_null("CameraController/Camera3D/Sketchfab_Scene")
+	var los: Node = get_node_or_null("CameraController/Camera3D/LineOfSightMesh")
+	if vc != null:
+		vc.visible = not dead
+	if gc != null:
+		gc.visible = not dead
+	if fp_hands != null:
+		fp_hands.visible = not dead
+	if los != null:
+		los.visible = not dead
+	# Note: physics collisions stay enabled (ShootHandler uses analytical capsule
+	# tests against shadow_state, not physics raycasts, and we want the corpse
+	# to keep standing on the floor until respawn snaps it).

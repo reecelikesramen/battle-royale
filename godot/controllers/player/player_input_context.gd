@@ -10,6 +10,12 @@ var prev_input_packet: PlayerInput = null
 func is_sprinting() -> bool:
 	return input_packet.sprint
 
+# Sprint requires forward input. get_axis("move_forward","move_backward") yields
+# negative when W is held, so forward == move_forward_backward < 0. Used by all
+# sprint entry/maintain checks so sideways or backward sprinting isn't allowed.
+func is_sprinting_forward() -> bool:
+	return input_packet.sprint and input_packet.move_forward_backward < 0.0
+
 func is_sprint_just_pressed() -> bool:
 	return input_packet.sprint and not prev_input_packet.sprint
 

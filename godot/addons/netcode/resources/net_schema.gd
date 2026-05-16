@@ -138,19 +138,41 @@ static var _revalidate_scheduled: bool = false
 		command_template = v
 		_schedule_emit_changed()
 
-## Simulation tick rate (Hz). The predictor's _physics_process executes
-## _simulate at roughly this cadence; in practice Godot's physics step is
-## fixed so this is the design target.
+## Per-entity simulation + wire rate (Hz). Server-side hosts gate their
+## _physics_process at (project_physics_hz / tick_hz) so high-frequency
+## entities (players, vehicles) and low-frequency ones (props, projectiles,
+## ambient world objects) can coexist without all paying the player rate.
+## The wire rate equals this — each gated tick produces one snapshot.
 @export var tick_hz: int = 120:
 	set(v):
 		tick_hz = v
 		_schedule_emit_changed()
-## Server broadcast rate (Hz). Snapshots are sent every (tick_hz / snapshot_hz)
-## ticks. Lower = less bandwidth + more interpolation; higher = more bandwidth
-## + tighter visuals.
+## Historical: explicit server broadcast rate. Now redundant — entities
+## broadcast once per gated tick, so the on-wire rate equals tick_hz. Field
+## kept (and still hashed) for pinned-hash backwards compatibility; remove on
+## the next breaking-change pass. Don't read for behavior, use tick_hz.
 @export var snapshot_hz: int = 30:
 	set(v):
 		snapshot_hz = v
+		_schedule_emit_changed()
+
+## Per-field proxy interpolation declarations (LERP / SLERP / DISCRETE /
+## HERMITE / PREDICTED). When non-empty, NetPredictor pre-blends snapshots
+## and the host's _proxy_apply receives a single blended state instead of
+## raw (from, to, alpha). Leave empty to keep the host-driven signature
+## (current behavior — used by the player which has bespoke proxy logic).
+@export var field_interp: Dictionary[StringName, NetFieldInterp] = {}:
+	set(v):
+		field_interp = v
+		_schedule_emit_changed()
+
+## Multiplier on the proxy ring buffer's auto-tuned inter-sample delay.
+## 1.0 = render one segment behind (default). 0.5 = tighter, more
+## extrapolation. 2.0 = safer under jitter at the cost of perceived lag.
+## Replaces the dead NetTimeline.interp_window_ratio.
+@export var buffer_segments: float = 1.0:
+	set(v):
+		buffer_segments = maxf(v, 0.0)
 		_schedule_emit_changed()
 
 ## Per-field codec config keyed by field name. One entry per @export var on

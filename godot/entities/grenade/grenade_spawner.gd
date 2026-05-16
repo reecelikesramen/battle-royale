@@ -18,6 +18,12 @@ func _ready() -> void:
 
 func _on_throw_request(peer_id: int, payload: PackedByteArray) -> void:
 	print("[GRENADE] server received throw from peer=%d bytes=%d" % [peer_id, payload.size()])
+	# Dead players can't throw. shadow_state.health<=0 → drop.
+	var thrower_pred: NetPredictor = NetReplication.get_entity(1, peer_id) as NetPredictor
+	if thrower_pred != null and thrower_pred.shadow_state != null:
+		if (thrower_pred.shadow_state as PlayerState).health <= 0:
+			print("[GRENADE] throw rejected: peer=%d is dead" % peer_id)
+			return
 	var now_us: int = Time.get_ticks_usec()
 	var last_us: int = _last_throw_us.get(peer_id, 0)
 	if last_us > 0 and now_us - last_us < int(THROW_COOLDOWN_SEC * 1_000_000):
@@ -46,6 +52,7 @@ func _on_throw_request(peer_id: int, payload: PackedByteArray) -> void:
 	s.state = Grenade.STATE_FLYING
 	s.fuse_remaining = 3.0
 	s.explosion_progress = 0.0
+	grenade.thrower_id = peer_id
 	grenade.global_position = origin
 	grenade.global_basis = Basis.IDENTITY
 	grenade.linear_velocity = velocity

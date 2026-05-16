@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://dykxmwq5pnw8h"]
+
+[ext_resource type="Script" uid="uid://dcu57s6ux1x8v" path="res://tools/generate_collision_res.gd" id="1_704bs"]
+
+[node name="GenerateCollisionRes" type="Node" unique_id=1953769880]
+script = ExtResource("1_704bs")

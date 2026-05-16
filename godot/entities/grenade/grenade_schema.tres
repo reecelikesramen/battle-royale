@@ -5,12 +5,36 @@
 [ext_resource type="Script" uid="uid://nerxe2t21ft7" path="res://addons/netcode/resources/net_state_field.gd" id="2_field"]
 [ext_resource type="Script" uid="uid://dh0tg4ybbnptl" path="res://addons/netcode/resources/net_correction.gd" id="3_corr"]
 [ext_resource type="Script" uid="uid://do0r0qgoi7ufc" path="res://entities/grenade/grenade_state.gd" id="4_gstate"]
+[ext_resource type="Script" uid="uid://d2h504b43trwl" path="res://addons/netcode/resources/net_field_interp.gd" id="5_finterp"]
 
 [sub_resource type="Resource" id="CorrDiscreteState"]
 script = ExtResource("3_corr")
 name = &"discrete_state"
 fields = PackedStringArray("state")
 always_snap = true
+
+[sub_resource type="Resource" id="InterpExplosion"]
+script = ExtResource("5_finterp")
+
+[sub_resource type="Resource" id="InterpFuse"]
+script = ExtResource("5_finterp")
+
+[sub_resource type="Resource" id="InterpPos"]
+script = ExtResource("5_finterp")
+mode = 4
+velocity_field = &"velocity"
+acceleration = Vector3(0, -9.8, 0)
+
+[sub_resource type="Resource" id="InterpRotation"]
+script = ExtResource("5_finterp")
+mode = 1
+
+[sub_resource type="Resource" id="InterpState"]
+script = ExtResource("5_finterp")
+mode = 2
+
+[sub_resource type="Resource" id="InterpVelocity"]
+script = ExtResource("5_finterp")
 
 [sub_resource type="Resource" id="FieldExplosionProgress"]
 script = ExtResource("2_field")
@@ -35,6 +59,10 @@ quant = 4
 script = ExtResource("2_field")
 no_interp = true
 
+[sub_resource type="Resource" id="FieldVelocity"]
+script = ExtResource("2_field")
+quant = 3
+
 [sub_resource type="Resource" id="GrenadeStateTemplate"]
 script = ExtResource("4_gstate")
 
@@ -43,12 +71,21 @@ script = ExtResource("1_schema")
 id = 2
 state_template = SubResource("GrenadeStateTemplate")
 tick_hz = 60
-snapshot_hz = 20
+snapshot_hz = 60
+field_interp = Dictionary[StringName, ExtResource("5_finterp")]({
+&"explosion_progress": SubResource("InterpExplosion"),
+&"fuse_remaining": SubResource("InterpFuse"),
+&"pos": SubResource("InterpPos"),
+&"rotation_quat": SubResource("InterpRotation"),
+&"state": SubResource("InterpState"),
+&"velocity": SubResource("InterpVelocity")
+})
 state_fields = Dictionary[StringName, ExtResource("2_field")]({
 &"explosion_progress": SubResource("FieldExplosionProgress"),
 &"fuse_remaining": SubResource("FieldFuse"),
 &"pos": SubResource("FieldPos"),
 &"rotation_quat": SubResource("FieldRotation"),
-&"state": SubResource("FieldState")
+&"state": SubResource("FieldState"),
+&"velocity": SubResource("FieldVelocity")
 })
 corrections = Array[ExtResource("3_corr")]([SubResource("CorrDiscreteState")])

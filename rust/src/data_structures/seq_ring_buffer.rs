@@ -26,6 +26,12 @@ struct InterpolationPair {
     #[var]
     extrapolation_s: f64,
     #[var]
+    /// Wall-clock seconds between `from` and `to` samples. 0 when `to` is
+    /// missing (single-sample fallback) or the buffer holds only one entry.
+    /// Used by host `_proxy_apply` implementations that need real segment dt
+    /// for tangent-weighted interpolation (Hermite / Catmull-Rom).
+    segment_s: f64,
+    #[var]
     is_valid: bool,
 }
 
@@ -40,6 +46,11 @@ struct SequenceRingBuffer {
     newest_sequence_id: u16,
     count: usize,
     buffer_delay_us: i64,
+    /// Scales the auto-tuned `buffer_delay_us`. 1.0 = render one inter-sample
+    /// segment behind (default), 0.5 = tighter (more extrapolation), 2.0 =
+    /// safer under jitter (extra perceived latency). Set per-schema by
+    /// NetPredictor via `set_buffer_delay_multiplier` at register time.
+    buffer_delay_multiplier: f64,
 }
 
 #[godot_api]
@@ -54,6 +65,7 @@ impl IRefCounted for SequenceRingBuffer {
             newest_sequence_id: 65535,
             count: 0,
             buffer_delay_us: 0,
+            buffer_delay_multiplier: 1.0,
         }
     }
 }
@@ -107,7 +119,8 @@ impl SequenceRingBuffer {
             if let Some(prev_arrival_timestamp_us) = prev_arrival_timestamp_us {
                 let delta_us = arrival_timestamp_us - prev_arrival_timestamp_us;
                 if delta_us > 0 {
-                    self.buffer_delay_us = delta_us.clamp(MIN_DELAY_US, MAX_DELAY_US);
+                    let scaled = (delta_us as f64 * self.buffer_delay_multiplier) as i64;
+                    self.buffer_delay_us = scaled.clamp(MIN_DELAY_US, MAX_DELAY_US);
                 } else if arrival_timestamp_us != -1 || prev_arrival_timestamp_us != -1 {
                     // not -1 and not -1 supresses insert from unacked inputs since its not needed for this
                     godot_warn!("Timestamp is older than previous entry: {} < {}", arrival_timestamp_us, prev_arrival_timestamp_us);
@@ -241,6 +254,7 @@ impl SequenceRingBuffer {
             to: Variant::nil(),
             alpha: 0.0,
             extrapolation_s: 0.0,
+            segment_s: 0.0,
             is_valid: false,
         });
 
@@ -297,6 +311,7 @@ impl SequenceRingBuffer {
             pair.bind_mut().to = to.value.clone();
             pair.bind_mut().alpha = alpha;
             pair.bind_mut().extrapolation_s = extrapolation_us as f64 / 1_000_000.0;
+            pair.bind_mut().segment_s = span as f64 / 1_000_000.0;
             pair.bind_mut().is_valid = true;
         } else if let Some(from) = from {
             pair.bind_mut().from = from.value.clone();
@@ -324,5 +339,13 @@ impl SequenceRingBuffer {
     #[func]
     fn buffer_delay_us(&self) -> i64 {
         self.buffer_delay_us
+    }
+
+    /// Scales the auto-tuned inter-sample delay. Set once per schema by
+    /// `NetPredictor` from `NetSchema.buffer_segments`. Takes effect on the
+    /// next sample insertion (when the auto-tuner runs).
+    #[func]
+    fn set_buffer_delay_multiplier(&mut self, m: f64) {
+        self.buffer_delay_multiplier = m.max(0.0);
     }
 }

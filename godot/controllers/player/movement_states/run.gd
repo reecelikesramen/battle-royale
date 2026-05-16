@@ -30,7 +30,7 @@ func logic_transitions() -> void:
 	if is_zero_approx(player.game_velocity.x) and is_zero_approx(player.game_velocity.z):
 		transition.emit(&"IdleMovementState")
 
-	if player.input.is_sprinting():
+	if player.input.is_sprinting_forward():
 		transition.emit(&"SprintMovementState")
 
 	if player.input.is_walk_mode():

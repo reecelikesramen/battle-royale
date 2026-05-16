@@ -32,24 +32,39 @@ func _ready() -> void:
 	_maybe_autoconnect()
 
 
-# Honors `-- --client [ip] [port] [username]` user args so scripts/run-debug.sh
-# can spin up clients without anyone clicking the Connect button. All three
-# trailing args are optional and fall back to localhost / default port / a
-# generated username.
+# Skip the menu and connect immediately. Honors any of:
+#   -- --client [ip] [port] [username]     # legacy form used by run-debug.sh
+#   -- --autojoin                          # localhost:45876, auto username
+#   -- --autojoin <ip>                     # custom host, default port
+#   -- --autojoin <ip:port>                # custom host + port shorthand
+#   -- --autojoin <ip> <port> [username]   # explicit form
+# Drop into Godot's editor "Main Run Args" (Project Settings → Editor → Run)
+# or pass via the CLI: `godot --path godot/ -- --autojoin` to bypass the menu.
 func _maybe_autoconnect() -> void:
 	var args := OS.get_cmdline_user_args()
 	var idx := args.find("--client")
+	if idx == -1:
+		idx = args.find("--autojoin")
 	if idx == -1:
 		return
 
 	var ip := "127.0.0.1"
 	var port := 45876
 	var username := "AutoClient_%d" % (Time.get_ticks_msec() % 10000)
-	if idx + 1 < args.size():
-		ip = args[idx + 1]
-	if idx + 2 < args.size():
+	if idx + 1 < args.size() and not args[idx + 1].begins_with("--"):
+		var first: String = args[idx + 1]
+		# Accept `ip:port` shorthand or bare ip
+		if ":" in first:
+			var parts := first.split(":")
+			ip = parts[0]
+			if parts.size() > 1:
+				port = int(parts[1])
+		else:
+			ip = first
+	if idx + 2 < args.size() and not args[idx + 2].begins_with("--") \
+			and not (":" in args[idx + 1]):
 		port = int(args[idx + 2])
-	if idx + 3 < args.size():
+	if idx + 3 < args.size() and not args[idx + 3].begins_with("--"):
 		username = args[idx + 3]
 
 	NetClient.username = username

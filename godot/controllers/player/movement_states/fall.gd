@@ -1,11 +1,12 @@
 extends MovementState
 
-@export var SPEED := 6.0
-@export var ACCELERATION := 20.0
+@export var SPEED := 3.5
+@export var ACCELERATION := 5.0
 
 
 func logic_enter() -> void:
-	player.set_parameters(SPEED, ACCELERATION)
+	# Match jump: don't raise the wish-dir target above the previous ground speed.
+	player.set_parameters(minf(SPEED, player._speed), ACCELERATION)
 
 
 func visual_enter() -> void:
@@ -30,7 +31,7 @@ func _land_target() -> StringName:
 	var moving := !is_zero_approx(player.game_velocity.x) or !is_zero_approx(player.game_velocity.z)
 	if not moving:
 		return &"IdleMovementState"
-	if player.input.is_sprinting():
+	if player.input.is_sprinting_forward():
 		return &"SprintMovementState"
 	if player.input.is_walk_mode():
 		return &"WalkMovementState"

@@ -18,7 +18,7 @@ func logic_transitions() -> void:
 
 	if !is_zero_approx(player.game_velocity.x) or !is_zero_approx(player.game_velocity.z):
 		# Run is the default ground locomotion. Walk on toggle, Sprint on hold.
-		if player.input.is_sprinting():
+		if player.input.is_sprinting_forward():
 			transition.emit(&"SprintMovementState")
 		elif player.input.is_walk_mode():
 			transition.emit(&"WalkMovementState")

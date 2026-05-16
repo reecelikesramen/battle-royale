@@ -47,7 +47,7 @@ func _get_configuration_warnings() -> PackedStringArray:
 #   _apply_corrections(delta: float) -> void
 #       Lerp scene-graph toward shadow_state. Host-owned in Sprint 1; future
 #       sprint moves the schema-driven loop into the framework.
-#   _proxy_apply(from_state, to_state, alpha, extrapolation_s, delta) -> void
+#   _proxy_apply(from_state, to_state, alpha, extrapolation_s, segment_s, delta) -> void
 #       Proxy interp + scene write. Host owns the field interpolation today.
 
 # Identity. Set by the owning controller before/while adding as child.
@@ -197,6 +197,15 @@ func _ready() -> void:
 		_resolve_children()
 		_cache_state_field_cfgs()
 		_cache_command_field_cfgs()
+		# Per-schema proxy buffer scaling. Takes effect on the next ring buffer
+		# auto-tune (i.e., when the second snapshot arrives).
+		if player_state_buffer.has_method(&"set_buffer_delay_multiplier"):
+			player_state_buffer.set_buffer_delay_multiplier(schema.buffer_segments)
+		# Per-entity server tick rate: schema declares tick_hz, predictor gates
+		# _server_tick every (physics_hz / tick_hz) physics frames. tick_hz=120
+		# (player default) → fire every frame; tick_hz=60 → every 2nd; etc.
+		var physics_hz: int = ProjectSettings.get_setting("physics/common/physics_ticks_per_second", 120)
+		_server_tick_every = maxi(1, physics_hz / maxi(1, schema.tick_hz))
 
 	# Hosts that need to seed scene-derived defaults into shadow/render (spawn
 	# position, initial state-machine ids, etc.) implement _seed_state(state).
@@ -451,6 +460,17 @@ static func _user_field_names(res: Resource) -> PackedStringArray:
 # Networking data structures.
 var server_input_queue := JitterBuffer.new()
 var player_state_buffer := SequenceRingBuffer.new()
+# Per-predictor mutable state owned by NetProxyBlender. Holds last rendered
+# values for PREDICTED-mode fields so correction lerp survives across ticks.
+# Empty unless this schema declares field_interp.
+var _proxy_correction_state: Dictionary = {}
+# Per-entity tick-rate gating. Server-side _server_tick fires once every
+# `_server_tick_every` physics ticks (derived from physics_hz / schema.tick_hz
+# at register time). Higher physics rates with lower-priority entities means
+# the server skips most work for cheap props / ambient objects while keeping
+# players running hot.
+var _server_tick_every: int = 1
+var _server_tick_ctr: int = 0
 var input_sequence := PacketSequence.new()
 var unacked_inputs := SequenceRingBuffer.new()
 
@@ -1153,7 +1173,15 @@ func _physics_process(delta: float) -> void:
 	if schema == null or shadow_state == null:
 		return
 	if NetSession.is_server:
-		_server_tick(delta)
+		# Per-entity tick-rate gate. Skip _server_tick on intermediate ticks so
+		# low-priority entities (props, projectiles) cost a fraction of what
+		# players cost. Effective dt scales with the gate so time-based fields
+		# advance correctly.
+		_server_tick_ctr += 1
+		if _server_tick_ctr < _server_tick_every:
+			return
+		_server_tick_ctr = 0
+		_server_tick(delta * float(_server_tick_every))
 	elif is_local_authority:
 		_authority_tick(delta)
 	else:
@@ -1253,6 +1281,11 @@ func _server_tick(_delta: float) -> void:
 
 # Remote proxy: interpolate two ring entries, hand off to host for scene write.
 # No simulate, no reconcile.
+#
+# Two host signatures depending on schema.field_interp:
+#   - empty (host-driven, default): host._proxy_apply(from, to, alpha, ext_s, seg_s, delta)
+#   - non-empty (schema-driven blending): host._proxy_apply(blended, from, to, delta)
+# NetProxyBlender does the math; host just writes blended fields into the scene.
 func _proxy_tick(delta: float) -> void:
 	if host == null or not host.has_method(&"_proxy_apply"):
 		return
@@ -1260,7 +1293,14 @@ func _proxy_tick(delta: float) -> void:
 	var pair := player_state_buffer.get_interpolation_pair(now_us)
 	if not pair.is_valid:
 		return
-	host._proxy_apply(pair.from, pair.to, pair.alpha, pair.extrapolation_s, delta)
+	if schema != null and not schema.field_interp.is_empty():
+		var blended: NetState = NetProxyBlender.blend(
+				state_template, schema.field_interp,
+				pair.from, pair.to, pair.alpha, pair.segment_s,
+				pair.extrapolation_s, _proxy_correction_state, delta)
+		host._proxy_apply(blended, pair.from, pair.to, delta)
+	else:
+		host._proxy_apply(pair.from, pair.to, pair.alpha, pair.extrapolation_s, pair.segment_s, delta)
 
 
 const _AXIS_INDEX := {"x": 0, "y": 1, "z": 2, "w": 3}

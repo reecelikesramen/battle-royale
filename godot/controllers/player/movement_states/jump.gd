@@ -1,13 +1,16 @@
 extends MovementState
 
-@export var SPEED := 5.0
-@export var ACCELERATION := 20.0
+@export var SPEED := 3.5
+@export var ACCELERATION := 5.0
 @export var JUMP_VELOCITY := 4.5
 
 var _enter_time := -1
 
 func logic_enter() -> void:
-	player.set_parameters(SPEED, ACCELERATION)
+	# Cap target at the previous ground speed so walk-jump (2.0) doesn't get
+	# bumped up to 3.5. Sprint/run still clamp to 3.5 — momentum above the cap is
+	# preserved by low AIR_FRICTION rather than by raising the wish-dir target.
+	player.set_parameters(minf(SPEED, player._speed), ACCELERATION)
 	player.game_velocity.y += JUMP_VELOCITY
 	_enter_time = Time.get_ticks_usec()
 
@@ -43,7 +46,7 @@ func _land_target() -> StringName:
 	var moving := !is_zero_approx(player.game_velocity.x) or !is_zero_approx(player.game_velocity.z)
 	if not moving:
 		return &"IdleMovementState"
-	if player.input.is_sprinting():
+	if player.input.is_sprinting_forward():
 		return &"SprintMovementState"
 	if player.input.is_walk_mode():
 		return &"WalkMovementState"

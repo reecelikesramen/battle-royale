@@ -13,6 +13,7 @@ const UNCROUCH_FALL_DISTANCE := 2.0
 var progress := 0.0
 
 var _wants_to_uncrouch := false
+var _prev_wants_to_uncrouch := false
 var _crouch_anim_length := 0.0
 
 # Debug: track progress observed by logic vs visual sides to spot rubber-band.
@@ -43,6 +44,10 @@ func logic_enter() -> void:
 		else:
 			progress = 0.0
 		_wants_to_uncrouch = false
+		_prev_wants_to_uncrouch = false
+		# Fresh crouch (not a replay) — bump tiredness for the down-transition.
+		# Standing-up edge in logic_transitions bumps again for the up-transition.
+		player.bump_tiredness("crouch_enter")
 	#if player.is_authority:
 		#print("[CR-ENTER f=%d] replay=%s progress=%.4f wants_uncrouch=%s" % [
 				#Engine.get_physics_frames(), player.is_replaying_inputs, progress, _wants_to_uncrouch])
@@ -75,10 +80,34 @@ func logic_physics(delta: float) -> void:
 	if player.is_replaying_inputs:
 		return
 	
+	var slowdown: float = player.tiredness_slowdown()
+	var step: float
 	if _wants_to_uncrouch and not _crouch_shapecast.is_colliding():
-		progress -= delta * UNCROUCH_SPEED
+		step = -delta * UNCROUCH_SPEED / slowdown
 	else:
-		progress += delta * CROUCH_SPEED
+		step = delta * CROUCH_SPEED / slowdown
+	var prev_progress: float = progress
+	progress += step
+	progress = clampf(progress, 0.0, _crouch_anim_length)
+	# Freeze tiredness throughout the crouch state so the peak slowdown
+	# actually persists through the transition. State-exit + 0.25s lets decay
+	# resume after stood-up.
+	if not player.is_replaying_inputs:
+		# Only freeze tiredness while actively animating (progress strictly between
+		# 0 and max). At either terminal we let the 0.25s hold from tiredness_hold_peak
+		# expire so decay can start.
+		var animating: bool = progress > 0.0 and progress < _crouch_anim_length
+		if animating:
+			player.tiredness_refresh_hold()
+		# Loud markers at exact peak boundaries — these push a fresh 0.25s hold
+		# that runs out and lets decay take over at the terminal pose.
+		if step > 0.0 and prev_progress < _crouch_anim_length and progress >= _crouch_anim_length:
+			player.tiredness_hold_peak("full_crouch")
+		elif step < 0.0 and prev_progress > 0.0 and progress <= 0.0:
+			player.tiredness_hold_peak("crouch_stood_up")
+	if player.TIREDNESS_DEBUG and player.is_authority:
+		print("[TIRED crouch] tired=%.3f  slowdown=%.2fx  step=%+.4f  progress=%.3f  want_un=%s" % [
+				player.current_tiredness(), slowdown, step, progress, _wants_to_uncrouch])
 		
 	
 	progress = clampf(progress, 0.0, _crouch_anim_length)
@@ -102,6 +131,13 @@ func logic_transitions() -> void:
 	# TODO: make work with crouch jump
 	if not player.on_floor(Enums.IntegrationContext.GAME) and player.game_position.y < player.last_grounded_height - UNCROUCH_FALL_DISTANCE:
 		_wants_to_uncrouch = true
+
+	# Rising-edge bump: when the player commits to standing back up, fatigue
+	# accumulates again so the up-transition slows down too. Suppressed during
+	# replay so the bump stays deterministic with the original tick.
+	if _wants_to_uncrouch and not _prev_wants_to_uncrouch and not player.is_replaying_inputs:
+		player.bump_tiredness("uncrouch_edge")
+	_prev_wants_to_uncrouch = _wants_to_uncrouch
 
 	# Direct crouch -> prone (skip uncrouch path).
 	if player.input.is_prone_just_pressed():

@@ -4,8 +4,31 @@
 [ext_resource type="Script" uid="uid://cft1cl0nousye" path="res://controllers/player/player_input.gd" id="2_r06js"]
 [ext_resource type="Script" uid="uid://dh0tg4ybbnptl" path="res://addons/netcode/resources/net_correction.gd" id="3_x5rij"]
 [ext_resource type="Script" uid="uid://cmp2jhgtkye1t" path="res://addons/netcode/resources/net_schema.gd" id="4_ncpu0"]
+[ext_resource type="Script" uid="uid://d2h504b43trwl" path="res://addons/netcode/resources/net_field_interp.gd" id="5_r06js"]
 [ext_resource type="Script" uid="uid://nerxe2t21ft7" path="res://addons/netcode/resources/net_state_field.gd" id="6_4w2p4"]
 [ext_resource type="Script" uid="uid://buifrwxokyh4s" path="res://controllers/player/player_state.gd" id="6_k7ufs"]
+
+[sub_resource type="Resource" id="Resource_cmd_look"]
+script = ExtResource("6_4w2p4")
+quant = 3
+
+[sub_resource type="Resource" id="Resource_cmd_mfwd"]
+script = ExtResource("6_4w2p4")
+quant = 1
+min_value = -1.0
+max_value = 1.0
+
+[sub_resource type="Resource" id="Resource_cmd_mlr"]
+script = ExtResource("6_4w2p4")
+quant = 1
+min_value = -1.0
+max_value = 1.0
+
+[sub_resource type="Resource" id="Resource_cmd_peeklr"]
+script = ExtResource("6_4w2p4")
+quant = 1
+min_value = -1.0
+max_value = 1.0
 
 [sub_resource type="Resource" id="Resource_k7ufs"]
 script = ExtResource("2_r06js")
@@ -37,8 +60,7 @@ always_smooth = true
 
 [sub_resource type="Resource" id="Resource_ngq10"]
 script = ExtResource("6_4w2p4")
-quant = 1
-max_value = 1.0
+quant = 3
 
 [sub_resource type="Resource" id="Resource_health"]
 script = ExtResource("6_4w2p4")
@@ -58,9 +80,7 @@ max_value = 8.0
 
 [sub_resource type="Resource" id="Resource_7kikq"]
 script = ExtResource("6_4w2p4")
-quant = 1
-min_value = -1.0
-max_value = 1.0
+quant = 3
 
 [sub_resource type="Resource" id="Resource_bg44s"]
 script = ExtResource("6_4w2p4")
@@ -74,32 +94,9 @@ quant = 3
 
 [sub_resource type="Resource" id="Resource_kv0la"]
 script = ExtResource("6_4w2p4")
-quant = 1
-max_value = 1.0
-
-[sub_resource type="Resource" id="Resource_5k8u3"]
-script = ExtResource("6_4w2p4")
 quant = 3
 
-[sub_resource type="Resource" id="Resource_cmd_mfwd"]
-script = ExtResource("6_4w2p4")
-quant = 1
-min_value = -1.0
-max_value = 1.0
-
-[sub_resource type="Resource" id="Resource_cmd_mlr"]
-script = ExtResource("6_4w2p4")
-quant = 1
-min_value = -1.0
-max_value = 1.0
-
-[sub_resource type="Resource" id="Resource_cmd_peeklr"]
-script = ExtResource("6_4w2p4")
-quant = 1
-min_value = -1.0
-max_value = 1.0
-
-[sub_resource type="Resource" id="Resource_cmd_look"]
+[sub_resource type="Resource" id="Resource_5k8u3"]
 script = ExtResource("6_4w2p4")
 quant = 3
 
@@ -123,10 +120,10 @@ state_fields = Dictionary[StringName, ExtResource("6_4w2p4")]({
 &"prone_progress": SubResource("Resource_kv0la"),
 &"velocity": SubResource("Resource_5k8u3")
 })
-corrections = Array[ExtResource("3_x5rij")]([SubResource("Resource_ia2k4"), SubResource("Resource_j4kbt"), SubResource("Resource_dednk")])
 command_fields = Dictionary[StringName, ExtResource("6_4w2p4")]({
 &"look_abs": SubResource("Resource_cmd_look"),
 &"move_forward_backward": SubResource("Resource_cmd_mfwd"),
 &"move_left_right": SubResource("Resource_cmd_mlr"),
 &"peek_left_right": SubResource("Resource_cmd_peeklr")
 })
+corrections = Array[ExtResource("3_x5rij")]([SubResource("Resource_ia2k4"), SubResource("Resource_j4kbt"), SubResource("Resource_dednk")])

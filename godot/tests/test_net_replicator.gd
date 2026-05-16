@@ -17,7 +17,7 @@ class FakeHost:
 		captured_count += 1
 		(state as PlayerState).pos = Vector3(captured_count, 0.0, 0.0)
 
-	func _proxy_apply(from_state, to_state, alpha: float, _ext: float, _delta: float) -> void:
+	func _proxy_apply(from_state, to_state, alpha: float, _ext: float, _segment_s: float, _delta: float) -> void:
 		proxy_calls += 1
 		last_from = from_state
 		last_to = to_state

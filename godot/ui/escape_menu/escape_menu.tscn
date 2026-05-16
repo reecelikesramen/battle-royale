@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3 uid="uid://cjlrm8h7knl1t"]
+[gd_scene load_steps=8 format=3 uid="uid://cjlrm8h7knl1t"]
 
 [ext_resource type="Theme" uid="uid://rai2e421dmte" path="res://ui/themes/main_menu.tres" id="1_1yra2"]
 [ext_resource type="Script" uid="uid://cqwjgcdirm54s" path="res://ui/escape_menu/escape_menu.gd" id="1_g21w1"]
@@ -14,6 +14,14 @@ bg_color = Color(0.1, 0.1, 0.1, 0.6)
 corner_detail = 5
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3548v"]
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+bg_color = Color(0.1, 0.1, 0.1, 0.6)
+corner_detail = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_content"]
 content_margin_left = 0.0
 content_margin_top = 0.0
 content_margin_right = 0.0
@@ -125,5 +133,31 @@ text = "Graphics"
 layout_mode = 2
 text = "Audio"
 
+[node name="ContentPanel" type="PanelContainer" parent="VBoxContainer/OptionsAreaHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_content")
+
+[node name="ContentMargin" type="MarginContainer" parent="VBoxContainer/OptionsAreaHBox/ContentPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 10
+
+[node name="ContentScroll" type="ScrollContainer" parent="VBoxContainer/OptionsAreaHBox/ContentPanel/ContentMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ContentVBox" type="VBoxContainer" parent="VBoxContainer/OptionsAreaHBox/ContentPanel/ContentMargin/ContentScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+
 [connection signal="pressed" from="VBoxContainer/PanelContainer/MarginContainer/TopHBox/MarginContainer/HBoxContainer/OptionsButton" to="." method="_on_options_button_pressed"]
 [connection signal="pressed" from="VBoxContainer/PanelContainer/MarginContainer/TopHBox/MarginContainer/HBoxContainer/ExitButton" to="." method="_on_exit_button_pressed"]
+[connection signal="pressed" from="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer/GameplaySettingsButton" to="." method="_on_gameplay_settings_button_pressed"]
+[connection signal="pressed" from="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer/DisplaySettingsButton" to="." method="_on_display_settings_button_pressed"]
+[connection signal="pressed" from="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer/GraphicsSettingsButton" to="." method="_on_graphics_settings_button_pressed"]
+[connection signal="pressed" from="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer/AudioSettingsButton" to="." method="_on_audio_settings_button_pressed"]

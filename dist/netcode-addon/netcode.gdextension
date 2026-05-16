@@ -1,0 +1,21 @@
+; Distribution-ready gdextension manifest. All paths point inside
+; addons/netcode/bin/ — there is no dev fallback to rust/target/. Rendered into
+; a packaging output directory by scripts/make-addon.sh when bundling the
+; addon for shipping; the in-tree addons/netcode/netcode.gdextension keeps
+; dev-mode paths to rust/target/debug/ so the editor picks up `cargo build`
+; automatically.
+
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.1
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 =     "res://addons/netcode/bin/libnetcode.linux.x86_64.so"
+linux.release.x86_64 =   "res://addons/netcode/bin/libnetcode.linux.x86_64.so"
+windows.debug.x86_64 =   "res://addons/netcode/bin/libnetcode.windows.x86_64.dll"
+windows.release.x86_64 = "res://addons/netcode/bin/libnetcode.windows.x86_64.dll"
+macos.debug =            "res://addons/netcode/bin/libnetcode.macos.universal.dylib"
+macos.release =          "res://addons/netcode/bin/libnetcode.macos.universal.dylib"
+macos.debug.arm64 =      "res://addons/netcode/bin/libnetcode.macos.universal.dylib"
+macos.release.arm64 =    "res://addons/netcode/bin/libnetcode.macos.universal.dylib"
