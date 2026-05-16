@@ -171,6 +171,19 @@ fn apply_updates(
     updater::write_atomic(&install.join("VERSION.txt"), manifest.latest.as_bytes())
         .context("write VERSION.txt")?;
 
+    // Stamp build-sha.txt so the in-game version handshake matches the
+    // freshly-installed bundle. Per-component updates (rust_lib / pck) leave
+    // the ZIP-shipped build-sha.txt untouched, so without this write the
+    // client would handshake with the OLD sha against the new server and
+    // get kicked. Manifests from older publish steps may not carry the
+    // field — in that case leave whatever's on disk in place.
+    if let Some(target_ver) = manifest.versions.get(&manifest.latest) {
+        if let Some(sha) = &target_ver.build_sha {
+            updater::write_atomic(&install.join("build-sha.txt"), sha.as_bytes())
+                .context("write build-sha.txt")?;
+        }
+    }
+
     // Self-update last. We can't overwrite the running launcher binary, so we
     // download to <launcher>.new and hand off to the launcher-updater
     // bootstrap, which waits for us to exit, swaps the file, and relaunches.

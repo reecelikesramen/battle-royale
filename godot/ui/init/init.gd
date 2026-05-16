@@ -106,6 +106,7 @@ func start_auto_update() -> void:
 		return
 	
 	print("Build version: ", _build_version)
+	print("Build SHA: ", Constants.get_build_sha())
 	print("OS prefix: ", _os_prefix)
 	print("Executable dir: ", OS.get_executable_path().get_base_dir())
 	

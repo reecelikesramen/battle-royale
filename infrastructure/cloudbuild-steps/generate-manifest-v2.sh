@@ -124,8 +124,20 @@ prev_tag=$(echo "$versions" | grep -vx "${_TAG_NAME}" | sort -V | tail -1 || tru
 # the prior manifest above.
 tag="${_TAG_NAME}"
 released_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-version_obj='{released_at: $rel, platforms: {}}'
+# Cross-platform build identity for this release. Written to release/BUILD_SHA
+# by the compute-build-sha + zip-builds cloudbuild steps. The launcher reads
+# this from the manifest and stamps build-sha.txt next to the game binary on
+# every update — keeps the in-game version handshake aligned with the
+# actually-installed release without having to re-download the platform zip.
+if [[ -f release/BUILD_SHA ]]; then
+  current_build_sha=$(cat release/BUILD_SHA)
+else
+  echo "WARNING: release/BUILD_SHA missing — manifest will omit build_sha for $tag" >&2
+  current_build_sha=""
+fi
+version_obj='{released_at: $rel, build_sha: $build_sha, platforms: {}}'
 jq_input=$(echo "$jq_input" | jq --arg tag "$tag" --arg rel "$released_at" \
+  --arg build_sha "$current_build_sha" \
   ".versions[\$tag] = $version_obj")
 
 while IFS='|' read -r platform component path_tpl installed_name; do

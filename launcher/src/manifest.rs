@@ -15,6 +15,12 @@ pub struct Manifest {
 #[derive(Debug, Deserialize, Clone)]
 pub struct VersionEntry {
     pub released_at: Option<String>,
+    // Cross-platform git short SHA of the commit that produced this release.
+    // The launcher stamps this into build-sha.txt next to the game binary on
+    // every successful update; the in-game version handshake compares it to
+    // the server's sha and disconnects on mismatch.
+    #[serde(default)]
+    pub build_sha: Option<String>,
     pub platforms: BTreeMap<String, PlatformEntry>,
 }
 

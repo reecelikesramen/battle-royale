@@ -81,6 +81,14 @@ fi
 install -m 0755 "$LAUNCHER" "$MACOS/launcher"
 install -m 0755 "$UPDATER"  "$MACOS/launcher-updater"
 
+# Drop build-sha.txt next to the game binary inside the .app. Runtime reads
+# via OS.get_executable_path().get_base_dir(), which on macOS points at
+# Contents/MacOS — same dir we install the launcher into. Optional: if the
+# caller didn't pass BUILD_SHA_FILE we skip silently (local dev rewraps).
+if [[ -n "${BUILD_SHA_FILE:-}" && -f "$BUILD_SHA_FILE" ]]; then
+  install -m 0644 "$BUILD_SHA_FILE" "$MACOS/build-sha.txt"
+fi
+
 # Patch Info.plist: CFBundleExecutable -> launcher. PlistBuddy isn't on
 # Cloud Build's Linux runners, so we use a small Python rewrite via plistlib.
 python3 - "$PLIST" <<'PY'

@@ -410,9 +410,15 @@ jobs:
         run: |
           TAG_NAME="${{ steps.tag.outputs.name }}"
           
+          # _COMMIT_SHA: the GH commit that produced this build. Used as the
+          # cross-platform BUILD_SHA written into build-sha.txt and exchanged
+          # during the connect handshake; same commit = same build = clients
+          # and server handshake-match.
+          COMMIT_SHA="${{ github.sha }}"
+
           BUILD_ID=$(gcloud builds submit \
             --config=cloudbuild.yaml \
-            --substitutions="_TAG_NAME=$TAG_NAME,_BUCKET=$GCS_BUCKET,_EXPORT_NAME=$EXPORT_NAME,_PROJECT_NAME=$PROJECT_NAME,_PROJECT_PATH=$PROJECT_PATH,_GODOT_VERSION=$GODOT_VERSION" \
+            --substitutions="_TAG_NAME=$TAG_NAME,_BUCKET=$GCS_BUCKET,_EXPORT_NAME=$EXPORT_NAME,_PROJECT_NAME=$PROJECT_NAME,_PROJECT_PATH=$PROJECT_PATH,_GODOT_VERSION=$GODOT_VERSION,_COMMIT_SHA=$COMMIT_SHA" \
             --format='value(id)' \
             --async)
           
