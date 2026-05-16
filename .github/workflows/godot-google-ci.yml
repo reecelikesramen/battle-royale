@@ -28,6 +28,11 @@ env:
   GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
   GCS_BUCKET: ${{ vars.GCS_BUCKET }}
 
+  # Strip upstream-crate debug info from rmeta/rlib intermediates as well as
+  # final artifacts. Pairs with profile.release.debug=false + strip="symbols"
+  # in the workspace Cargo.toml. Roughly halves Windows target/ size.
+  RUSTFLAGS: "-Cdebuginfo=0"
+
 jobs:
   # ============ RUST BUILDS (native runners) ============
   # Builds two artifacts per platform from the same workspace:

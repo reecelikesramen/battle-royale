@@ -34,7 +34,7 @@ func _ready() -> void:
 	_http = HTTPRequest.new()
 	add_child(_http)
 
-	if _bootstrap_metadata():
+	if await _bootstrap_metadata():
 		_enabled = true
 		var t := Timer.new()
 		t.wait_time = REPORT_INTERVAL_S
@@ -46,10 +46,10 @@ func _ready() -> void:
 		queue_free()
 
 func _bootstrap_metadata() -> bool:
-	var project = _metadata_get(PROJECT_PATH)
-	var inst_id = _metadata_get(INSTANCE_ID_PATH)
-	var name = _metadata_get(INSTANCE_NAME_PATH)
-	var zone_full = _metadata_get(ZONE_PATH)
+	var project = await _metadata_get(PROJECT_PATH)
+	var inst_id = await _metadata_get(INSTANCE_ID_PATH)
+	var name = await _metadata_get(INSTANCE_NAME_PATH)
+	var zone_full = await _metadata_get(ZONE_PATH)
 	if project.is_empty() or inst_id.is_empty() or zone_full.is_empty():
 		return false
 	_project_id = project

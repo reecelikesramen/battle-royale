@@ -29,18 +29,33 @@ steps:
     args:
       - -c
       - |
-        mkdir -p ${_PROJECT_PATH}/addons/rust/bin
+        # The Sprint-3 netcode addon's gdextension manifest expects libs at
+        # addons/netcode/bin/ with platform-suffixed names:
+        #   linux:   libnetcode.linux.x86_64.so
+        #   windows: libnetcode.windows.x86_64.dll
+        #   macos:   libnetcode.macos.universal.dylib
+        # CI uploads the raw cargo output names (librust.{so,dylib}, rust.dll)
+        # under gs://.../rust-libs/<tag>/; rename them into place here.
+        mkdir -p ${_PROJECT_PATH}/addons/netcode/bin
         mkdir -p rust/target/release
         mkdir -p rust/target/debug
 
-        # Download all platform libraries
-        gsutil -m cp gs://${_BUCKET}/rust-libs/${_TAG_NAME}/* ${_PROJECT_PATH}/addons/rust/bin/
+        STAGE=$(mktemp -d)
+        gsutil -m cp gs://${_BUCKET}/rust-libs/${_TAG_NAME}/* "$STAGE/"
 
-        # Copy Linux lib to expected paths for editor
-        cp ${_PROJECT_PATH}/addons/rust/bin/librust.so rust/target/release/librust.so
-        cp ${_PROJECT_PATH}/addons/rust/bin/librust.so rust/target/debug/librust.so
+        cp "$STAGE/librust.so"     ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.linux.x86_64.so
+        cp "$STAGE/rust.dll"       ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.windows.x86_64.dll
+        cp "$STAGE/librust.dylib"  ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.macos.universal.dylib
 
-        ls -la ${_PROJECT_PATH}/addons/rust/bin/
+        # The gdextension manifest's debug-mode entries point at the in-tree
+        # rust/target/debug/ paths used during local dev. Headless export uses
+        # release; populate debug paths too so godot --editor --quit-after
+        # (import step) doesn't error.
+        cp "$STAGE/librust.so" rust/target/release/librust.so
+        cp "$STAGE/librust.so" rust/target/debug/librust.so
+        rm -rf "$STAGE"
+
+        ls -la ${_PROJECT_PATH}/addons/netcode/bin/
 
   # ============ DOWNLOAD LAUNCHER BINARIES ============
   - name: 'gcr.io/cloud-builders/gsutil'

@@ -92,67 +92,76 @@ get_blob_info() {
 }
 
 # ─── Build the JSON ──────────────────────────────────────────────────────────
-# Stream out to versions.json via jq. We construct a nested map and let jq
-# pretty-print at the end.
+# Strategy: pull the previously-published manifest (if any) and reuse its
+# version entries verbatim. Only re-hash artifacts for the CURRENT tag. This
+# keeps generate-manifest O(1) per release instead of O(num_releases).
+#
+# Cold-build fallback: if no prior manifest exists OR its schema is wrong,
+# emit a fresh manifest containing only the current tag (historical tags
+# would have been published with the legacy v1 schema and aren't recoverable
+# without a re-hash — operator can backfill manually if needed).
 
-jq_input=$(jq -n '{schema: 2, latest: $latest, versions: {}}' --arg latest "$latest")
-
-prev_tag=""
-for tag in $(echo "$versions" | sort -V); do
-  # For historical versions, read released_at from GCS object creation time of
-  # the canonical base PCK so we don't overwrite past timestamps on every
-  # rebuild. For the current tag, use now.
-  if [[ "$tag" == "${_TAG_NAME}" ]]; then
-    released_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+prior_path="$WORK/prior.json"
+if gsutil -q cp "gs://${_BUCKET}/versions.json" "$prior_path" 2>/dev/null; then
+  prior_schema=$(jq -r '.schema // 0' "$prior_path" 2>/dev/null || echo 0)
+  if [[ "$prior_schema" == "2" ]]; then
+    jq_input=$(jq --arg latest "$latest" '.latest = $latest' "$prior_path")
+    echo "Reusing $(jq '.versions | length' "$prior_path") prior version entries from published manifest."
   else
-    # Pick any base PCK as the representative artifact; fall through to "now"
-    # if absent (shouldn't happen for an indexed version).
-    released_at=$(gsutil stat "gs://${_BUCKET}/releases/${tag}/linux-base.pck" 2>/dev/null \
-      | awk -F': ' '/Creation time:/ {print $2}' \
-      | xargs -I{} date -u -d '{}' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) \
-      || released_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    echo "Prior manifest schema=$prior_schema, not v2 — building fresh."
+    jq_input=$(jq -n '{schema: 2, latest: $latest, versions: {}}' --arg latest "$latest")
   fi
-  version_obj='{released_at: $rel, platforms: {}}'
-  jq_input=$(echo "$jq_input" | jq --arg tag "$tag" --arg rel "$released_at" \
-    ".versions[\$tag] = $version_obj")
+else
+  echo "No prior versions.json on GCS — building fresh."
+  jq_input=$(jq -n '{schema: 2, latest: $latest, versions: {}}' --arg latest "$latest")
+fi
 
-  while IFS='|' read -r platform component path_tpl installed_name; do
-    [[ -z "$platform" ]] && continue
-    full_path=${path_tpl//\{tag\}/$tag}
-    if ! get_blob_info "$full_path"; then
-      continue
+# Previous tag (used for delta `from:` field). Take the highest version
+# strictly less than _TAG_NAME from the bucket listing.
+prev_tag=$(echo "$versions" | grep -vx "${_TAG_NAME}" | sort -V | tail -1 || true)
+
+# Only hash artifacts for the CURRENT release. Historical entries come from
+# the prior manifest above.
+tag="${_TAG_NAME}"
+released_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+version_obj='{released_at: $rel, platforms: {}}'
+jq_input=$(echo "$jq_input" | jq --arg tag "$tag" --arg rel "$released_at" \
+  ".versions[\$tag] = $version_obj")
+
+while IFS='|' read -r platform component path_tpl installed_name; do
+  [[ -z "$platform" ]] && continue
+  full_path=${path_tpl//\{tag\}/$tag}
+  if ! get_blob_info "$full_path"; then
+    continue
+  fi
+  sha=${blob_sha[$full_path]}
+  size=${blob_size[$full_path]}
+  url=${blob_url[$full_path]}
+
+  component_json=$(jq -n \
+    --arg url "$url" --arg sha "$sha" --argjson size "$size" \
+    --arg installed_name "$installed_name" \
+    '{url: $url, sha256: $sha, size: $size, installed_name: $installed_name}')
+
+  # Optional delta block.
+  if [[ "$component" != "pck_base" && "$component" != "pck_patch" && -n "$prev_tag" ]]; then
+    delta_path="deltas/${tag}/${platform}/${component}.zpatch"
+    if get_blob_info "$delta_path" 2>/dev/null; then
+      delta_json=$(jq -n \
+        --arg url "${blob_url[$delta_path]}" \
+        --arg sha "${blob_sha[$delta_path]}" \
+        --argjson size "${blob_size[$delta_path]}" \
+        --arg from "$prev_tag" \
+        '{url: $url, sha256: $sha, size: $size, from: $from, algo: "zstd"}')
+      component_json=$(echo "$component_json" | jq --argjson d "$delta_json" '. + {delta: $d}')
     fi
-    sha=${blob_sha[$full_path]}
-    size=${blob_size[$full_path]}
-    url=${blob_url[$full_path]}
+  fi
 
-    component_json=$(jq -n \
-      --arg url "$url" --arg sha "$sha" --argjson size "$size" \
-      --arg installed_name "$installed_name" \
-      '{url: $url, sha256: $sha, size: $size, installed_name: $installed_name}')
-
-    # Optional delta block (populated by Sprint 4 step).
-    if [[ "$component" != "pck_base" && "$component" != "pck_patch" && -n "$prev_tag" ]]; then
-      delta_path="deltas/${tag}/${platform}/${component}.zpatch"
-      if get_blob_info "$delta_path" 2>/dev/null; then
-        delta_json=$(jq -n \
-          --arg url "${blob_url[$delta_path]}" \
-          --arg sha "${blob_sha[$delta_path]}" \
-          --argjson size "${blob_size[$delta_path]}" \
-          --arg from "$prev_tag" \
-          '{url: $url, sha256: $sha, size: $size, from: $from, algo: "zstd"}')
-        component_json=$(echo "$component_json" | jq --argjson d "$delta_json" '. + {delta: $d}')
-      fi
-    fi
-
-    jq_input=$(echo "$jq_input" | jq \
-      --arg tag "$tag" --arg platform "$platform" --arg component "$component" \
-      --argjson c "$component_json" \
-      '.versions[$tag].platforms[$platform][$component] = $c')
-  done <<< "$component_table"
-
-  prev_tag="$tag"
-done
+  jq_input=$(echo "$jq_input" | jq \
+    --arg tag "$tag" --arg platform "$platform" --arg component "$component" \
+    --argjson c "$component_json" \
+    '.versions[$tag].platforms[$platform][$component] = $c')
+done <<< "$component_table"
 
 echo "$jq_input" | jq '.' > versions.json
-echo "Wrote versions.json ($(wc -c < versions.json) bytes)"
+echo "Wrote versions.json ($(wc -c < versions.json) bytes, $(jq '.versions | length' versions.json) versions)"

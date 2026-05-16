@@ -18,3 +18,11 @@ sha2 = "0.10"
 ed25519-dalek = "2.1"
 anyhow = "1.0"
 thiserror = "2.0"
+
+# Release builds: no debug info, strip symbols. Cuts Windows target/ roughly
+# in half (MSVC otherwise emits big .pdb files even for release), and shrinks
+# all platforms a little. CI also passes RUSTFLAGS=-Cdebuginfo=0 to remove
+# upstream-crate debug info from rmeta/rlib intermediates.
+[profile.release]
+debug = false
+strip = "symbols"

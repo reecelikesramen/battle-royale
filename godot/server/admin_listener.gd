@@ -44,10 +44,10 @@ func _process(_dt: float) -> void:
 		if c.get_status() != StreamPeerTCP.STATUS_CONNECTED:
 			_clients.erase(c)
 			continue
-		var available := c.get_available_bytes()
+		var available: int = c.get_available_bytes()
 		if available <= 0:
 			continue
-		var buf := c.get_data(available)
+		var buf: Array = c.get_data(available)
 		if buf[0] != OK:
 			continue
 		var text := (buf[1] as PackedByteArray).get_string_from_utf8()
