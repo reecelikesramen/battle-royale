@@ -104,11 +104,13 @@ fn apply_updates(
         ensure_executable(&path)?;
     }
 
-    // Components we install. Order matters only insofar as a partial failure
-    // mid-list shouldn't brick the install — each install is atomic-rename so
-    // even an interrupted update leaves us with a coherent (older) install.
+    // game_binary is intentionally skipped: the manifest URL points at the
+    // full platform .zip (mac/linux/windows), not a single binary file. The
+    // initial install delivers the binary via that zip download out-of-band;
+    // in-place game-binary updates require Godot-version-bump release and
+    // re-downloading the zip. PCK patches + launcher self-update cover the
+    // common per-tag change set without touching the binary.
     let components = [
-        ("game_binary", target_plat.game_binary.as_ref()),
         ("rust_lib", target_plat.rust_lib.as_ref()),
         ("pck_base", target_plat.pck_base.as_ref()),
         ("pck_patch", target_plat.pck_patch.as_ref()),

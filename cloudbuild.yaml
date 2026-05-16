@@ -260,6 +260,8 @@ steps:
         cp launchers/windows/launcher-updater.exe build/windows/launcher-updater.exe 2>/dev/null || true
         cp launchers/linux/launcher               build/linux/launcher               2>/dev/null || true
         cp launchers/linux/launcher-updater       build/linux/launcher-updater       2>/dev/null || true
+        chmod +x build/linux/launcher build/linux/launcher-updater 2>/dev/null || true
+        cp infrastructure/cloudbuild-steps/linux-launcher.desktop build/linux/Battle\ Royale.desktop 2>/dev/null || true
 
         # Windows
         (cd build && zip -r ../release/windows.zip windows)
@@ -271,15 +273,11 @@ steps:
         mv build/linux/linux-base.pck release/ 2>/dev/null || true
         mv build/linux/${_TAG_NAME}.pck release/linux-${_TAG_NAME}.pck 2>/dev/null || true
 
-        # Mac (already zipped — repack to inject launcher next to .app bundle).
-        # Note: the launcher is currently placed alongside the .app rather than
-        # inside it. Sprint 8 will codesign + notarize a proper Launcher.app.
-        if [ -f "build/mac/${_EXPORT_NAME}.zip" ]; then
-          # Append launcher binaries to the mac zip in place — no extract/repack.
-          # `zip -j` adds files at the zip root (siblings of the .app bundle)
-          # rather than under their on-disk path.
-          (cd launchers/mac && zip -jq ../../build/mac/${_EXPORT_NAME}.zip launcher launcher-updater)
-        fi
+        # Mac: rewrap Godot's exported .app so the launcher is the entry point.
+        # Double-click of Battle Royale.app then opens the launcher UI directly
+        # instead of running the raw game in a Terminal session. Gatekeeper
+        # approval covers the whole bundle in one right-click → Open.
+        bash infrastructure/cloudbuild-steps/build-mac-app.sh
         mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
         mv build/mac/mac-base.pck release/ 2>/dev/null || true
         mv build/mac/${_TAG_NAME}.pck release/mac-${_TAG_NAME}.pck 2>/dev/null || true

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Battle Royale
+Comment=Multiplayer FPS
+Exec=./launcher
+Icon=icon
+Terminal=false
+Categories=Game;ActionGame;
