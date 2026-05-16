@@ -22,10 +22,10 @@ thiserror = { workspace = true }
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
 directories = "5.0"
 zstd = "0.13"
+slint = { version = "1.8", optional = true, default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-slint = { version = "1.8", optional = true, default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
 
 [build-dependencies]
 slint-build = "1.8"

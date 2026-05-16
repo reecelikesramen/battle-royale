@@ -127,11 +127,51 @@ jobs:
         shell: pwsh
         run: git config --global core.longpaths true
 
+      # GNS vendors a large C++ tree built via vcpkg. Caching the buildtrees
+      # cuts cold-build time on Windows from ~40min to ~10min.
+      - name: Cache vcpkg buildtrees (Windows)
+        if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg-buildtrees
+          key: vcpkg-buildtrees-${{ runner.os }}-${{ hashFiles('rust/Cargo.toml', 'Cargo.lock') }}
+          restore-keys: |
+            vcpkg-buildtrees-${{ runner.os }}-
+
+      # sccache wraps cl.exe — caches C++ object files across runs.
+      - name: Setup sccache (Windows)
+        if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      # Expose GH Actions cache tokens to env so vcpkg's `x-gha` binary-cache
+      # backend can use them. These aren't normally in env for subsequent steps.
+      - name: Export GHA cache env (Windows)
+        if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
       - name: Build gdextension (rust crate)
         if: steps.cache-lib.outputs.cache-hit != 'true'
         env:
           CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr/local' || '' }}
           GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\vcpkg-buildtrees' || '' }}
+          # Skip debug build of vcpkg deps (~halves cold C++ time on Windows).
+          VCPKG_DEFAULT_TRIPLET: ${{ runner.os == 'Windows' && 'x64-windows-release' || '' }}
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ runner.os == 'Windows' && 'x64-windows-release' || '' }}
+          # vcpkg binary cache via GitHub Actions cache. After first run, subsequent
+          # builds (even on different commits) re-download prebuilt packages instead
+          # of recompiling — works across PRs, branches, lockfile bumps.
+          VCPKG_BINARY_SOURCES: ${{ runner.os == 'Windows' && 'clear;x-gha,readwrite' || '' }}
+          # Use all available CPU cores for cl.exe (vcpkg respects this).
+          CL: ${{ runner.os == 'Windows' && '/MP' || '' }}
+          # sccache wraps the C/C++ compiler for GNS's vendored build (Windows only;
+          # macOS/Linux protobuf paths are smaller and not worth the overhead).
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && 'true' || '' }}
+          CMAKE_C_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
+          CMAKE_CXX_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && 'sccache' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --package rust
 
       - name: Build launcher (launcher crate)
@@ -145,12 +185,21 @@ jobs:
         shell: bash
         run: |
           mkdir -p target/release
-          if [ -f target/${{ matrix.target }}/release/${{ matrix.library-name }} ]; then
-            cp target/${{ matrix.target }}/release/${{ matrix.library-name }} target/release/
+          # On cache hit, lib is already at target/release/<name> (no rebuild).
+          # On cache miss, build wrote it to target/<target>/release/<name>; copy it.
+          SRC=target/${{ matrix.target }}/release/${{ matrix.library-name }}
+          DST=target/release/${{ matrix.library-name }}
+          if [ -f "$SRC" ]; then
+            cp "$SRC" "$DST"
+          elif [ ! -f "$DST" ]; then
+            echo "ERROR: gdextension lib missing at both $SRC and $DST" >&2
+            ls -la target/${{ matrix.target }}/release/ || true
+            ls -la target/release/ || true
+            exit 1
           fi
           cp target/${{ matrix.target }}/release/${{ matrix.launcher-name }} target/release/
           if [ "$RUNNER_OS" = "Linux" ]; then
-            cp target/${{ matrix.target }}/release/server-agent target/release/server-agent || true
+            cp target/${{ matrix.target }}/release/server-agent target/release/server-agent
           fi
 
       - name: Upload server-agent artifact (Linux only)
