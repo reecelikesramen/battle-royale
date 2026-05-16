@@ -131,6 +131,10 @@ jq_input=$(echo "$jq_input" | jq --arg tag "$tag" --arg rel "$released_at" \
 while IFS='|' read -r platform component path_tpl installed_name; do
   [[ -z "$platform" ]] && continue
   full_path=${path_tpl//\{tag\}/$tag}
+  # installed_name may also contain {tag} (e.g. pck_patch "<plat>-{tag}.pck")
+  # — substitute or the manifest ends up with a literal "{tag}" in the path
+  # and the launcher writes the file to a bogus location.
+  installed_name=${installed_name//\{tag\}/$tag}
   if ! get_blob_info "$full_path"; then
     continue
   fi

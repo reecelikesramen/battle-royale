@@ -154,6 +154,15 @@ fn apply_updates(
             ComponentAction::DownloadedFull => "downloaded",
         };
         let _ = tx.send(UpdateMessage::Status(format!("{label}: {suffix}")));
+
+        // game_binary + rust_lib are executables/loadable libs that must be
+        // chmod +x on unix. atomic-rename preserves the source file's mode
+        // (0644 from the GCS download), which makes the game binary fail
+        // to spawn with EACCES.
+        #[cfg(unix)]
+        if matches!(label, "game_binary" | "rust_lib") {
+            ensure_executable(&target_path)?;
+        }
     }
 
     // Stamp the new version into VERSION.txt durably.
