@@ -61,6 +61,23 @@ if [[ ! -d "$MACOS" ]]; then
   exit 1
 fi
 
+# Rename the Godot-exported game binary to match what the launcher looks
+# for (`battle-royale`, see launcher/src/platform.rs::game_exe_name).
+# Godot names the binary after the project's `application/config/name`,
+# which is "Battle Royale" with a space — so without this rename, the
+# launcher reports `game executable not found at .../battle-royale`.
+GAME_SRC=$(find "$MACOS" -maxdepth 1 -type f \
+  ! -name launcher ! -name launcher-updater ! -name battle-royale | head -1)
+if [[ -z "$GAME_SRC" ]]; then
+  if [[ ! -f "$MACOS/battle-royale" ]]; then
+    echo "ERROR: no game binary found in $MACOS" >&2
+    exit 1
+  fi
+else
+  mv "$GAME_SRC" "$MACOS/battle-royale"
+  chmod +x "$MACOS/battle-royale"
+fi
+
 install -m 0755 "$LAUNCHER" "$MACOS/launcher"
 install -m 0755 "$UPDATER"  "$MACOS/launcher-updater"
 
