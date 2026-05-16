@@ -60,7 +60,12 @@ chown gameserver:gameserver /opt/battle-royale/server-agent
 sudo -u gameserver -E /opt/battle-royale/refresh.sh || true
 
 systemctl daemon-reload
-systemctl enable --now battle-royale-server.service
-systemctl enable --now battle-royale-agent.service
+# Enable both first (no --now) so failures don't block each other; then start
+# them. A crash-looping server service used to make `enable --now` exit
+# non-zero and kill the rest of the script under `set -e`, leaving the agent
+# unit on disk but never enabled.
+systemctl enable battle-royale-server.service battle-royale-agent.service
+systemctl start battle-royale-server.service || true
+systemctl start battle-royale-agent.service  || true
 
 echo "startup-script complete"
