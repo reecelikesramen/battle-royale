@@ -26,7 +26,7 @@ var thrower_id: int = -1
 const THROWER_ARM_DISTANCE := 1.5
 var _armed_for_thrower: bool = false
 
-@onready var _net: NetReplicator = $NetReplicator
+@onready var _net: NetPredictor = $NetPredictor
 @onready var _shape: CollisionShape3D = $CollisionShape3D
 @onready var _body: MeshInstance3D = $Body
 @onready var _explosion: MeshInstance3D = $Explosion
@@ -45,8 +45,8 @@ func _ready() -> void:
 		_shape.disabled = true
 
 
-# Server hook: NetReplicator calls this once per gated physics tick
-# (physics_hz / schema.tick_hz = 60Hz for grenades at 120Hz physics). The
+# Server hook: NetPredictor (archetype=REPLICATED) calls this once per gated
+# physics tick (physics_hz / schema.tick_hz = 60Hz for grenades at 120Hz). The
 # scaled `dt` is the wall-time covered by this firing, so time-based fields
 # (fuse, explosion progress) advance regardless of the underlying physics
 # rate. Game logic + scene→state copy + visual update + queue_free all live
@@ -91,7 +91,7 @@ func _capture_state(state: GrenadeState, dt: float) -> void:
 		queue_free()
 
 
-# Schema-driven blending: NetReplicator (via NetPredictor base) inspects
+# Schema-driven blending: NetPredictor (archetype=REPLICATED) inspects
 # grenade_schema.tres.field_interp, pre-builds the blended state via
 # NetProxyBlender (PREDICTED on pos w/ gravity, SLERP on rotation, DISCRETE
 # on state, LERP on scalars), and hands it here. All this method does is
