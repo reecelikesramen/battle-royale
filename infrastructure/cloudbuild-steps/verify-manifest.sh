@@ -66,9 +66,12 @@ if ! command -v jq >/dev/null 2>&1; then
   chmod +x /usr/local/bin/jq
 fi
 
-CURRENT_TAG=$(jq -r .latest "$WORK/versions.json")
-if [[ "$CURRENT_TAG" != "${_TAG_NAME}" ]]; then
-  echo "ERROR: manifest .latest=$CURRENT_TAG but cloudbuild ran for ${_TAG_NAME}." >&2
+# Don't require .latest == _TAG_NAME — concurrent tag builds race, and a
+# newer tag legitimately winning .latest is fine. Just confirm OUR tag is
+# present in the manifest (i.e. our release was recorded).
+if ! jq -e --arg t "${_TAG_NAME}" '.versions[$t]' "$WORK/versions.json" >/dev/null; then
+  PUBLISHED_LATEST=$(jq -r .latest "$WORK/versions.json")
+  echo "ERROR: manifest has no entry for ${_TAG_NAME} (published .latest=$PUBLISHED_LATEST)." >&2
   exit 1
 fi
 

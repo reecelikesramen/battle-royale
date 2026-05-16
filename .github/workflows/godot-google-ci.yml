@@ -24,8 +24,12 @@ on:
 #
 # `github.sha` is the same for both runs (same commit). For workflow_dispatch
 # where there's no concurrent peer, `run_id` keeps each run isolated.
+# All tag-push builds share one group so they serialize globally — prevents
+# two concurrent releases from racing on versions.json publish + signing.
+# Non-tag pushes (main) still group by SHA so main+tag at the same commit
+# share + dedupe cleanly.
 concurrency:
-  group: build-${{ github.sha || github.run_id }}
+  group: ${{ github.ref_type == 'tag' && 'release-tags' || format('build-{0}', github.sha) }}
   cancel-in-progress: false
 
 env:
