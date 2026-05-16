@@ -30,6 +30,9 @@ env:
 
 jobs:
   # ============ RUST BUILDS (native runners) ============
+  # Builds two artifacts per platform from the same workspace:
+  #   1. the gdextension cdylib (rust crate)  →  target/release/{librust.*|rust.dll}
+  #   2. the launcher binary    (launcher crate) →  target/release/launcher{.exe}
   build-rust:
     strategy:
       fail-fast: false
@@ -39,14 +42,17 @@ jobs:
             target: aarch64-apple-darwin
             artifact-name: rust-macos
             library-name: librust.dylib
+            launcher-name: launcher
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact-name: rust-linux
             library-name: librust.so
+            launcher-name: launcher
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact-name: rust-windows
             library-name: rust.dll
+            launcher-name: launcher.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -57,33 +63,32 @@ jobs:
 
       # Ensure cache path exists for validation
       - name: Prepare cache directory
-        run: mkdir -p rust/target/release
+        run: mkdir -p target/release
 
-      # Check if we have a cached build for this exact source
+      # Cache the gdextension cdylib. Launcher binary is small so it always
+      # rebuilds; gates here check only the lib's source hash.
       - name: Cache built library
         id: cache-lib
         uses: actions/cache@v4
         with:
-          path: rust/target/release/${{ matrix.library-name }}
-          key: rust-lib-${{ matrix.target }}-${{ hashFiles('rust/src/**', 'rust/Cargo.toml', 'rust/Cargo.lock') }}
+          path: target/release/${{ matrix.library-name }}
+          key: rust-lib-${{ matrix.target }}-${{ hashFiles('rust/src/**', 'rust/Cargo.toml', 'Cargo.toml', 'Cargo.lock') }}
 
-      # ===== All steps below only run on cache miss =====
+      # ===== Toolchain + deps run regardless of cache hit; launcher always builds =====
 
       - name: Setup Rust
-        if: steps.cache-lib.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust deps
-        if: steps.cache-lib.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust -> target
+          workspaces: . -> target
           shared-key: ${{ matrix.target }}
           cache-all-crates: true
 
-      # Linux deps
+      # Linux deps (only needed for the gdextension's GNS dep, not the launcher)
       - name: Cache protobuf (Linux)
         if: runner.os == 'Linux' && steps.cache-lib.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -111,41 +116,63 @@ jobs:
           fi
           sudo ldconfig
 
-      # macOS deps
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS' && steps.cache-lib.outputs.cache-hit != 'true'
         run: |
           brew install openssl protobuf@21 pkg-config
           brew unlink protobuf@21 && brew link --force protobuf@21
 
-      # Windows
       - name: Enable long paths (Windows)
         if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
         shell: pwsh
         run: git config --global core.longpaths true
 
-      # Build
-      - name: Build Rust release
+      - name: Build gdextension (rust crate)
         if: steps.cache-lib.outputs.cache-hit != 'true'
-        working-directory: rust
         env:
           CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr/local' || '' }}
           GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\vcpkg-buildtrees' || '' }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --package rust
 
-      # Copy to expected path for gdextension compatibility
-      - name: Copy library to release dir
-        if: steps.cache-lib.outputs.cache-hit != 'true'
+      - name: Build launcher (launcher crate)
+        run: cargo build --release --target ${{ matrix.target }} --package launcher
+
+      - name: Build server-agent (Linux only)
+        if: runner.os == 'Linux'
+        run: cargo build --release --target ${{ matrix.target }} --package server-agent
+
+      - name: Stage release artifacts
         shell: bash
         run: |
-          mkdir -p rust/target/release
-          cp rust/target/${{ matrix.target }}/release/${{ matrix.library-name }} rust/target/release/
+          mkdir -p target/release
+          if [ -f target/${{ matrix.target }}/release/${{ matrix.library-name }} ]; then
+            cp target/${{ matrix.target }}/release/${{ matrix.library-name }} target/release/
+          fi
+          cp target/${{ matrix.target }}/release/${{ matrix.launcher-name }} target/release/
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp target/${{ matrix.target }}/release/server-agent target/release/server-agent || true
+          fi
 
-      # Upload as GitHub artifact (for next job)
-      - uses: actions/upload-artifact@v4
+      - name: Upload server-agent artifact (Linux only)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}-server-agent
+          path: target/release/server-agent
+          retention-days: 1
+
+      - name: Upload gdextension artifact
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: rust/target/release/${{ matrix.library-name }}
+          path: target/release/${{ matrix.library-name }}
+          retention-days: 1
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}-launcher
+          path: target/release/${{ matrix.launcher-name }}
           retention-days: 1
 
   # ============ UPLOAD TO GCS & TRIGGER CLOUD BUILD (only on tags) ============
@@ -194,6 +221,21 @@ jobs:
           gsutil -m cp rust-libs/rust-linux/librust.so "gs://$GCS_BUCKET/rust-libs/$TAG_NAME/librust.so"
           gsutil -m cp rust-libs/rust-macos/librust.dylib "gs://$GCS_BUCKET/rust-libs/$TAG_NAME/librust.dylib"
           gsutil -m cp rust-libs/rust-windows/rust.dll "gs://$GCS_BUCKET/rust-libs/$TAG_NAME/rust.dll"
+
+      - name: Upload launcher binaries to GCS
+        run: |
+          TAG_NAME="${{ steps.tag.outputs.name }}"
+          gsutil cp rust-libs/rust-linux-launcher/launcher    "gs://$GCS_BUCKET/launcher/$TAG_NAME/linux/launcher"
+          gsutil cp rust-libs/rust-macos-launcher/launcher    "gs://$GCS_BUCKET/launcher/$TAG_NAME/mac/launcher"
+          gsutil cp rust-libs/rust-windows-launcher/launcher.exe "gs://$GCS_BUCKET/launcher/$TAG_NAME/windows/launcher.exe"
+
+      - name: Upload server-agent to GCS
+        run: |
+          TAG_NAME="${{ steps.tag.outputs.name }}"
+          gsutil cp rust-libs/rust-linux-server-agent/server-agent "gs://$GCS_BUCKET/server-agent/$TAG_NAME/server-agent"
+          # Also publish as `latest` for the VM startup script to grab without
+          # needing to read the manifest.
+          gsutil cp rust-libs/rust-linux-server-agent/server-agent "gs://$GCS_BUCKET/server-agent/latest/server-agent"
 
       - name: Trigger Cloud Build
         id: trigger

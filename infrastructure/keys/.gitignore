@@ -1,0 +1,8 @@
+*priv*
+*private*
+*secret*
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx

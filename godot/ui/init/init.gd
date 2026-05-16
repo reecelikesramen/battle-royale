@@ -27,7 +27,15 @@ func _ready() -> void:
 	if NetSession.is_dedicated_server:
 		initialize()
 		return
-	
+
+	# Sprint 3: the Rust launcher now handles updates before spawning the
+	# game. The in-game auto-update flow stays available behind an env var
+	# (BR_LEGACY_UPDATER=1) for back-compat with old distributions launched
+	# without the new launcher.
+	if not OS.has_environment("BR_LEGACY_UPDATER"):
+		initialize()
+		return
+
 	restore_progress_ui()
 	process_patches_and_updates()
 

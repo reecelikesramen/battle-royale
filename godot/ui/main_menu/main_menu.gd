@@ -24,8 +24,10 @@ func _ready() -> void:
 	if OS.get_name() == "macOS":
 		get_window().content_scale_factor = 1.5
 
-	if ip_regex.compile("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$") != OK:
-		push_error("IP regex failed to compile")
+	# Accept either an IPv4 literal or a DNS hostname (RFC-952 / 1123 subset).
+	# Cloud server lives at playtest.server.pywire.dev — bare IPv4 still works.
+	if ip_regex.compile("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$|^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$") != OK:
+		push_error("IP/host regex failed to compile")
 	if num_regex.compile("^\\d+$") != OK:
 		push_error("Numeric regex failed to compile")
 
@@ -112,8 +114,8 @@ func _on_connect_button_pressed() -> void:
 		push_error("Server tried to connect")
 		return
 		
-	var ip_address = %IPAddressEdit.text if !%IPAddressEdit.text.is_empty() else "127.0.0.1"
-	var port = int(%PortEdit.text) if !%PortEdit.text.is_empty() else 45876
+	var ip_address = %IPAddressEdit.text if !%IPAddressEdit.text.is_empty() else Constants.DEFAULT_SERVER_HOST
+	var port = int(%PortEdit.text) if !%PortEdit.text.is_empty() else Constants.DEFAULT_SERVER_PORT
 
 	if !NetSession.is_connected:
 		NetSession.start_client(ip_address, port)

@@ -1,0 +1,18 @@
+[Unit]
+Description=Battle Royale server agent (idle watch + release watch)
+After=network-online.target battle-royale-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gameserver
+Group=gameserver
+ExecStart=/opt/battle-royale/server-agent --idle-secs 600 --poll-secs 60
+Restart=always
+RestartSec=5s
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

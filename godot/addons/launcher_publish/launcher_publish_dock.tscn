@@ -1,0 +1,23 @@
+[gd_scene load_steps=2 format=3 uid="uid://djktl3lpubpub"]
+
+[ext_resource type="Script" path="res://addons/launcher_publish/launcher_publish_dock.gd" id="1_dock"]
+
+[node name="LauncherPublish" type="VBoxContainer"]
+script = ExtResource("1_dock")
+
+[node name="Title" type="Label" parent="."]
+text = "Launcher Publish"
+
+[node name="Description" type="Label" parent="."]
+text = "Build manifests + bundle launcher binaries with your game exports."
+autowrap_mode = 3
+
+[node name="GenerateButton" type="Button" parent="."]
+text = "Generate manifest from folder..."
+
+[node name="DownloadButton" type="Button" parent="."]
+text = "Download launcher binaries..."
+
+[node name="Status" type="Label" parent="."]
+text = ""
+autowrap_mode = 3

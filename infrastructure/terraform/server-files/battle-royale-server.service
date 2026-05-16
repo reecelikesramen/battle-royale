@@ -1,0 +1,23 @@
+[Unit]
+Description=Battle Royale dedicated game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gameserver
+Group=gameserver
+WorkingDirectory=/opt/battle-royale
+ExecStartPre=/opt/battle-royale/refresh.sh
+ExecStart=/opt/battle-royale/battle-royale.x86_64 --server --headless
+Restart=always
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=60s
+
+# Logs to systemd journal
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

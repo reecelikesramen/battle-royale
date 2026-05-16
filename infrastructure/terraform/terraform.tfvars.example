@@ -1,0 +1,5 @@
+project_id        = "erudite-cycle-480104"
+region            = "us-central1"
+bucket_name       = "erudite-cycle-480104-game-builds"
+state_bucket_name = "erudite-cycle-480104-tfstate"
+github_repo       = "reecelikesramen/battle-royale"

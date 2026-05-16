@@ -1,4 +1,10 @@
 #!/bin/bash
+#
+# DEPRECATED — replaced by Terraform in infrastructure/terraform/.
+# See infrastructure/README.md for the new bootstrap + import flow.
+# This script is kept for historical reference only and will be removed
+# once the Terraform import has been validated against the live project.
+#
 set -e
 
 # ============ CONFIGURATION ============
