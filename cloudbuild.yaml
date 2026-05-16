@@ -264,17 +264,22 @@ steps:
       - -c
       - |
         set -euo pipefail
+        # `${_COMMIT_SHA}` IS a Cloud Build substitution (passed by GH
+        # Actions). Bash refs — `$$SHORT_SHA`, `$${SHORT_SHA:0:12}` — must
+        # be doubled or Cloud Build tries to look them up as substitutions
+        # and silently produces empty (parameter-expansion `${X:n:m}` isn't
+        # supported by Cloud Build's substitution syntax either).
         SHORT_SHA="${_COMMIT_SHA}"
-        SHORT_SHA="${SHORT_SHA:0:12}"
-        if [[ -z "$SHORT_SHA" ]]; then
+        SHORT_SHA="$${SHORT_SHA:0:12}"
+        if [[ -z "$$SHORT_SHA" ]]; then
           # A missing sha would mean every future client fails the handshake
           # against this release. Fail the build instead of shipping a broken
           # version-handshake bundle.
           echo "ERROR: _COMMIT_SHA substitution missing — refusing to build" >&2
           exit 1
         fi
-        echo -n "$SHORT_SHA" > BUILD_SHA
-        echo "BUILD_SHA = $SHORT_SHA"
+        echo -n "$$SHORT_SHA" > BUILD_SHA
+        echo "BUILD_SHA = $$SHORT_SHA"
 
   # ============ ZIP BUILDS ============
   - name: 'gcr.io/cloud-builders/gsutil'
