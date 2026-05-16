@@ -211,17 +211,17 @@ steps:
         set -euo pipefail
         if gcloud secrets describe authenticode-cert --quiet >/dev/null 2>&1; then
           which osslsigncode >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq osslsigncode)
-          CERT=$(mktemp)
-          PASS=$(gcloud secrets versions access latest --secret=authenticode-password)
-          gcloud secrets versions access latest --secret=authenticode-cert > "$CERT"
+          CERT=$$(mktemp)
+          PASS=$$(gcloud secrets versions access latest --secret=authenticode-password)
+          gcloud secrets versions access latest --secret=authenticode-cert > "$$CERT"
           # Sign both the game .exe and the launcher .exe before they get zipped.
           for f in build/windows/${_EXPORT_NAME}.exe launchers/windows/launcher.exe; do
-            [ -f "$f" ] || continue
-            osslsigncode sign -pkcs12 "$CERT" -pass "$PASS" -in "$f" -out "$f.signed" \
+            [ -f "$$f" ] || continue
+            osslsigncode sign -pkcs12 "$$CERT" -pass "$$PASS" -in "$$f" -out "$$f.signed" \
               -h sha256 -t http://timestamp.digicert.com
-            mv "$f.signed" "$f"
+            mv "$$f.signed" "$$f"
           done
-          shred -u "$CERT"
+          shred -u "$$CERT"
         else
           echo "no authenticode-cert secret; skipping Windows codesigning"
         fi
