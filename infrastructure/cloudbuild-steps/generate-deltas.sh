@@ -40,9 +40,12 @@ gsutil -q cp "gs://${_BUCKET}/releases/${prev_tag}/mac.zip"     prev/mac.zip    
 gsutil -q cp "gs://${_BUCKET}/rust-libs/${prev_tag}/librust.so"   prev/linux/librust.so   || true
 gsutil -q cp "gs://${_BUCKET}/rust-libs/${prev_tag}/librust.dylib" prev/mac/librust.dylib || true
 gsutil -q cp "gs://${_BUCKET}/rust-libs/${prev_tag}/rust.dll"     prev/windows/rust.dll   || true
-gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/linux/launcher"       prev/linux/launcher       || true
-gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/mac/launcher"         prev/mac/launcher         || true
-gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/windows/launcher.exe" prev/windows/launcher.exe || true
+gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/linux/launcher"               prev/linux/launcher               || true
+gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/mac/launcher"                 prev/mac/launcher                 || true
+gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/windows/launcher.exe"         prev/windows/launcher.exe         || true
+gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/linux/launcher-updater"       prev/linux/launcher-updater       || true
+gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/mac/launcher-updater"         prev/mac/launcher-updater         || true
+gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/windows/launcher-updater.exe" prev/windows/launcher-updater.exe || true
 
 # Unpack the prev zips so we can grab the game binaries.
 for plat in windows linux; do
@@ -75,11 +78,13 @@ out_root="deltas/${_TAG_NAME}"
 make_delta prev/windows/${_EXPORT_NAME}.exe build/windows/${_EXPORT_NAME}.exe ${out_root}/windows/game_binary.zpatch
 make_delta prev/windows/rust.dll            ${_PROJECT_PATH:-godot}/addons/rust/bin/rust.dll ${out_root}/windows/rust_lib.zpatch
 make_delta prev/windows/launcher.exe        launchers/windows/launcher.exe ${out_root}/windows/launcher.zpatch
+make_delta prev/windows/launcher-updater.exe launchers/windows/launcher-updater.exe ${out_root}/windows/launcher_updater.zpatch
 
 # Linux.
 make_delta prev/linux/${_EXPORT_NAME}.x86_64 build/linux/${_EXPORT_NAME}.x86_64 ${out_root}/linux/game_binary.zpatch
 make_delta prev/linux/librust.so             ${_PROJECT_PATH:-godot}/addons/rust/bin/librust.so ${out_root}/linux/rust_lib.zpatch
 make_delta prev/linux/launcher               launchers/linux/launcher ${out_root}/linux/launcher.zpatch
+make_delta prev/linux/launcher-updater       launchers/linux/launcher-updater ${out_root}/linux/launcher_updater.zpatch
 
 # macOS. The game binary lives inside the .app bundle.
 NEW_MAC_BIN="build/mac/${_PROJECT_NAME}.app/Contents/MacOS/${_PROJECT_NAME}"
@@ -87,6 +92,7 @@ PREV_MAC_BIN="prev/mac/${_PROJECT_NAME}.app/Contents/MacOS/${_PROJECT_NAME}"
 make_delta "$PREV_MAC_BIN" "$NEW_MAC_BIN"   ${out_root}/mac/game_binary.zpatch
 make_delta prev/mac/librust.dylib           ${_PROJECT_PATH:-godot}/addons/rust/bin/librust.dylib ${out_root}/mac/rust_lib.zpatch
 make_delta prev/mac/launcher                launchers/mac/launcher ${out_root}/mac/launcher.zpatch
+make_delta prev/mac/launcher-updater        launchers/mac/launcher-updater ${out_root}/mac/launcher_updater.zpatch
 
 # Upload all deltas.
 if compgen -G "deltas/${_TAG_NAME}/*/*.zpatch" > /dev/null; then

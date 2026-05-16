@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
 use crate::manifest::{self, Component, Manifest, PlatformEntry};
-use crate::platform::{install_dir, installed_version, platform_key};
+use crate::platform::{
+    install_dir, installed_version, launcher_exe_name, launcher_updater_exe_name, platform_key,
+};
 use crate::updater::{self, ComponentAction, DownloadProgress};
 
 const MANIFEST_URL_BASE: &str =
@@ -43,8 +45,8 @@ pub fn run(tx: Sender<UpdateMessage>) -> Result<()> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let manifest_url = format!("{MANIFEST_URL_BASE}/versions-v2.json?t={bust}");
-    let sig_url = format!("{MANIFEST_URL_BASE}/versions-v2.json.sig?t={bust}");
+    let manifest_url = format!("{MANIFEST_URL_BASE}/versions.json?t={bust}");
+    let sig_url = format!("{MANIFEST_URL_BASE}/versions.json.sig?t={bust}");
 
     let manifest_bytes = client
         .get(&manifest_url)
@@ -90,13 +92,21 @@ fn apply_updates(
         return Ok(());
     }
 
+    // launcher-updater is the bootstrap helper that swaps the launcher binary
+    // when it isn't running. Update it FIRST and in-place — it isn't running,
+    // so a normal atomic-rename works. The launcher itself is updated last via
+    // a deferred swap.
+    if let Some(updater_component) = target_plat.launcher_updater.as_ref() {
+        let path = install.join(launcher_updater_exe_name());
+        let _ = tx.send(UpdateMessage::Status("Updating launcher-updater...".into()));
+        updater::install_component(client, updater_component, &path, &current, |_| {})?;
+        #[cfg(unix)]
+        ensure_executable(&path)?;
+    }
+
     // Components we install. Order matters only insofar as a partial failure
     // mid-list shouldn't brick the install — each install is atomic-rename so
     // even an interrupted update leaves us with a coherent (older) install.
-    //
-    // The launcher component is skipped here in Sprint 4 — the launcher
-    // can't safely replace its own binary while running on Windows; Sprint 8
-    // adds a separate `launcher-updater` bootstrap for that.
     let components = [
         ("game_binary", target_plat.game_binary.as_ref()),
         ("rust_lib", target_plat.rust_lib.as_ref()),
@@ -150,12 +160,82 @@ fn apply_updates(
     updater::write_atomic(&install.join("VERSION.txt"), manifest.latest.as_bytes())
         .context("write VERSION.txt")?;
 
+    // Self-update last. We can't overwrite the running launcher binary, so we
+    // download to <launcher>.new and hand off to the launcher-updater
+    // bootstrap, which waits for us to exit, swaps the file, and relaunches.
+    if let Some(launcher_component) = target_plat.launcher.as_ref() {
+        if launcher_self_update_needed(&install, launcher_component)? {
+            let current_launcher = std::env::current_exe().context("current_exe")?;
+            let new_launcher = current_launcher.with_extension("new");
+            let _ = std::fs::remove_file(&new_launcher);
+            let _ = tx.send(UpdateMessage::Status("Updating launcher...".into()));
+            // Force a full download to the .new path. Skip the delta path — the
+            // currently-running launcher is the old version; patching the .new
+            // path with a delta keyed against the installed version wouldn't be
+            // meaningful, and we can't read the running binary as a patch base
+            // reliably on Windows.
+            updater::download_and_install(client, launcher_component, &new_launcher, |_| {})?;
+            #[cfg(unix)]
+            ensure_executable(&new_launcher)?;
+            hand_off_to_updater(&install, &new_launcher, &current_launcher, tx)?;
+            return Ok(());
+        }
+    }
+
     let _ = tx.send(UpdateMessage::Status(format!(
         "Installed {}",
         manifest.latest
     )));
     let _ = tx.send(UpdateMessage::Progress(1.0));
     Ok(())
+}
+
+fn launcher_self_update_needed(install: &std::path::Path, component: &Component) -> Result<bool> {
+    let path = install.join(launcher_exe_name());
+    if !path.exists() {
+        return Ok(true);
+    }
+    let current = updater::sha256_of_file(&path)?;
+    Ok(current != component.sha256.to_ascii_lowercase())
+}
+
+#[cfg(unix)]
+fn ensure_executable(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path)
+        .with_context(|| format!("stat {}", path.display()))?
+        .permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(path, perms)
+        .with_context(|| format!("chmod {}", path.display()))?;
+    Ok(())
+}
+
+fn hand_off_to_updater(
+    install: &std::path::Path,
+    new_launcher: &std::path::Path,
+    current_launcher: &std::path::Path,
+    tx: &Sender<UpdateMessage>,
+) -> Result<()> {
+    let updater_bin = install.join(launcher_updater_exe_name());
+    if !updater_bin.is_file() {
+        anyhow::bail!(
+            "launcher-updater missing at {} — cannot self-update",
+            updater_bin.display()
+        );
+    }
+    let pid = std::process::id().to_string();
+    let _ = tx.send(UpdateMessage::Status("Restarting to apply launcher update...".into()));
+    std::process::Command::new(&updater_bin)
+        .arg(&pid)
+        .arg(new_launcher)
+        .arg(current_launcher)
+        .spawn()
+        .with_context(|| format!("spawn {}", updater_bin.display()))?;
+    let _ = tx.send(UpdateMessage::Done);
+    // Give the UI thread a tick to flush, then exit so the updater can swap.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    std::process::exit(0);
 }
 
 /// Resolve where a component's file lives in the install dir. Uses

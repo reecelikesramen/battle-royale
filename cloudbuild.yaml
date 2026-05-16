@@ -50,10 +50,13 @@ steps:
       - -c
       - |
         mkdir -p launchers/windows launchers/linux launchers/mac
-        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/windows/launcher.exe launchers/windows/launcher.exe
-        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/linux/launcher       launchers/linux/launcher
-        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/mac/launcher         launchers/mac/launcher
-        chmod +x launchers/linux/launcher launchers/mac/launcher
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/windows/launcher.exe         launchers/windows/launcher.exe
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/windows/launcher-updater.exe launchers/windows/launcher-updater.exe
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/linux/launcher               launchers/linux/launcher
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/linux/launcher-updater       launchers/linux/launcher-updater
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/mac/launcher                 launchers/mac/launcher
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/mac/launcher-updater         launchers/mac/launcher-updater
+        chmod +x launchers/linux/launcher launchers/mac/launcher launchers/linux/launcher-updater launchers/mac/launcher-updater
         ls -la launchers/*
 
   # ============ DOWNLOAD PREVIOUS BASE PCKs (for patches) ============
@@ -210,7 +213,7 @@ steps:
       - |
         set -euo pipefail
         if gcloud secrets describe authenticode-cert --quiet >/dev/null 2>&1; then
-          which osslsigncode >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq osslsigncode)
+          which osslsigncode >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 update -qq && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 install -y -qq osslsigncode)
           CERT=$$(mktemp)
           PASS=$$(gcloud secrets versions access latest --secret=authenticode-password)
           gcloud secrets versions access latest --secret=authenticode-cert > "$$CERT"
@@ -238,8 +241,10 @@ steps:
         # Bundle the launcher binary alongside each platform's game files.
         # The launcher is the new primary entrypoint (game can still be
         # launched directly for legacy clients via BR_LEGACY_UPDATER=1).
-        cp launchers/windows/launcher.exe build/windows/launcher.exe 2>/dev/null || true
-        cp launchers/linux/launcher       build/linux/launcher       2>/dev/null || true
+        cp launchers/windows/launcher.exe         build/windows/launcher.exe         2>/dev/null || true
+        cp launchers/windows/launcher-updater.exe build/windows/launcher-updater.exe 2>/dev/null || true
+        cp launchers/linux/launcher               build/linux/launcher               2>/dev/null || true
+        cp launchers/linux/launcher-updater       build/linux/launcher-updater       2>/dev/null || true
 
         # Windows
         (cd build && zip -r ../release/windows.zip windows)
@@ -255,7 +260,7 @@ steps:
         # Note: the launcher is currently placed alongside the .app rather than
         # inside it. Sprint 8 will codesign + notarize a proper Launcher.app.
         if [ -f "build/mac/${_EXPORT_NAME}.zip" ]; then
-          (cd build/mac && unzip -q ${_EXPORT_NAME}.zip && cp ../../launchers/mac/launcher ./launcher && rm -f ${_EXPORT_NAME}.zip && zip -r ${_EXPORT_NAME}.zip "${_PROJECT_NAME}.app" launcher)
+          (cd build/mac && unzip -q ${_EXPORT_NAME}.zip && cp ../../launchers/mac/launcher ./launcher && cp ../../launchers/mac/launcher-updater ./launcher-updater && rm -f ${_EXPORT_NAME}.zip && zip -r ${_EXPORT_NAME}.zip "${_PROJECT_NAME}.app" launcher launcher-updater)
         fi
         mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
         mv build/mac/mac-base.pck release/ 2>/dev/null || true
@@ -289,53 +294,34 @@ steps:
       - -c
       - |
         set -euo pipefail
-        which zstd >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq zstd unzip)
+        which zstd >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 update -qq && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 install -y -qq zstd unzip)
         chmod +x infrastructure/cloudbuild-steps/generate-deltas.sh
         env _BUCKET='${_BUCKET}' _TAG_NAME='${_TAG_NAME}' _EXPORT_NAME='${_EXPORT_NAME}' \
             _PROJECT_NAME='${_PROJECT_NAME}' _PROJECT_PATH='${_PROJECT_PATH}' \
           infrastructure/cloudbuild-steps/generate-deltas.sh
 
-  # ============ LEGACY versions.json (v1) for back-compat ============
-  # The pre-Sprint-2 in-game updater in init.gd reads this format. Kept for
-  # one release cycle so any client running the legacy auto-update path doesn't
-  # break. Remove once all clients are on the Rust launcher (Sprint 3+).
-  - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'update-manifest-legacy'
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        VERSIONS=$$(gsutil ls gs://${_BUCKET}/releases/ 2>/dev/null | grep -oP 'v[\d.]+(-[a-zA-Z0-9.]+)?' | sort -V | uniq)
-        if [ -z "$$VERSIONS" ]; then
-          VERSIONS="${_TAG_NAME}"
-        fi
-        VERSIONS_JSON=$$(echo "$$VERSIONS" | sed 's/^/"/' | sed 's/$$/"/' | tr '\n' ',' | sed 's/,$$//')
-        echo "{\"versions\": [$$VERSIONS_JSON], \"latest\": \"${_TAG_NAME}\"}" > versions-v1.json
-        gsutil cp versions-v1.json gs://${_BUCKET}/versions-v1.json
-        # Also keep the canonical /versions.json pointing at v1 for now so the
-        # legacy clients keep working. The v2 manifest is uploaded below
-        # to a sibling path; Sprint 3 launcher reads the v2 path.
-        gsutil cp versions-v1.json gs://${_BUCKET}/versions.json
-
-  # ============ GENERATE versions.json v2 + ed25519 signature ============
+  # ============ GENERATE versions.json + ed25519 signature ============
   # Produces a per-platform, per-component manifest with sha256s, signed by
-  # the ed25519 key in Secret Manager. The launcher (Sprint 3+) downloads
-  # versions-v2.json + .sig, verifies, and uses checksum-driven updates.
-  # Use the gcloud cloud-builder (Debian-based, has apt + gsutil + gcloud)
-  # rather than gsutil's builder for the apt-get install step.
+  # the ed25519 key in Secret Manager. The launcher downloads versions.json
+  # + .sig, verifies, and uses checksum-driven updates.
   - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'generate-manifest-v2'
+    id: 'generate-manifest'
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        which jq >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq jq)
+        # Install jq via direct binary download to avoid apt/dpkg hangs in the
+        # builder. Pin to a known-good release.
+        if ! command -v jq >/dev/null 2>&1; then
+          curl -fsSL -o /usr/local/bin/jq \
+            https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+          chmod +x /usr/local/bin/jq
+        fi
         chmod +x infrastructure/cloudbuild-steps/generate-manifest-v2.sh
         env _BUCKET='${_BUCKET}' _TAG_NAME='${_TAG_NAME}' _EXPORT_NAME='${_EXPORT_NAME}' \
           infrastructure/cloudbuild-steps/generate-manifest-v2.sh
-        mv versions.json versions-v2.json
-        gsutil cp versions-v2.json gs://${_BUCKET}/versions-v2.json
+        gsutil cp versions.json gs://${_BUCKET}/versions.json
 
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'sign-manifest'
@@ -344,12 +330,36 @@ steps:
       - -c
       - |
         set -euo pipefail
-        which openssl >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq openssl)
-        gsutil cp gs://${_BUCKET}/versions-v2.json versions.json
+        which openssl >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 update -qq && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 install -y -qq openssl)
+        gsutil cp gs://${_BUCKET}/versions.json versions.json
         chmod +x infrastructure/cloudbuild-steps/sign-manifest.sh
         env GCP_PROJECT_ID="$PROJECT_ID" \
           infrastructure/cloudbuild-steps/sign-manifest.sh
-        gsutil cp versions.json.sig gs://${_BUCKET}/versions-v2.json.sig
+        gsutil cp versions.json.sig gs://${_BUCKET}/versions.json.sig
+
+  # ============ VERIFY PUBLISHED MANIFEST ============
+  # Smoke-tests the freshly-published manifest from the same public URL a real
+  # launcher hits. Verifies the ed25519 signature with the committed pubkey,
+  # HEADs every component URL, and sha256-checks one component per platform.
+  # If anything fails, the release is "published but rejected" — the Pub/Sub
+  # broadcast below is skipped and the server won't auto-restart onto a broken
+  # release. Operator must roll forward with a fixed manifest.
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'verify-manifest'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        which openssl >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 update -qq && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 install -y -qq openssl)
+        if ! command -v jq >/dev/null 2>&1; then
+          curl -fsSL -o /usr/local/bin/jq \
+            https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+          chmod +x /usr/local/bin/jq
+        fi
+        chmod +x infrastructure/cloudbuild-steps/verify-manifest.sh
+        env _BUCKET='${_BUCKET}' _TAG_NAME='${_TAG_NAME}' \
+          infrastructure/cloudbuild-steps/verify-manifest.sh
 
   # ============ PUBLISH RELEASE TO PUB/SUB ============
   # Tells the running game server (and any other subscribers) that a new

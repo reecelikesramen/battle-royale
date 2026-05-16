@@ -314,3 +314,66 @@ fn try_delta(
     let _ = fs::remove_file(&patch_staging);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    fn tmpdir() -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "br-launcher-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn sha256_of_file_matches_known() {
+        // sha256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+        let dir = tmpdir();
+        let path = dir.join("hello.txt");
+        let mut f = fs::File::create(&path).unwrap();
+        f.write_all(b"hello").unwrap();
+        f.sync_all().unwrap();
+        drop(f);
+        let s = sha256_of_file(&path).unwrap();
+        assert_eq!(s, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_leaves_no_partial_on_success() {
+        // Validates the staging→rename promise: target only ever sees the
+        // complete payload; no half-written file is observable.
+        let dir = tmpdir();
+        let path = dir.join("out.bin");
+        write_atomic(&path, b"final-contents").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"final-contents");
+        // The .part staging file is the rename source; after rename it must
+        // be gone (consumed by the rename), not lingering with stale bytes.
+        let staging = super::staging_path(&path);
+        assert!(
+            !staging.exists(),
+            "staging file must be consumed by rename, not left behind"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_overwrites_existing_target() {
+        // A re-update flow: target already has older bytes; atomic write
+        // replaces them in one step.
+        let dir = tmpdir();
+        let path = dir.join("ver.txt");
+        fs::write(&path, b"old").unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

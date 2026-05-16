@@ -2920,6 +2920,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "launcher-updater"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

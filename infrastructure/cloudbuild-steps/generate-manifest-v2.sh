@@ -46,16 +46,19 @@ latest=$(echo "$versions" | sort -V | tail -1)
 # {tag} placeholder gets substituted per-version below.
 component_table=$(cat <<'EOF'
 windows|launcher|launcher/{tag}/windows/launcher.exe|launcher.exe
+windows|launcher_updater|launcher/{tag}/windows/launcher-updater.exe|launcher-updater.exe
 windows|game_binary|releases/{tag}/windows.zip|battle-royale.exe
 windows|rust_lib|rust-libs/{tag}/rust.dll|rust.dll
 windows|pck_base|releases/{tag}/windows-base.pck|battle-royale.pck
 windows|pck_patch|releases/{tag}/windows-{tag}.pck|windows-{tag}.pck
 linux|launcher|launcher/{tag}/linux/launcher|launcher
+linux|launcher_updater|launcher/{tag}/linux/launcher-updater|launcher-updater
 linux|game_binary|releases/{tag}/linux.zip|battle-royale.x86_64
 linux|rust_lib|rust-libs/{tag}/librust.so|librust.so
 linux|pck_base|releases/{tag}/linux-base.pck|battle-royale.pck
 linux|pck_patch|releases/{tag}/linux-{tag}.pck|linux-{tag}.pck
 mac|launcher|launcher/{tag}/mac/launcher|launcher
+mac|launcher_updater|launcher/{tag}/mac/launcher-updater|launcher-updater
 mac|game_binary|releases/{tag}/mac.zip|battle-royale
 mac|rust_lib|rust-libs/{tag}/librust.dylib|librust.dylib
 mac|pck_base|releases/{tag}/mac-base.pck|battle-royale.pck

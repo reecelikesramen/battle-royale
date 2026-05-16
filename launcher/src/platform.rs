@@ -69,3 +69,15 @@ pub fn rust_lib_name() -> &'static str {
         "librust.so"
     }
 }
+
+pub fn launcher_exe_name() -> &'static str {
+    if cfg!(target_os = "windows") { "launcher.exe" } else { "launcher" }
+}
+
+pub fn launcher_updater_exe_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "launcher-updater.exe"
+    } else {
+        "launcher-updater"
+    }
+}

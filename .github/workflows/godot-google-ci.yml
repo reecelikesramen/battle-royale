@@ -43,16 +43,19 @@ jobs:
             artifact-name: rust-macos
             library-name: librust.dylib
             launcher-name: launcher
+            updater-name: launcher-updater
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact-name: rust-linux
             library-name: librust.so
             launcher-name: launcher
+            updater-name: launcher-updater
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact-name: rust-windows
             library-name: rust.dll
             launcher-name: launcher.exe
+            updater-name: launcher-updater.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -180,9 +183,20 @@ jobs:
       - name: Build launcher (launcher crate)
         run: cargo build --release --target ${{ matrix.target }} --package launcher
 
+      - name: Build launcher-updater
+        run: cargo build --release --target ${{ matrix.target }} --package launcher-updater
+
       - name: Build server-agent (Linux only)
         if: runner.os == 'Linux'
         run: cargo build --release --target ${{ matrix.target }} --package server-agent
+
+      # Launcher regression tests gate every PR + every tag against changes
+      # that would silently break the update path (signature verify, manifest
+      # parse, atomic file ops). Linux-only because the logic is portable and
+      # we want to keep Windows/macOS jobs fast.
+      - name: Run launcher tests (Linux only)
+        if: runner.os == 'Linux'
+        run: cargo test --release --target ${{ matrix.target }} --package launcher
 
       - name: Stage release artifacts
         shell: bash
@@ -205,6 +219,7 @@ jobs:
           # Final staging dir for downstream upload steps.
           cp "$CACHED" target/release/$LIB
           cp target/${{ matrix.target }}/release/${{ matrix.launcher-name }} target/release/
+          cp target/${{ matrix.target }}/release/${{ matrix.updater-name }} target/release/
           if [ "$RUNNER_OS" = "Linux" ]; then
             cp target/${{ matrix.target }}/release/server-agent target/release/server-agent
           fi
@@ -229,6 +244,13 @@ jobs:
         with:
           name: ${{ matrix.artifact-name }}-launcher
           path: target/release/${{ matrix.launcher-name }}
+          retention-days: 1
+
+      - name: Upload launcher-updater artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}-launcher-updater
+          path: target/release/${{ matrix.updater-name }}
           retention-days: 1
 
   # ============ UPLOAD TO GCS & TRIGGER CLOUD BUILD (only on tags) ============
@@ -284,6 +306,9 @@ jobs:
           gsutil cp rust-libs/rust-linux-launcher/launcher    "gs://$GCS_BUCKET/launcher/$TAG_NAME/linux/launcher"
           gsutil cp rust-libs/rust-macos-launcher/launcher    "gs://$GCS_BUCKET/launcher/$TAG_NAME/mac/launcher"
           gsutil cp rust-libs/rust-windows-launcher/launcher.exe "gs://$GCS_BUCKET/launcher/$TAG_NAME/windows/launcher.exe"
+          gsutil cp rust-libs/rust-linux-launcher-updater/launcher-updater       "gs://$GCS_BUCKET/launcher/$TAG_NAME/linux/launcher-updater"
+          gsutil cp rust-libs/rust-macos-launcher-updater/launcher-updater       "gs://$GCS_BUCKET/launcher/$TAG_NAME/mac/launcher-updater"
+          gsutil cp rust-libs/rust-windows-launcher-updater/launcher-updater.exe "gs://$GCS_BUCKET/launcher/$TAG_NAME/windows/launcher-updater.exe"
 
       - name: Upload server-agent to GCS
         run: |
