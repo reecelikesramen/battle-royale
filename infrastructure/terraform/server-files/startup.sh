@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 #
 # GCE startup script. Runs on first boot and on every reboot. Idempotent.
-# Templated variables from Terraform (interpolated by templatefile):
-#   ${bucket}              - GCS bucket holding releases + manifest
-#   ${project_id}          - GCP project id (used by metric/shutdown agents in Sprint 6+)
-#   ${service_unit_body}   - contents of battle-royale-server.service
-#   ${refresh_script}      - contents of refresh.sh
-#   ${manifest_pub_b64}    - base64-encoded 32-byte ed25519 pubkey (for refresh.sh sig verify)
+# Template variables (interpolated by terraform templatefile): bucket,
+# project_id, service_unit_body, agent_unit_body, refresh_script,
+# manifest_pub_b64. Do NOT use literal $${...} forms in comments — they
+# expand multi-line values into the rendered script and break bash parsing.
 
 set -euo pipefail
 
