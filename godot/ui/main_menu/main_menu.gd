@@ -123,9 +123,12 @@ func _on_wake_button_pressed() -> void:
 		_wake_action_http = HTTPRequest.new()
 		add_child(_wake_action_http)
 		_wake_action_http.request_completed.connect(_on_wake_action_completed)
+	# Empty-body POST: Godot's HTTPRequest doesn't emit Content-Length by
+	# default, and Google's HTTP frontend (Cloud Run / load balancer) rejects
+	# such POSTs with 411 Length Required. Set it explicitly.
 	var err := _wake_action_http.request(
 		Constants.WAKE_FUNCTION_URL,
-		PackedStringArray(),
+		PackedStringArray(["Content-Length: 0"]),
 		HTTPClient.METHOD_POST,
 		""
 	)
