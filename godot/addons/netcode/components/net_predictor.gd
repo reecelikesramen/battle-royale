@@ -13,6 +13,15 @@ func _get_configuration_warnings() -> PackedStringArray:
 	# Surface ERROR + WARNING; INFO suppressed in scene-tree warnings to keep
 	# the red triangle meaningful.
 	warnings.append_array(schema.validate_strings(ValidationIssue.Severity.WARNING))
+	# Body export: if set, the resolved node must be a Node3D-derived type the
+	# framework knows how to rewind. Mismatched configurations would silently
+	# skip rewind at runtime; flag them at edit time.
+	if not body.is_empty():
+		_resolve_body()
+		if _body == null:
+			warnings.append(
+					"NetPredictor.body path '%s' does not resolve to a CharacterBody3D / RigidBody3D / AnimatableBody3D / Node3D — rewind will be a no-op."
+					% body)
 	return warnings
 
 # Sprint 1: hook-driven tick dispatcher. NetPredictor owns _physics_process and
@@ -40,6 +49,10 @@ func _get_configuration_warnings() -> PackedStringArray:
 #       in replay after snapshot ack — must be idempotent for a (state, cmd).
 #   _load_simulation_state(state: NetState) -> void
 #       Snap host's sim representation from state. Called before replay.
+#       When `body` (NodePath export) is set, the framework rewinds the body
+#       BEFORE this hook runs — host only needs to restore non-body sim
+#       state (state machines, animation progress, etc.). When `body` is
+#       unset (default), the host is responsible for body rewind too.
 #   _apply_state(state: NetState) -> void
 #       Write scene from state. Camera, visual SM ids, non-smoothed fields.
 #   _visualize(delta: float, state: NetState) -> void
@@ -114,6 +127,28 @@ signal shadow_state_applied()
 ## this slot. The predictor walks the schema in _ready to allocate
 ## shadow_state, register with NetReplication, and resolve child_refs.
 @export var schema: NetSchema
+
+## Optional path (relative to this predictor) to the simulated body. When set,
+## the framework owns rewind discipline around replay and reconciliation:
+## transform + velocity reset, physics-interpolation reset, and (for
+## CharacterBody3D) cached floor-flag refresh via a zero-motion move_and_slide.
+## Leave empty to keep the host responsible for body state — current behavior,
+## used by the player's dual-CharacterBody3D setup. See netcode-synchronizer.md
+## for the body-shape catalog and migration plan.
+@export var body: NodePath = ^"":
+	set(v):
+		body = v
+		# update_configuration_warnings is only available in @tool scripts;
+		# this script is @tool so the call is safe at both edit and runtime.
+		update_configuration_warnings()
+
+# Body-shape dispatch keys. Resolved once at _ready (runtime) or on demand by
+# _get_configuration_warnings (editor). NONE = body unset, body unresolvable,
+# or body is not a supported type — rewind is a no-op in that case.
+enum BodyKind { NONE, CHAR_BODY, RIGID_BODY, ANIMATABLE_BODY, NODE3D }
+
+var _body: Node = null
+var _body_kind: BodyKind = BodyKind.NONE
 
 # Template accessors. The actual state/command instances (shadow_state etc.)
 # are constructed in _ready via duplicate(true), so the schema's templates
@@ -206,6 +241,10 @@ func _ready() -> void:
 		# (player default) → fire every frame; tick_hz=60 → every 2nd; etc.
 		var physics_hz: int = ProjectSettings.get_setting("physics/common/physics_ticks_per_second", 120)
 		_server_tick_every = maxi(1, physics_hz / maxi(1, schema.tick_hz))
+
+	# Body resolution runs independently of schema so a misconfigured schema
+	# doesn't drop the body wiring on the floor. NONE kind = no-op rewind.
+	_resolve_body()
 
 	# Hosts that need to seed scene-derived defaults into shadow/render (spawn
 	# position, initial state-machine ids, etc.) implement _seed_state(state).
@@ -994,6 +1033,102 @@ func handle_net_state_packet(packet) -> void:
 			shadow_state.duplicate())
 
 
+# Resolve the `body` NodePath into a typed reference + cached BodyKind for
+# dispatch. Idempotent + side-effect free; safe to call from editor context
+# (no autoload access). Unsupported types or unresolvable paths leave _body
+# null + _body_kind = NONE, which makes _rewind_body a no-op.
+func _resolve_body() -> void:
+	_body = null
+	_body_kind = BodyKind.NONE
+	if body.is_empty():
+		return
+	var node := get_node_or_null(body)
+	if node == null:
+		return
+	# Specific-to-general type check: CharacterBody3D + RigidBody3D before the
+	# generic Node3D fallback. AnimatableBody3D is treated like a Node3D for
+	# rewind (only transform is meaningful; engine doesn't integrate it).
+	if node is CharacterBody3D:
+		_body = node
+		_body_kind = BodyKind.CHAR_BODY
+	elif node is RigidBody3D:
+		_body = node
+		_body_kind = BodyKind.RIGID_BODY
+	elif node is AnimatableBody3D:
+		_body = node
+		_body_kind = BodyKind.ANIMATABLE_BODY
+	elif node is Node3D:
+		_body = node
+		_body_kind = BodyKind.NODE3D
+
+
+# Snap the simulated body to the pose in `state`. Called by _reconcile_replay
+# before host code runs so the first replay step sees post-rewind body state
+# rather than the live frame's stale value.
+#
+# Field access is tolerant: missing rotation / angular_velocity / velocity on
+# the state schema is fine (capsule-style players whose rotation is
+# camera-driven and not replicated, projectiles with linear-only motion, etc.)
+# — those fields are left at the body's current value when absent from state.
+#
+# Per-body-kind details:
+#   CharacterBody3D: writes pos/velocity directly; runs a zero-motion
+#     move_and_slide to refresh cached is_on_floor / floor_normal /
+#     last_motion BEFORE the replay loop reads them.
+#   RigidBody3D: goes through PhysicsServer3D.body_set_state so Jolt's
+#     internal contact cache is properly invalidated (direct property writes
+#     during a physics step are a known footgun on rigid bodies).
+#   AnimatableBody3D / Node3D: transform-only; engine doesn't integrate so
+#     no flag refresh is needed.
+func _rewind_body(state: NetState) -> void:
+	if _body == null or state == null:
+		return
+	var has_pos: bool = state_field_names.has(&"pos")
+	var has_velocity: bool = state_field_names.has(&"velocity")
+	var has_rotation: bool = state_field_names.has(&"rotation_quat")
+	var has_angular: bool = state_field_names.has(&"angular_velocity")
+	match _body_kind:
+		BodyKind.CHAR_BODY:
+			var cb := _body as CharacterBody3D
+			if has_pos:
+				cb.global_position = state.get(&"pos")
+			if has_rotation:
+				cb.global_basis = Basis(state.get(&"rotation_quat"))
+			if has_velocity:
+				cb.velocity = state.get(&"velocity")
+			cb.reset_physics_interpolation()
+			# Zero-motion move_and_slide refreshes is_on_floor / get_floor_normal
+			# so the first replay step doesn't read stale flags. Velocity is
+			# preserved across the dummy call.
+			var saved_v: Vector3 = cb.velocity
+			cb.velocity = Vector3.ZERO
+			cb.move_and_slide()
+			cb.velocity = saved_v
+		BodyKind.RIGID_BODY:
+			var rb := _body as RigidBody3D
+			var rid := rb.get_rid()
+			var basis: Basis = Basis(state.get(&"rotation_quat")) if has_rotation else rb.global_basis
+			var origin: Vector3 = state.get(&"pos") if has_pos else rb.global_position
+			PhysicsServer3D.body_set_state(rid,
+					PhysicsServer3D.BODY_STATE_TRANSFORM, Transform3D(basis, origin))
+			if has_velocity:
+				PhysicsServer3D.body_set_state(rid,
+						PhysicsServer3D.BODY_STATE_LINEAR_VELOCITY, state.get(&"velocity"))
+			if has_angular:
+				PhysicsServer3D.body_set_state(rid,
+						PhysicsServer3D.BODY_STATE_ANGULAR_VELOCITY, state.get(&"angular_velocity"))
+			rb.reset_physics_interpolation()
+		BodyKind.ANIMATABLE_BODY, BodyKind.NODE3D:
+			var n3 := _body as Node3D
+			if has_pos:
+				n3.global_position = state.get(&"pos")
+			if has_rotation:
+				n3.global_basis = Basis(state.get(&"rotation_quat"))
+			n3.reset_physics_interpolation()
+		BodyKind.NONE:
+			pass
+
+
 # Authority-side reconcile: snap host's sim representation to shadow_state,
 # then replay any inputs the server hasn't acked yet so the predicted view
 # resumes from the authoritative tick instead of the last predicted tick.
@@ -1008,6 +1143,11 @@ func handle_net_state_packet(packet) -> void:
 func _reconcile_replay(new_sequence_id: int) -> void:
 	game_sequence_id = new_sequence_id
 	is_replaying_inputs = true
+	# Framework-owned body rewind: snap body transform/velocity to shadow
+	# before host code runs. No-op when `body` is unset (current behavior;
+	# host still owns body management via _load_simulation_state).
+	if _body != null:
+		_rewind_body(shadow_state)
 	if host and host.has_method(&"_load_simulation_state"):
 		host._load_simulation_state(shadow_state)
 	var inputs := unacked_inputs.get_starting_at(game_sequence_id)
