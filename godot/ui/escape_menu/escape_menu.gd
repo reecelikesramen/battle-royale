@@ -79,7 +79,9 @@ func _on_options_button_pressed() -> void:
 
 
 func _on_exit_button_pressed() -> void:
-	NetSession.disconnect_client()
+	# shutdown_all closes both sockets when present (listen mode); for a
+	# pure-client connection it's equivalent to disconnect_client().
+	NetSession.shutdown_all()
 
 
 func _on_gameplay_settings_button_pressed() -> void:

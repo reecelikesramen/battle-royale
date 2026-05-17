@@ -69,7 +69,7 @@ func set_debug_property(title: String, value):
 
 
 func _on_exit_to_menu_button_pressed() -> void:
-	NetSession.disconnect_client()
+	NetSession.shutdown_all()
 
 
 func _on_quit_button_pressed() -> void:
