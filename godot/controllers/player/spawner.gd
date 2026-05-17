@@ -26,13 +26,7 @@ func _ready() -> void:
 	NetClient.handle_remote_id_assignment.connect(_spawn_client_player)
 	NetClient.handle_player_disconnected.connect(_despawn)
 
-	# Role-gated setup: backfill of pre-existing peers + chat relay subscribe.
-	# In listen mode, role flags flip true inside playtest_map._ready AFTER
-	# this _ready runs (Godot's bottom-up order), so we read them on the next
-	# frame via call_deferred. In dedicated/client modes the flags are set in
-	# NetSession boot before scene tree loads, so the deferred call still sees
-	# correct state.
-	call_deferred("_finish_role_setup")
+	NetSession.when_roles_ready(_finish_role_setup)
 
 
 func _finish_role_setup() -> void:
@@ -42,6 +36,8 @@ func _finish_role_setup() -> void:
 	if NetSession.has_server_role:
 		for peer_id in NetServer.peer_ids:
 			_spawn_server_player(peer_id)
+		# Server-side reliable RPC fan-out: peer sends chat, server rebroadcasts.
+		NetReliableHub.subscribe_server(Enums.ReliableTopic.CHAT, _relay_chat_to_clients)
 	if NetSession.has_client_role:
 		if NetClient.id != -1:
 			_spawn_client_player(NetClient.id)
@@ -49,13 +45,6 @@ func _finish_role_setup() -> void:
 			if remote_id == NetClient.id:
 				continue
 			_spawn_client_player(remote_id)
-
-	# Phase 9b: server-side reliable RPC fan-out. Chat is the first user — when
-	# a peer sends, the server re-broadcasts the same payload to all peers so
-	# every client sees it. Fresh idem_key per fan-out is fine; the hub's per-
-	# topic dedup ring isolates client and server views.
-	if NetSession.has_server_role:
-		NetReliableHub.subscribe(Enums.ReliableTopic.CHAT, _relay_chat_to_clients)
 
 
 func _relay_chat_to_clients(_peer_id: int, payload: PackedByteArray) -> void:

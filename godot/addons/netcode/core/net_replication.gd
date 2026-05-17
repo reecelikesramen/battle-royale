@@ -64,7 +64,11 @@ func _ready() -> void:
 	# Sprint 7: only the client subscribes to spawn packets. The server fires
 	# entity_spawn_requested locally inside spawn_entity() so its own world
 	# controller spawns without bouncing through the wire.
-	NetReliableHub.subscribe(SPAWN_TOPIC, _on_spawn_payload)
+	# Spawn dispatch payloads only travel server → clients (host emits its own
+	# auth instance locally inside spawn_entity). Subscribe on the client lane
+	# only so the loopback echo in listen mode doesn't re-emit the proxy spawn
+	# inside server reception.
+	NetReliableHub.subscribe_client(SPAWN_TOPIC, _on_spawn_payload)
 
 
 func register_schema(schema_id: int, schema: NetSchema) -> void:
@@ -141,6 +145,16 @@ func register_entity(schema_id: int, entity_id: int, predictor) -> void:
 
 func unregister_entity(schema_id: int, entity_id: int) -> void:
 	var key := Vector2i(schema_id, entity_id)
+	# Cascade-free a co-resident proxy when its auth unregisters (listen mode
+	# only). Without this, NetProxyBlender's buffer drains to null after the
+	# auth queue_frees and DISCRETE fields fall back to the last known value —
+	# proxies get stuck rendering their final frame forever (grenades hung in
+	# EXPLODING on the explosion site). Auth unregister is the canonical
+	# "no more snapshots are coming" signal, so the proxy can free immediately.
+	if _server_entities.has(key) and _client_entities.has(key):
+		var proxy: NetPredictor = _client_entities[key]
+		if is_instance_valid(proxy) and is_instance_valid(proxy.host):
+			proxy.host.queue_free()
 	_server_entities.erase(key)
 	_client_entities.erase(key)
 	_pending_packets.erase(key)

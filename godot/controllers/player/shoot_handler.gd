@@ -70,23 +70,15 @@ void fragment() {
 
 
 func _ready() -> void:
-	# Reliable-hub subscriptions are mode-agnostic — both server and client
-	# need to react to confirms/deaths, and the hub no-ops for messages a
-	# given role wouldn't receive. Wire those eagerly.
-	NetReliableHub.subscribe(Enums.ReliableTopic.HIT_CONFIRM, _on_hit_confirm)
-	NetReliableHub.subscribe(Enums.ReliableTopic.SHOT_FIRED, _on_shot_fired)
-	NetReliableHub.subscribe(Enums.ReliableTopic.PLAYER_DIED, _on_player_died)
-	NetReliableHub.subscribe(Enums.ReliableTopic.PLAYER_RESPAWN, _on_player_respawn)
+	# Render-side subscriptions: these payloads only ever reach the client lane
+	# (server is the broadcaster, never the receiver). subscribe_client gives
+	# us payload-only callbacks and skips the listen-mode double-fire.
+	NetReliableHub.subscribe_client(Enums.ReliableTopic.HIT_CONFIRM, _on_hit_confirm)
+	NetReliableHub.subscribe_client(Enums.ReliableTopic.SHOT_FIRED, _on_shot_fired)
+	NetReliableHub.subscribe_client(Enums.ReliableTopic.PLAYER_DIED, _on_player_died)
+	NetReliableHub.subscribe_client(Enums.ReliableTopic.PLAYER_RESPAWN, _on_player_respawn)
 	tree_exiting.connect(_unsubscribe_all)
-	# Role-gated setup is deferred to end-of-frame. In listen mode the map
-	# root's _ready calls NetSession.start_listen_mode AFTER its children's
-	# _readys have run (Godot calls _ready bottom-up), so has_server_role /
-	# has_client_role are still false at this point. call_deferred runs after
-	# every _ready in the current frame — by that time listen mode is active
-	# and the flags reflect the intended role. Dedicated server / client-only
-	# modes set the flags in NetSession boot, so the deferred call sees the
-	# correct values there too.
-	call_deferred("_finish_setup")
+	NetSession.when_roles_ready(_finish_setup)
 
 
 func _finish_setup() -> void:
@@ -296,16 +288,7 @@ func _broadcast_hit_confirm(shooter_id: int, target_id: int, damage: int, remain
 	NetReliableHub.broadcast(Enums.ReliableTopic.HIT_CONFIRM, sp.data_array)
 
 
-# Reliable hub delivers two-arg (peer_id, payload) on server and one-arg
-# (payload) on client. We only act on the client branch; server already
-# logged inside _on_command.
-func _on_hit_confirm(arg1, arg2 = null) -> void:
-	# Reliable hub fires twice in listen mode (server + client subscriptions).
-	# Branch on arg2 — server invocations supply (peer_id, payload), client
-	# invocations supply (payload,) — so we only process the client-render side.
-	if arg2 != null:
-		return
-	var payload: PackedByteArray = arg1 if arg2 == null else arg2
+func _on_hit_confirm(payload: PackedByteArray) -> void:
 	var sp := StreamPeerBuffer.new()
 	sp.data_array = payload
 	var shooter_id: int = sp.get_u16()
@@ -335,10 +318,7 @@ func _broadcast_shot_fired(shooter_id: int, origin: Vector3, endpoint: Vector3) 
 	NetReliableHub.broadcast(Enums.ReliableTopic.SHOT_FIRED, sp.data_array)
 
 
-func _on_shot_fired(arg1, arg2 = null) -> void:
-	if arg2 != null:
-		return
-	var payload: PackedByteArray = arg1 if arg2 == null else arg2
+func _on_shot_fired(payload: PackedByteArray) -> void:
 	var sp := StreamPeerBuffer.new()
 	sp.data_array = payload
 	var shooter_id: int = sp.get_u16()
@@ -455,10 +435,7 @@ func _broadcast_player_respawn(victim_id: int, pos: Vector3) -> void:
 	NetReliableHub.broadcast(Enums.ReliableTopic.PLAYER_RESPAWN, sp.data_array)
 
 
-func _on_player_died(arg1, arg2 = null) -> void:
-	if arg2 != null:
-		return
-	var payload: PackedByteArray = arg1 if arg2 == null else arg2
+func _on_player_died(payload: PackedByteArray) -> void:
 	var sp := StreamPeerBuffer.new()
 	sp.data_array = payload
 	var victim_id: int = sp.get_u16()
@@ -467,10 +444,7 @@ func _on_player_died(arg1, arg2 = null) -> void:
 	player_died.emit(victim_id, killer_id)
 
 
-func _on_player_respawn(arg1, arg2 = null) -> void:
-	if arg2 != null:
-		return
-	var payload: PackedByteArray = arg1 if arg2 == null else arg2
+func _on_player_respawn(payload: PackedByteArray) -> void:
 	var sp := StreamPeerBuffer.new()
 	sp.data_array = payload
 	var victim_id: int = sp.get_u16()

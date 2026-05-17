@@ -9,12 +9,12 @@ func test_record_and_check_first_key_passes() -> void:
 	var hub: Node = NetReliableHub
 	# Use unique topic per test to avoid cross-test pollution.
 	var topic := 9001
-	assert_true(hub._record_and_check(topic, 1))
+	assert_true(hub._record_and_check_client(topic, 1))
 	# Repeat of same key should be rejected.
-	assert_false(hub._record_and_check(topic, 1))
+	assert_false(hub._record_and_check_client(topic, 1))
 	# Different key on same topic should pass.
-	assert_true(hub._record_and_check(topic, 2))
-	hub._seen_keys_per_topic.erase(topic)
+	assert_true(hub._record_and_check_client(topic, 2))
+	hub._seen_keys_per_topic_client.erase(topic)
 
 
 func test_dedup_ring_evicts_oldest_when_full() -> void:
@@ -22,12 +22,12 @@ func test_dedup_ring_evicts_oldest_when_full() -> void:
 	var topic := 9002
 	var cap: int = hub.MAX_DEDUP_PER_TOPIC
 	for i in cap:
-		assert_true(hub._record_and_check(topic, i), "key %d should be new" % i)
+		assert_true(hub._record_and_check_client(topic, i), "key %d should be new" % i)
 	# Ring full. One more eviction-triggering insert.
-	assert_true(hub._record_and_check(topic, cap), "key %d should be new (just inserted)" % cap)
+	assert_true(hub._record_and_check_client(topic, cap), "key %d should be new (just inserted)" % cap)
 	# The oldest (key 0) should have been evicted; reinserting it returns true.
-	assert_true(hub._record_and_check(topic, 0), "key 0 should be evicted and re-acceptable")
-	hub._seen_keys_per_topic.erase(topic)
+	assert_true(hub._record_and_check_client(topic, 0), "key 0 should be evicted and re-acceptable")
+	hub._seen_keys_per_topic_client.erase(topic)
 
 
 func test_subscribe_and_dispatch_via_received_signal() -> void:
@@ -48,7 +48,7 @@ func test_subscribe_and_dispatch_via_received_signal() -> void:
 	assert_eq(seen_payloads[0], PackedByteArray([0xCA, 0xFE]))
 
 	hub.unsubscribe(topic, listener)
-	hub._seen_keys_per_topic.erase(topic)
+	hub._seen_keys_per_topic_client.erase(topic)
 
 
 func test_duplicate_idempotency_key_drops_packet() -> void:
@@ -69,7 +69,7 @@ func test_duplicate_idempotency_key_drops_packet() -> void:
 	assert_eq(call_count[0], 1, "duplicate idem keys should not re-fire")
 
 	hub.unsubscribe(topic, listener)
-	hub._seen_keys_per_topic.erase(topic)
+	hub._seen_keys_per_topic_client.erase(topic)
 
 
 func test_resolve_idem_key_increments_counter_when_unset() -> void:

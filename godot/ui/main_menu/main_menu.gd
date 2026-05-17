@@ -38,7 +38,7 @@ func _ready() -> void:
 func _install_play_solo_button() -> void:
 	var vbox: Node = %ConnectButton.get_parent()
 	var play_solo := Button.new()
-	play_solo.text = "Play Solo (Listen Server)"
+	play_solo.text = "Play Solo"
 	play_solo.pressed.connect(_on_play_solo_pressed)
 	vbox.add_child(play_solo)
 	vbox.move_child(play_solo, %ConnectButton.get_index() + 1)

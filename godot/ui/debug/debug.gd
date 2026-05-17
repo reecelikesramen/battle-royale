@@ -9,9 +9,9 @@ var player: PlayerController:
 	get: return owner as PlayerController
 
 func _enter_tree() -> void:
-	# Phase 9b: chat now travels over NetReliableHub instead of a dedicated
-	# ChatPacket. Payload format below in _encode_chat_payload.
-	NetReliableHub.subscribe(Enums.ReliableTopic.CHAT, _on_chat_payload)
+	# Chat display is render-side; subscribe_client gives the payload-only
+	# callback shape and avoids listen-mode double-fire.
+	NetReliableHub.subscribe_client(Enums.ReliableTopic.CHAT, _on_chat_payload)
 
 
 func _exit_tree() -> void:

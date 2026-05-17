@@ -168,31 +168,6 @@ func _ready():
 
 	global_position = Constants.MAP_SPAWN
 
-	# Listen mode splits each peer into two instances (server-auth + client-
-	# proxy). The auth runs physics; the proxy is what the local player sees.
-	# Without these gates you get:
-	#   - server-auth's move_and_slide bouncing off the proxy's collider each
-	#     tick (capsule-vs-capsule feedback loop sends both flying)
-	#   - every visible node on both instances rendered (capsule + FPS hand
-	#     mesh under CameraController/Camera3D + any future view models), so
-	#     the user sees doubled hands / bodies at their spawn
-	# Gate on has_server_role to scope these to listen mode: in client-only
-	# mode the local player has no server-auth sibling and remote proxies need
-	# colliders so the local player bumps into them correctly.
-	if NetSession.has_server_role and NetSession.has_client_role:
-		if _net.is_authoritative_instance:
-			# Server-auth: hide the whole instance. Visibility is a Node3D
-			# property — propagates to every MeshInstance3D under this player
-			# (capsule, hands, view models) without touching physics, which is
-			# shape-driven. Mirrors what dedicated-server mode gets implicitly
-			# (no rendering at all on a headless server).
-			visible = false
-		else:
-			# Client-proxy: kill physics so it doesn't shove the auth sibling
-			# around. Mesh stays visible — this is the body the camera follows
-			# in third-person and the one other clients would see.
-			$VisualCollider.set_deferred("disabled", true)
-
 	if is_local_view:
 		camera.make_current()
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -338,16 +313,6 @@ func _gather_command(delta: float) -> PlayerInput:
 		cmd.shoot = false
 		cmd.scope = false
 
-	# Listen-mode local proxy: NetPredictor routes this side through _proxy_tick
-	# instead of _authority_tick, so _simulate -> _apply_state -> update_camera
-	# never fires. Without driving the camera here, the view would wait for the
-	# server-auth sibling's broadcast to roundtrip via loopback GNS + a tick of
-	# state-buffer interp (~16ms) before reflecting this frame's mouse delta.
-	# Push the freshly-integrated _look_abs onto the camera now so view response
-	# stays input-locked; _proxy_apply will write the same value next tick and
-	# the camera doesn't notice the duplicate.
-	if not _net.is_authoritative_instance and NetSession.has_server_role:
-		update_camera(_look_abs)
 	return cmd
 
 

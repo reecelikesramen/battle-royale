@@ -288,6 +288,32 @@ var mode: Mode:
 		else:
 			return Mode.CLIENT_ONLY
 
+
+# Fires once when role identity is settled (post start_listen_mode /
+# start_client / start_server_default). Game scripts gate role-aware setup on
+# this instead of running it in _ready, which races against the autoload
+# bootstrap order in listen mode. Latch is process-lifetime; shutdown_all
+# doesn't reset it.
+signal roles_ready
+var _roles_ready_emitted: bool = false
+
+
+# Idempotent subscriber. Invoke cb immediately if roles already settled,
+# otherwise one-shot connect. Replaces the call_deferred("_finish_setup")
+# pattern game scripts used to dodge the bottom-up _ready race.
+func when_roles_ready(cb: Callable) -> void:
+	if _roles_ready_emitted:
+		cb.call()
+		return
+	roles_ready.connect(cb, CONNECT_ONE_SHOT)
+
+
+func _emit_roles_ready_once() -> void:
+	if _roles_ready_emitted:
+		return
+	_roles_ready_emitted = true
+	roles_ready.emit()
+
 # Test runner sets NETCODE_TEST_MODE=1 so headless startup doesn't bind the
 # server port; tests instantiate their own minimal scaffolding.
 var is_test_mode: bool:
@@ -298,11 +324,15 @@ var is_test_mode: bool:
 func _ready() -> void:
 	if is_test_mode:
 		return
+	# Client mode: handshake completion is the canonical "roles settled" moment.
+	# Listen/dedicated paths emit explicitly below.
+	on_connect_to_server.connect(_emit_roles_ready_once)
 	if is_dedicated_server:
 		start_server_default()
 		# Re-push the inspector defaults: starting the server resets some GNS
 		# internals, so we have to set them again here.
 		_reapply_fake_state()
+		_emit_roles_ready_once()
 	# CLI overrides run last so per-instance flags can override either the
 	# scene defaults or a preset that was applied above.
 	_apply_cli_lag_overrides()
@@ -316,6 +346,7 @@ func start_listen_mode(port: int = 45876) -> void:
 	print("[NetSession] starting listen mode on 127.0.0.1:%d" % port)
 	start_listen(port)
 	_reapply_fake_state()
+	_emit_roles_ready_once()
 
 
 # Pushes every fake_* value through its property setter (which proxies into

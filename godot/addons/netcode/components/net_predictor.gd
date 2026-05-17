@@ -330,6 +330,33 @@ func _ready() -> void:
 		NetServer.handle_net_command.connect(_on_server_net_command)
 		_subscribed_to_input = true
 
+	# Listen-mode auto-gates: auth side hides its visuals (so it doesn't render
+	# on top of its proxy sibling), proxy side disables its colliders (so the
+	# auth's move_and_slide doesn't shove the coincident proxy capsule). Game
+	# scripts used to gate this themselves on has_server_role + has_client_role;
+	# framework now owns it via when_roles_ready (roles aren't settled at this
+	# predictor's _ready in listen mode — boot races against playtest_map._ready
+	# calling start_listen_mode bottom-up).
+	NetSession.when_roles_ready(_apply_listen_mode_role_gates)
+
+
+func _apply_listen_mode_role_gates() -> void:
+	if not (NetSession.has_server_role and NetSession.has_client_role):
+		return
+	if host == null:
+		return
+	if is_authoritative_instance:
+		if host is Node3D:
+			(host as Node3D).visible = false
+		return
+	# Proxy side: disable every CollisionShape3D under the host so the auth
+	# sibling's physics doesn't bump the visually-coincident proxy capsule.
+	# RigidBody3D-typed proxies (grenades) already freeze themselves in their
+	# own _ready — that lives entity-side because freeze semantics are per
+	# body kind and game-tunable.
+	for child in host.find_children("*", "CollisionShape3D", true, false):
+		(child as CollisionShape3D).set_deferred("disabled", true)
+
 
 # Sprint 6: cache schema.find_state_field() per name so the snapshot codec can
 # dispatch on Quant without re-walking schema.state_fields each field per tick.
@@ -1427,11 +1454,13 @@ func _physics_process(delta: float) -> void:
 	elif schema.archetype == NetSchema.Archetype.PREDICTED and is_local_authority:
 		_authority_tick(delta)
 	elif schema.archetype == NetSchema.Archetype.PREDICTED and is_input_source:
-		# Listen-mode local proxy: gather + send input so the server-auth sibling
-		# has commands to drain, then interp like any remote proxy. No predict,
-		# no reconcile — server is local so its snapshot is the truth, zero RTT.
+		# Listen-mode local proxy: gather + send input (shortcut delivers it
+		# straight into the in-process auth's queue — see _send_input_packet),
+		# then render from the auth's freshly-stepped shadow_state instead of
+		# the state buffer. Skips the ~50ms interp window that would otherwise
+		# make the local player feel laggy.
 		_send_input_packet(delta)
-		_proxy_tick(delta)
+		_zero_lag_proxy_tick(delta)
 	else:
 		# REPLICATED on any client + PREDICTED on remote clients both interp.
 		_proxy_tick(delta)
@@ -1476,6 +1505,18 @@ func _send_input_packet(delta: float) -> Variant:
 	input_redundancy_ring.append(packet)
 	while input_redundancy_ring.size() > INPUT_REDUNDANCY:
 		input_redundancy_ring.pop_front()
+	# Listen-mode local input shortcut: the auth sibling lives in-process, so
+	# delivering this cmd over GNS would round-trip through the codec for no
+	# reason and add a frame of latency. Enqueue directly into the auth's input
+	# queue + fire command_received for any server-side observers (lag-comp,
+	# ShootHandler hit detection). Codec is still exercised for remote LAN
+	# clients when a listen-host has joiners.
+	if NetSession.has_server_role:
+		var auth: NetPredictor = NetReplication.get_entity(schema.id, entity_id, true)
+		if auth != null and auth != self:
+			auth.server_input_queue.enqueue(packet.sequence_id, packet.timestamp_us, cmd)
+			auth.command_received.emit(cmd, packet.sequence_id, packet.timestamp_us, packet.last_received_tick)
+		return cmd
 	for redundant in input_redundancy_ring:
 		NetSession.send_packet(redundant.to_payload())
 	return cmd
@@ -1579,6 +1620,28 @@ func _server_tick(_delta: float) -> void:
 	# Phase 6: TimestampedPacket exposes sequence_id directly now that frame.packet
 	# is a typed NetCommand without an infrastructure sequence_id field.
 	server_broadcast_snapshot(frames[-1].sequence_id)
+
+
+# Listen-mode local proxy fast path. The auth sibling lives in-process; read
+# its shadow_state directly and hand it to _proxy_apply as both from/to with
+# alpha=1, bypassing the state buffer's segment interp (which would lag by the
+# buffer delay, ~50ms by default). Tree order parents server-side roots before
+# client-side, so the auth's _server_tick has already run this frame and the
+# shadow is fresh by the time we read it.
+func _zero_lag_proxy_tick(delta: float) -> void:
+	if host == null or not host.has_method(&"_proxy_apply"):
+		return
+	var auth: NetPredictor = NetReplication.get_entity(schema.id, entity_id, true)
+	if auth == null or auth == self or auth.shadow_state == null:
+		# Auth not registered yet (boot race) — skip this frame; next tick the
+		# state buffer fallback in _proxy_tick wouldn't help either since the
+		# auth's broadcast hasn't fired.
+		return
+	var s: NetState = auth.shadow_state
+	if schema != null and not schema.field_interp.is_empty():
+		host._proxy_apply(s, s, s, delta)
+	else:
+		host._proxy_apply(s, s, 1.0, 0.0, 0.0, delta)
 
 
 # Remote proxy: interpolate two ring entries, hand off to host for scene write.

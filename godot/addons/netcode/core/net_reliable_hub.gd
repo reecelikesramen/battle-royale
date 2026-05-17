@@ -20,11 +20,25 @@ const MAX_DEDUP_PER_TOPIC: int = 256
 signal received(topic: int, payload: PackedByteArray, peer_id: int)
 
 # topic -> Array[int] FIFO of idem keys we've already delivered.
-var _seen_keys_per_topic: Dictionary = {}
+# Split per side: in listen mode the same broadcast lands on the server (sender
+# echo) AND the client (loopback receive). Shared ring would drop the second
+# half. Pure-mode operation populates only one of the two.
+var _seen_keys_per_topic_server: Dictionary = {}
+var _seen_keys_per_topic_client: Dictionary = {}
 
 # topic -> Array[Callable] handlers; called with (payload) on client, with
 # (peer_id, payload) on server (peer_id = -1 on client-side).
+# Legacy polymorphic bucket — fires on both sides. Kept for backward compat
+# during migration; new code should use subscribe_server / subscribe_client.
 var _handlers: Dictionary = {}
+
+# Phase F5: role-scoped handler buckets. In listen mode (both roles active)
+# the polymorphic _handlers bucket fires twice per packet (once with peer_id+
+# payload, once with just payload) which forces game code to dispatch on
+# Callable arity. Split buckets eliminate that ambiguity — subscribers
+# explicitly opt into the role they want.
+var _server_handlers: Dictionary = {}
+var _client_handlers: Dictionary = {}
 
 # Local idempotency-key counter. send / broadcast auto-fill when omitted.
 var _idem_counter: int = 0
@@ -37,19 +51,41 @@ func _ready() -> void:
 		NetServer.handle_net_reliable.connect(_on_server_reliable_packet)
 
 
-# Adds a callback for a topic. Server-side callbacks receive
-# (peer_id: int, payload: PackedByteArray); client-side receive
-# (peer_id == -1, payload). Multiple callbacks per topic supported.
+# DEPRECATED polymorphic subscribe — fires on BOTH server and client delivery.
+# In listen mode this means one packet calls the handler twice with different
+# arities, forcing the handler to branch. Migrate to subscribe_server or
+# subscribe_client. Kept for backward compat.
 func subscribe(topic: int, callback: Callable) -> void:
 	if not _handlers.has(topic):
 		_handlers[topic] = []
 	_handlers[topic].append(callback)
 
 
-# Removes a previously-registered callback. Silent if not found.
+# Fires only when the server-side reliable lane delivers this topic. Callback
+# signature: cb(peer_id: int, payload: PackedByteArray).
+func subscribe_server(topic: int, callback: Callable) -> void:
+	if not _server_handlers.has(topic):
+		_server_handlers[topic] = []
+	_server_handlers[topic].append(callback)
+
+
+# Fires only when the client-side reliable lane delivers this topic. Callback
+# signature: cb(payload: PackedByteArray).
+func subscribe_client(topic: int, callback: Callable) -> void:
+	if not _client_handlers.has(topic):
+		_client_handlers[topic] = []
+	_client_handlers[topic].append(callback)
+
+
+# Removes a previously-registered callback. Walks all three buckets so callers
+# don't need to know which subscribe variant they used.
 func unsubscribe(topic: int, callback: Callable) -> void:
 	if _handlers.has(topic):
 		_handlers[topic].erase(callback)
+	if _server_handlers.has(topic):
+		_server_handlers[topic].erase(callback)
+	if _client_handlers.has(topic):
+		_client_handlers[topic].erase(callback)
 
 
 # Client -> server reliable send. Builds the packet and posts via the
@@ -83,24 +119,26 @@ func _resolve_idem_key(supplied: int) -> int:
 
 
 func _on_client_reliable_packet(packet) -> void:
-	if not _record_and_check(packet.topic, packet.idempotency_key):
+	if not _record_and_check_client(packet.topic, packet.idempotency_key):
 		return
 	received.emit(packet.topic, packet.payload, -1)
-	_dispatch(packet.topic, [packet.payload])
+	_dispatch(_client_handlers, packet.topic, [packet.payload])
+	_dispatch(_handlers, packet.topic, [packet.payload])
 
 
 func _on_server_reliable_packet(peer_id: int, packet) -> void:
-	if not _record_and_check(packet.topic, packet.idempotency_key):
+	if not _record_and_check_server(packet.topic, packet.idempotency_key):
 		return
 	received.emit(packet.topic, packet.payload, peer_id)
-	_dispatch(packet.topic, [peer_id, packet.payload])
+	_dispatch(_server_handlers, packet.topic, [peer_id, packet.payload])
+	_dispatch(_handlers, packet.topic, [peer_id, packet.payload])
 
 
 # Iterates handlers for a topic, pruning any whose target was freed (autoload
 # hub outlives scene-bound subscribers like ShootHandler — without this, a
 # scene reload leaves a stale Callable that crashes on next dispatch).
-func _dispatch(topic: int, args: Array) -> void:
-	var handlers: Array = _handlers.get(topic, [])
+func _dispatch(bucket: Dictionary, topic: int, args: Array) -> void:
+	var handlers: Array = bucket.get(topic, [])
 	if handlers.is_empty():
 		return
 	var alive: Array = []
@@ -110,17 +148,25 @@ func _dispatch(topic: int, args: Array) -> void:
 		alive.append(cb)
 		cb.callv(args)
 	if alive.size() != handlers.size():
-		_handlers[topic] = alive
+		bucket[topic] = alive
 
 
-# Returns true if (topic, idem_key) is new and should be delivered. False if
+# Returns true if (topic, idem_key) is new for the given side ring. False if
 # already-seen (drops the packet). Records the key on success.
-func _record_and_check(topic: int, idem_key: int) -> bool:
-	var seen: Array = _seen_keys_per_topic.get(topic, [])
+func _record_and_check_server(topic: int, idem_key: int) -> bool:
+	return _record_and_check_in(_seen_keys_per_topic_server, topic, idem_key)
+
+
+func _record_and_check_client(topic: int, idem_key: int) -> bool:
+	return _record_and_check_in(_seen_keys_per_topic_client, topic, idem_key)
+
+
+func _record_and_check_in(ring: Dictionary, topic: int, idem_key: int) -> bool:
+	var seen: Array = ring.get(topic, [])
 	if idem_key in seen:
 		return false
 	seen.append(idem_key)
 	if seen.size() > MAX_DEDUP_PER_TOPIC:
 		seen.pop_front()
-	_seen_keys_per_topic[topic] = seen
+	ring[topic] = seen
 	return true
