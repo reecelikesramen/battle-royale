@@ -32,17 +32,8 @@ signal received(topic: int, payload: PackedByteArray, peer_id: int)
 var _seen_keys_per_topic_server: Dictionary = {}
 var _seen_keys_per_topic_client: Dictionary = {}
 
-# topic -> Array[Callable] handlers; called with (payload) on client, with
-# (peer_id, payload) on server (peer_id = -1 on client-side).
-# Legacy polymorphic bucket — fires on both sides. Kept for backward compat
-# during migration; new code should use subscribe_server / subscribe_client.
-var _handlers: Dictionary = {}
-
-# Phase F5: role-scoped handler buckets. In listen mode (both roles active)
-# the polymorphic _handlers bucket fires twice per packet (once with peer_id+
-# payload, once with just payload) which forces game code to dispatch on
-# Callable arity. Split buckets eliminate that ambiguity — subscribers
-# explicitly opt into the role they want.
+# Role-scoped handler buckets. Subscribers explicitly opt into the side they
+# want — no polymorphic dispatch on Callable arity.
 var _server_handlers: Dictionary = {}
 var _client_handlers: Dictionary = {}
 
@@ -55,16 +46,6 @@ func _ready() -> void:
 		NetClient.handle_net_reliable.connect(_on_client_reliable_packet)
 	if NetServer.has_signal("handle_net_reliable"):
 		NetServer.handle_net_reliable.connect(_on_server_reliable_packet)
-
-
-# DEPRECATED polymorphic subscribe — fires on BOTH server and client delivery.
-# In listen mode this means one packet calls the handler twice with different
-# arities, forcing the handler to branch. Migrate to subscribe_server or
-# subscribe_client. Kept for backward compat.
-func subscribe(topic: int, callback: Callable) -> void:
-	if not _handlers.has(topic):
-		_handlers[topic] = []
-	_handlers[topic].append(callback)
 
 
 # Fires only when the server-side reliable lane delivers this topic. Callback
@@ -83,11 +64,9 @@ func subscribe_client(topic: int, callback: Callable) -> void:
 	_client_handlers[topic].append(callback)
 
 
-# Removes a previously-registered callback. Walks all three buckets so callers
+# Removes a previously-registered callback. Walks both buckets so callers
 # don't need to know which subscribe variant they used.
 func unsubscribe(topic: int, callback: Callable) -> void:
-	if _handlers.has(topic):
-		_handlers[topic].erase(callback)
 	if _server_handlers.has(topic):
 		_server_handlers[topic].erase(callback)
 	if _client_handlers.has(topic):
@@ -141,7 +120,6 @@ func _on_client_reliable_packet(packet) -> void:
 		return
 	received.emit(packet.topic, packet.payload, -1)
 	_dispatch(_client_handlers, packet.topic, [packet.payload])
-	_dispatch(_handlers, packet.topic, [packet.payload])
 
 
 func _on_server_reliable_packet(peer_id: int, packet) -> void:
@@ -149,7 +127,6 @@ func _on_server_reliable_packet(peer_id: int, packet) -> void:
 		return
 	received.emit(packet.topic, packet.payload, peer_id)
 	_dispatch(_server_handlers, packet.topic, [peer_id, packet.payload])
-	_dispatch(_handlers, packet.topic, [peer_id, packet.payload])
 
 
 # Iterates handlers for a topic, pruning any whose target was freed (autoload

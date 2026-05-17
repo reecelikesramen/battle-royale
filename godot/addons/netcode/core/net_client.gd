@@ -7,16 +7,10 @@ signal handle_net_state(packet: NetStatePacket)
 signal handle_net_reliable(packet: NetReliablePacket)
 signal handle_server_tick(tick: ServerTickPacket)
 signal handle_disconnect_from_server()
-signal self_spawned()
 
 var username: String
 var id: int = -1
-var player: PlayerController:
-	get: return player
-	set(value):
-		player = value
-		self_spawned.emit()
-	
+var player: PlayerController
 var debug
 var remote_ids: Array[int]
 var _disconnected_message: String = ""
