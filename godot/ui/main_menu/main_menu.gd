@@ -15,6 +15,15 @@ var _wake_in_progress := false
 # Tracks the most recent state pushed into _set_wake_button_state so the press
 # handler can decide whether to wake the VM or connect to the live server.
 var _wake_state := "offline"
+# Debounce: wake-fn fetches gs://.../server-state.json with a 5s timeout on
+# each GET. Cloud Run cold-starts + transient GCS hiccups can briefly return
+# ready=false even when the server is healthy. If we just saw "running", give
+# it one more probe (~5s sooner than the 15s cadence) before downgrading to
+# "starting" — keeps the button from flickering green→yellow→green on a
+# benign network blip.
+var _wake_starting_strikes := 0
+const WAKE_STARTING_STRIKES_NEEDED := 2
+const WAKE_FAST_RETRY_S := 5.0
 
 func _enter_tree() -> void:
 	# Listen for id-assignment, not raw GNS connect. on_connect_to_server fires
@@ -107,13 +116,30 @@ func _on_wake_probe_completed(_result: int, response_code: int, _headers: Packed
 	# VM is up but the game isn't yet — show "starting" so the user doesn't
 	# flap from green-to-red between probes.
 	if parsed.get("running", false):
+		_wake_starting_strikes = 0
 		_set_wake_button_state("running", "Server online")
 		return
 	var vm_status: String = parsed.get("vm_status", "")
 	if vm_status in ["STAGING", "PROVISIONING", "RUNNING", "REPAIRING"]:
+		# Debounce flap: don't downgrade running → starting on a single bad
+		# probe. Schedule a faster retry so the user only sees a brief beat,
+		# not a 15s yellow window for a one-off GCS hiccup.
+		if _wake_state == "running":
+			_wake_starting_strikes += 1
+			if _wake_starting_strikes < WAKE_STARTING_STRIKES_NEEDED:
+				_schedule_fast_retry()
+				return
 		_set_wake_button_state("starting", "Server starting...")
 	else:
+		_wake_starting_strikes = 0
 		_set_wake_button_state("offline", "Wake server")
+
+
+func _schedule_fast_retry() -> void:
+	if _wake_probe_timer == null:
+		return
+	if _wake_probe_timer.time_left > WAKE_FAST_RETRY_S:
+		_wake_probe_timer.start(WAKE_FAST_RETRY_S)
 
 
 # `state` ∈ {"offline", "starting", "running"}.
