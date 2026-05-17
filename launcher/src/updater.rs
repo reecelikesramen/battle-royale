@@ -186,8 +186,26 @@ fn windows_atomic_rename(src: &Path, dst: &Path) -> Result<()> {
 /// Apply a zstd patch (`zstd --patch-from prev new -o patch.zpatch`) by
 /// streaming the patch through a Decoder with the previous file content as
 /// the dictionary. Output is written atomically to `target`.
+///
+/// Memory note for the 1.2 GB `pck_base` patch on a 4 GB server:
+/// `fs::read(prev)` previously materialised a 1.2 GB anonymous Vec on top of
+/// `DecoderDictionary::copy`'s own 1.2 GB allocation. Combined with zstd's
+/// internal window/buffers the launcher's RSS hit ~3.7 GB and the OOM killer
+/// fired on e2-medium. Mmap'ing the source replaces that anonymous Vec with
+/// file-backed pages the kernel can evict under pressure — RSS hovers around
+/// ~1.5 GB instead. (Eliminating the second copy would need going through
+/// `zstd_safe::DDict::create_by_reference` because zstd-rs 0.13's safe API
+/// only exposes `DecoderDictionary::copy`; deferred until needed.)
 pub fn apply_zstd_patch(prev: &Path, patch_file: &Path, target: &Path) -> Result<()> {
-    let dict = fs::read(prev).with_context(|| format!("read prev {}", prev.display()))?;
+    let prev_file =
+        fs::File::open(prev).with_context(|| format!("open prev {}", prev.display()))?;
+    // SAFETY: this launcher is the sole writer of `prev` (atomic-renamed in
+    // this same fn at the end), so the file content is stable for the
+    // mapping's lifetime. We only read from it.
+    let prev_map = unsafe {
+        memmap2::Mmap::map(&prev_file)
+            .with_context(|| format!("mmap prev {}", prev.display()))?
+    };
     let patch = BufReader::new(
         fs::File::open(patch_file)
             .with_context(|| format!("open patch {}", patch_file.display()))?,
@@ -202,7 +220,7 @@ pub fn apply_zstd_patch(prev: &Path, patch_file: &Path, target: &Path) -> Result
     // window_log_max to 31 because `--patch-from` defaults to long-range
     // mode (--long=27) on the encoder side; the decoder must allow at
     // least that to materialize the patch in memory.
-    let prepared = zstd::dict::DecoderDictionary::copy(&dict);
+    let prepared = zstd::dict::DecoderDictionary::copy(&prev_map[..]);
     let mut decoder = zstd::stream::Decoder::with_prepared_dictionary(patch, &prepared)
         .context("zstd decoder with prev as prefix")?;
     decoder
@@ -214,6 +232,9 @@ pub fn apply_zstd_patch(prev: &Path, patch_file: &Path, target: &Path) -> Result
     std::io::copy(&mut decoder, &mut out).context("zstd decompress streaming")?;
     out.sync_all().context("fsync delta output")?;
     drop(out);
+    drop(decoder);
+    drop(prepared);
+    drop(prev_map);
 
     atomic_rename(&staging, target)
 }

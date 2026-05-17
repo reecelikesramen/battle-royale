@@ -2908,6 +2908,7 @@ dependencies = [
  "anyhow",
  "directories",
  "ed25519-dalek",
+ "memmap2",
  "reqwest",
  "serde",
  "serde_json",
