@@ -24,35 +24,53 @@ var _disconnected_message: String = ""
 func _ready() -> void:
 	NetSession.on_client_packet.connect(on_client_packet)
 	NetSession.on_disconnect_from_server.connect(on_disconnect_from_server)
+	NetReliableHub.subscribe_client(NetReliableHub.TOPIC_ID_ASSIGNMENT, _on_id_assignment_payload)
+	NetReliableHub.subscribe_client(NetReliableHub.TOPIC_PLAYER_DISCONNECTED, _on_player_disconnected_payload)
 
 
 func on_client_packet(data) -> void:
-	if data is IdAssignmentPacket:
-		manage_ids(data)
-	elif data is NetStatePacket:
+	if data is NetStatePacket:
 		handle_net_state.emit(data)
 	elif data is NetReliablePacket:
 		handle_net_reliable.emit(data)
 	elif data is ServerTickPacket:
 		handle_server_tick.emit(data)
-	elif data is PlayerDisconnectedPacket:
-		handle_player_disconnected.emit(data.player_id)
 	else:
 		push_error("Packet unknown type unhandled!")
 
 
-func manage_ids(packet: IdAssignmentPacket) -> void:
-	if id == -1: # When id == -1, the id sent by the server is for us
-		id = packet.id
-		handle_local_id_assignment.emit(packet.id)
+# Wire format: u8 id, u8 count, then `count` u8 remote ids. Mirrors NetServer
+# ._encode_id_assignment. Reliable-hub topic delivery is per-peer so packet
+# semantics match the old targeted typed-packet send.
+func _on_id_assignment_payload(payload: PackedByteArray) -> void:
+	var sp := StreamPeerBuffer.new()
+	sp.data_array = payload
+	var assigned_id: int = sp.get_u8()
+	var count: int = sp.get_u8()
+	var ids: Array[int] = []
+	for _i in count:
+		ids.append(sp.get_u8())
+	_manage_ids(assigned_id, ids)
 
-		remote_ids = packet.remote_ids
+
+func _manage_ids(assigned_id: int, ids: Array[int]) -> void:
+	if id == -1: # First receipt: server is telling us our own id + current roster.
+		id = assigned_id
+		handle_local_id_assignment.emit(assigned_id)
+		remote_ids = ids
 		for remote_id in remote_ids:
 			if remote_id == id: continue
 			handle_remote_id_assignment.emit(remote_id)
-	else: # When id != -1, we already own an id, and just append the remote ids by the sent id
-		remote_ids.append(packet.id)
-		handle_remote_id_assignment.emit(packet.id)
+	else: # Subsequent receipts: a new peer joined; ids[0..n) is current roster including them.
+		remote_ids.append(assigned_id)
+		handle_remote_id_assignment.emit(assigned_id)
+
+
+func _on_player_disconnected_payload(payload: PackedByteArray) -> void:
+	var sp := StreamPeerBuffer.new()
+	sp.data_array = payload
+	var peer_id: int = sp.get_u8()
+	handle_player_disconnected.emit(peer_id)
 
 
 func get_disconnect_message(end_reason: int) -> String:

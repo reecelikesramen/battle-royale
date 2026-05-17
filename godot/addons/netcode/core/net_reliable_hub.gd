@@ -17,6 +17,12 @@ extends Node
 
 const MAX_DEDUP_PER_TOPIC: int = 256
 
+# Framework-reserved topic IDs. Game code must keep its own Enums.ReliableTopic
+# below 0xFF00 to avoid collisions. u16 wire on the Rust side, so range is
+# 0..=65535; we reserve the high byte 0xFFxx for framework internals.
+const TOPIC_ID_ASSIGNMENT: int = 0xFF00
+const TOPIC_PLAYER_DISCONNECTED: int = 0xFF01
+
 signal received(topic: int, payload: PackedByteArray, peer_id: int)
 
 # topic -> Array[int] FIFO of idem keys we've already delivered.
@@ -108,6 +114,18 @@ func broadcast(topic: int, payload: PackedByteArray, idempotency_key: int = -1) 
 	packet.idempotency_key = key
 	packet.payload = payload
 	NetSession.broadcast_packet(packet.to_payload())
+	return key
+
+
+# Server -> one-specific-peer reliable send. Used when a payload is meaningful
+# only to a single recipient (e.g. that peer's own id-assignment on connect).
+func send_to_peer(peer_id: int, topic: int, payload: PackedByteArray, idempotency_key: int = -1) -> int:
+	var key: int = _resolve_idem_key(idempotency_key)
+	var packet := NetReliablePacket.new()
+	packet.topic = topic
+	packet.idempotency_key = key
+	packet.payload = payload
+	NetSession.send_packet_to_peer(peer_id, packet.to_payload())
 	return key
 
 

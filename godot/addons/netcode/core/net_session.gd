@@ -265,7 +265,7 @@ var is_listen_mode_requested: bool:
 # scene to the map; the map's root _ready (which runs AFTER spawners' _ready
 # subscribe to NetReplication signals, since Godot calls _ready bottom-up)
 # consumes the flag and triggers start_listen_mode. Eliminates the window where
-# the loopback handshake fires on_peer_connect / IdAssignmentPacket before
+# the loopback handshake fires on_peer_connect / id-assignment before
 # spawners are subscribed.
 var pending_listen_mode: bool = false
 
@@ -448,3 +448,14 @@ static func _parse_kv(arg: String) -> Dictionary:
 func _notification(what):
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		shutdown_all()
+
+
+# Wraps the Rust shutdown_all to also reset per-session GDScript state so a
+# second listen-mode boot in the same process starts from a clean slate.
+# Without the latch reset, when_roles_ready callbacks subscribed during
+# session 2's spawner _ready fire immediately with stale (closed) role state.
+func shutdown_all() -> void:
+	super.shutdown_all()
+	_roles_ready_emitted = false
+	pending_listen_mode = false
+	NetReplication.reset_session_state()

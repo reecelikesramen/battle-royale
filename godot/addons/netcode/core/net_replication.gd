@@ -49,7 +49,7 @@ var _schema_hashes: Dictionary = {}       # int (schema_id) -> int (NetSchema.co
 
 # Phase 9c: snapshots for entities not yet registered are queued instead of
 # dropped. When the entity finally registers (typically after a deferred
-# add_child chain triggered by IdAssignmentPacket), the queue flushes in
+# add_child chain triggered by id-assignment), the queue flushes in
 # arrival order so the predictor sees a coherent history.
 # Bounded so a malicious or out-of-sync server can't OOM the receiver — keeping
 # only the newest MAX_PENDING_PER_ENTITY entries; since deltas reference the
@@ -147,21 +147,29 @@ func register_entity(schema_id: int, entity_id: int, predictor) -> void:
 
 func unregister_entity(schema_id: int, entity_id: int) -> void:
 	var key := Vector2i(schema_id, entity_id)
+	var was_auth: bool = _server_entities.has(key)
+	var was_proxy: bool = _client_entities.has(key)
+	# Re-entry from the cascade-free path: auth unregister queue_frees the proxy
+	# host, whose _exit_tree calls back into unregister_entity with both keys
+	# already gone. Without this guard, listeners fire twice per entity death.
+	if not was_auth and not was_proxy:
+		return
 	# Cascade-free a co-resident proxy when its auth unregisters (listen mode
 	# only). Without this, NetProxyBlender's buffer drains to null after the
 	# auth queue_frees and DISCRETE fields fall back to the last known value —
 	# proxies get stuck rendering their final frame forever (grenades hung in
 	# EXPLODING on the explosion site). Auth unregister is the canonical
 	# "no more snapshots are coming" signal, so the proxy can free immediately.
-	var was_auth: bool = _server_entities.has(key)
-	var was_proxy: bool = _client_entities.has(key)
+	# Capture the proxy ref before erasing so the cascade queue_free still has
+	# something to act on.
+	var proxy_to_free: NetPredictor = null
 	if was_auth and was_proxy:
-		var proxy: NetPredictor = _client_entities[key]
-		if is_instance_valid(proxy) and is_instance_valid(proxy.host):
-			proxy.host.queue_free()
+		proxy_to_free = _client_entities[key]
 	_server_entities.erase(key)
 	_client_entities.erase(key)
 	_pending_packets.erase(key)
+	if proxy_to_free != null and is_instance_valid(proxy_to_free) and is_instance_valid(proxy_to_free.host):
+		proxy_to_free.host.queue_free()
 	# Use was_auth as the is_authoritative flag; if both sides existed the
 	# auth-side unregister fires first. Listeners that care can re-check via
 	# is_predictor_authoritative — but generally unregister handlers don't
@@ -385,6 +393,7 @@ func _instantiate_for_role(parent: Node, schema_id: int, entity_id: int, scene_p
 	instance.name = "E_%d_%d_%s" % [schema_id, entity_id, "auth" if is_auth else "proxy"]
 	var pred: NetPredictor = instance.get_node_or_null("NetPredictor") as NetPredictor
 	if pred == null:
+		pending.erase(key)
 		push_error("[NetReplication] scene %s has no NetPredictor child — cannot wire" % scene_path)
 		instance.queue_free()
 		return
@@ -433,3 +442,16 @@ func _despawn_all_for_schema(schema_id: int) -> void:
 # side just registered without re-checking dicts by hand.
 func is_predictor_authoritative(schema_id: int, entity_id: int) -> bool:
 	return _server_entities.has(Vector2i(schema_id, entity_id))
+
+
+# Called by NetSession.shutdown_all. Predictor _exit_tree handles registry
+# cleanup for entities still in the scene tree; this clears the
+# pre-_ready pending markers (instances mid-call_deferred("add_child") when
+# shutdown hit) and any buffered snapshots whose target proxy will never
+# register. Without this, a second start_listen_mode in the same process can
+# see stale pending markers that block re-spawn of the same (schema, entity)
+# pair, leaving a ghost predictor in the registry and no live host node.
+func reset_session_state() -> void:
+	_pending_auth_spawns.clear()
+	_pending_proxy_spawns.clear()
+	_pending_packets.clear()

@@ -54,7 +54,7 @@ func _on_play_solo_pressed() -> void:
 	NetClient.username = "Host_%d" % (Time.get_ticks_msec() % 10000)
 	# Set flag + change scene. The map root _ready calls start_listen_mode
 	# AFTER its child spawners have subscribed to NetReplication signals, so
-	# the loopback handshake's on_peer_connect / IdAssignmentPacket reach
+	# the loopback handshake's on_peer_connect / id-assignment reach
 	# subscribers instead of racing past them.
 	NetSession.pending_listen_mode = true
 	get_tree().change_scene_to_file(Constants.MAP_SCENE_PATH)

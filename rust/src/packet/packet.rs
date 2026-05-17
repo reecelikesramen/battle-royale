@@ -7,8 +7,6 @@ use std::io::{Error, ErrorKind, Result};
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 pub(crate) enum PacketId {
-    IdAssignment,
-    PlayerDisconnected,
     ServerTick,
     NetState,
     NetCommand,
@@ -17,8 +15,6 @@ pub(crate) enum PacketId {
 }
 
 pub(crate) enum Packet {
-    IdAssignment(IdAssignmentPacketWire),
-    PlayerDisconnected(PlayerDisconnectedPacketWire),
     ServerTick(ServerTickPacketWire),
     NetState(NetStatePacketWire),
     NetCommand(NetCommandPacketWire),
@@ -29,8 +25,6 @@ pub(crate) enum Packet {
 impl Packet {
     fn id(&self) -> PacketId {
         match self {
-            Packet::IdAssignment(_) => PacketId::IdAssignment,
-            Packet::PlayerDisconnected(_) => PacketId::PlayerDisconnected,
             Packet::ServerTick(_) => PacketId::ServerTick,
             Packet::NetState(_) => PacketId::NetState,
             Packet::NetCommand(_) => PacketId::NetCommand,
@@ -41,8 +35,6 @@ impl Packet {
 
     pub(crate) fn is_reliable(&self) -> bool {
         match self {
-            Packet::IdAssignment(_) => IdAssignmentPacketWire::IS_RELIABLE,
-            Packet::PlayerDisconnected(_) => PlayerDisconnectedPacketWire::IS_RELIABLE,
             Packet::ServerTick(_) => ServerTickPacketWire::IS_RELIABLE,
             Packet::NetState(_) => NetStatePacketWire::IS_RELIABLE,
             Packet::NetCommand(_) => NetCommandPacketWire::IS_RELIABLE,
@@ -54,8 +46,6 @@ impl Packet {
     pub(crate) fn encode(&self) -> Vec<u8> {
         let mut bytes = vec![self.id().to_u8().unwrap()];
         bytes.extend(match self {
-            Packet::IdAssignment(packet) => packet.encode(),
-            Packet::PlayerDisconnected(packet) => packet.encode(),
             Packet::ServerTick(packet) => packet.encode(),
             Packet::NetState(packet) => packet.encode(),
             Packet::NetCommand(packet) => packet.encode(),
@@ -79,12 +69,6 @@ impl Packet {
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Unknown packet ID"))?;
 
         match packet_id {
-            PacketId::IdAssignment => Ok(Packet::IdAssignment(IdAssignmentPacketWire::decode(
-                packet_data,
-            )?)),
-            PacketId::PlayerDisconnected => Ok(Packet::PlayerDisconnected(
-                PlayerDisconnectedPacketWire::decode(packet_data)?,
-            )),
             PacketId::ServerTick => Ok(Packet::ServerTick(ServerTickPacketWire::decode(packet_data)?)),
             PacketId::NetState => Ok(Packet::NetState(NetStatePacketWire::decode(packet_data)?)),
             PacketId::NetCommand => Ok(Packet::NetCommand(NetCommandPacketWire::decode(packet_data)?)),
@@ -95,8 +79,6 @@ impl Packet {
 
     pub(crate) fn as_gd(&self) -> Gd<Object> {
         match self {
-            Packet::IdAssignment(packet) => packet.as_gd(),
-            Packet::PlayerDisconnected(packet) => packet.as_gd(),
             Packet::ServerTick(packet) => packet.as_gd(),
             Packet::NetState(packet) => packet.as_gd(),
             Packet::NetCommand(packet) => packet.as_gd(),

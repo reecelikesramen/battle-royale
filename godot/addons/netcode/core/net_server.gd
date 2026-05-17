@@ -31,28 +31,34 @@ func _physics_process(_delta: float) -> void:
 func on_peer_connected(peer_id: int) -> void:
 	# Rust drains all GNS Connecting→Connected events in one poll before emitting
 	# on_peer_connect signals, so connected_clients can already contain a peer
-	# that hasn't received its IdAssignment yet. Broadcasting the first assignment
+	# that hasn't received its id-assignment yet. Broadcasting the first assignment
 	# would race: the unassigned peer (id==-1) takes whichever packet arrives
 	# first as its local id. Target sends instead.
 	for existing_id in peer_ids:
-		var remote_notify := IdAssignmentPacket.new()
-		remote_notify.id = peer_id
-		remote_notify.remote_ids = peer_ids.duplicate()
-		remote_notify.remote_ids.append(peer_id)
-		NetSession.send_packet_to_peer(existing_id, remote_notify.to_payload())
+		var remote_payload := peer_ids.duplicate()
+		remote_payload.append(peer_id)
+		NetReliableHub.send_to_peer(existing_id, NetReliableHub.TOPIC_ID_ASSIGNMENT, _encode_id_assignment(peer_id, remote_payload))
 
 	peer_ids.append(peer_id)
 
-	var id_assignment := IdAssignmentPacket.new()
-	id_assignment.id = peer_id
-	id_assignment.remote_ids = peer_ids.duplicate()
-	NetSession.send_packet_to_peer(peer_id, id_assignment.to_payload())
+	NetReliableHub.send_to_peer(peer_id, NetReliableHub.TOPIC_ID_ASSIGNMENT, _encode_id_assignment(peer_id, peer_ids.duplicate()))
 
 
 func on_peer_disconnected(peer_id: int) -> void:
 	peer_ids.erase(peer_id)
+	var sp := StreamPeerBuffer.new()
+	sp.put_u8(peer_id)
+	NetReliableHub.broadcast(NetReliableHub.TOPIC_PLAYER_DISCONNECTED, sp.data_array)
 
-	# Create IDUnassignment to broadcast to all still connected peers
+
+# Wire format: u8 id, u8 count, then `count` u8 remote ids.
+func _encode_id_assignment(id: int, remote_ids: Array) -> PackedByteArray:
+	var sp := StreamPeerBuffer.new()
+	sp.put_u8(id)
+	sp.put_u8(remote_ids.size())
+	for rid in remote_ids:
+		sp.put_u8(rid)
+	return sp.data_array
 
 
 func on_server_packet(peer_id: int, packet) -> void:
