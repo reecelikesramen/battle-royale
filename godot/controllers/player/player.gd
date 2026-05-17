@@ -168,15 +168,27 @@ func _ready():
 
 	global_position = Constants.MAP_SPAWN
 
-	# Listen mode: server-auth + client-proxy instances coexist in the same
-	# physics space. With both capsule colliders live, server-auth's
-	# move_and_slide bounces off its own proxy sibling each tick — feedback
-	# loop sends instances flying. Proxy doesn't simulate (NetPredictor routes
-	# listen-mode proxies through _proxy_tick), so its collider is pure hazard.
-	# Gate on has_server_role to scope to listen mode: client-only remote
-	# proxies keep their colliders so the local player still bumps into them.
-	if not _net.is_authoritative_instance and NetSession.has_server_role:
-		%VisualCollider.set_deferred("disabled", true)
+	# Listen mode splits each peer into two instances (server-auth + client-
+	# proxy). The auth runs physics; the proxy is what the local player sees.
+	# Without these gates you get:
+	#   - server-auth's move_and_slide bouncing off the proxy's collider each
+	#     tick (capsule-vs-capsule feedback loop sends both flying)
+	#   - both capsules rendered, so the user sees two players at their spawn
+	# Gate on has_server_role to scope these to listen mode: in client-only
+	# mode the local player has no server-auth sibling and remote proxies need
+	# colliders so the local player bumps into them correctly.
+	if NetSession.has_server_role and NetSession.has_client_role:
+		if _net.is_authoritative_instance:
+			# Server-auth: keep collider (physics truth) but hide the mesh — the
+			# proxy sibling under ClientPlayers is the body the user renders.
+			# Visibility propagates to PlaceholderMesh; CollisionShape3D.disabled
+			# is unaffected so physics queries still work.
+			$VisualCollider.visible = false
+		else:
+			# Client-proxy: kill physics so it doesn't shove the auth sibling
+			# around. Mesh stays visible — this is the body the camera follows
+			# in third-person and the one other clients would see.
+			$VisualCollider.set_deferred("disabled", true)
 
 	if is_local_view:
 		camera.make_current()
@@ -322,6 +334,17 @@ func _gather_command(delta: float) -> PlayerInput:
 		cmd.peek_left_right = 0.0
 		cmd.shoot = false
 		cmd.scope = false
+
+	# Listen-mode local proxy: NetPredictor routes this side through _proxy_tick
+	# instead of _authority_tick, so _simulate -> _apply_state -> update_camera
+	# never fires. Without driving the camera here, the view would wait for the
+	# server-auth sibling's broadcast to roundtrip via loopback GNS + a tick of
+	# state-buffer interp (~16ms) before reflecting this frame's mouse delta.
+	# Push the freshly-integrated _look_abs onto the camera now so view response
+	# stays input-locked; _proxy_apply will write the same value next tick and
+	# the camera doesn't notice the duplicate.
+	if not _net.is_authoritative_instance and NetSession.has_server_role:
+		update_camera(_look_abs)
 	return cmd
 
 
