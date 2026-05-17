@@ -23,7 +23,14 @@ signal entity_spawn_requested(schema_id: int, entity_id: int, scene_path: String
 const SPAWN_TOPIC: int = 65001
 
 var _schemas: Dictionary = {}             # int -> NetSchema
-var _entities: Dictionary = {}            # Vector2i(schema_id, entity_id) -> NetPredictor
+
+# Phase D split: in listen-server mode the same (schema_id, entity_id) maps to
+# two NetPredictor instances — one server-authoritative (drives outbound state
+# broadcast) and one client-rendered proxy (receives inbound state packets).
+# Single-mode operation populates only one of the two registries. Predictors
+# self-route into the correct registry via NetPredictor.is_authoritative_instance.
+var _server_entities: Dictionary = {}     # Vector2i -> NetPredictor (auth)
+var _client_entities: Dictionary = {}     # Vector2i -> NetPredictor (proxy)
 
 # Sprint 7: drift detection. First registrant for a schema_id pins the
 # expected content hash; subsequent registrants with the same id but a
@@ -96,13 +103,29 @@ func get_schema(schema_id: int) -> NetSchema:
 	return _schemas.get(schema_id, null)
 
 
+# Predictor's is_authoritative_instance routes the registration into the
+# correct dual-mode registry. Non-NetPredictor fixtures (test fakes) without
+# the field default to server-side, since that's the dominant pre-listen-mode
+# convention for tests that bypass scene-level spawn flow.
+func _is_authoritative(predictor) -> bool:
+	if "is_authoritative_instance" in predictor:
+		return predictor.is_authoritative_instance
+	return true
+
+
 func register_entity(schema_id: int, entity_id: int, predictor) -> void:
 	var key := Vector2i(schema_id, entity_id)
-	_entities[key] = predictor
+	var is_auth: bool = _is_authoritative(predictor)
+	if is_auth:
+		_server_entities[key] = predictor
+	else:
+		_client_entities[key] = predictor
 	entity_registered.emit(schema_id, entity_id)
 	# Phase 9c: drain any snapshots that arrived before this entity registered.
-	# Flushed in arrival order so a deltas-on-keyframe chain decodes correctly.
-	if _pending_packets.has(key):
+	# Only proxies receive snapshots (state flows server → client), so only
+	# client-side registration triggers the flush. Authoritative-only single-
+	# mode operation (DEDICATED_SERVER) never has pending packets to drain.
+	if not is_auth and _pending_packets.has(key):
 		var queued: Array = _pending_packets[key]
 		_pending_packets.erase(key)
 		for packet in queued:
@@ -111,34 +134,59 @@ func register_entity(schema_id: int, entity_id: int, predictor) -> void:
 
 func unregister_entity(schema_id: int, entity_id: int) -> void:
 	var key := Vector2i(schema_id, entity_id)
-	_entities.erase(key)
-	# Clear pending too — once the entity is gone, queued snapshots no longer
-	# have a valid target. A future re-register starts from a fresh keyframe.
+	_server_entities.erase(key)
+	_client_entities.erase(key)
 	_pending_packets.erase(key)
 	entity_unregistered.emit(schema_id, entity_id)
 
 
-func get_entity(schema_id: int, entity_id: int):
-	return _entities.get(Vector2i(schema_id, entity_id), null)
+# Lookup defaults to "server registry first, fall back to client". In single-
+# mode operation only one registry is populated so the lookup hits whichever
+# exists; in listen-server the default returns the authoritative instance
+# (which is what every server-side game-logic caller wants — lag-comp, blast
+# damage iteration, hit resolution). Pass `prefer_server` explicitly to force
+# one side (e.g. a client-only debug overlay enumerating proxies).
+func get_entity(schema_id: int, entity_id: int, prefer_server: Variant = null):
+	var key := Vector2i(schema_id, entity_id)
+	if prefer_server != null:
+		return (_server_entities if bool(prefer_server) else _client_entities).get(key, null)
+	var p = _server_entities.get(key, null)
+	if p != null:
+		return p
+	return _client_entities.get(key, null)
 
 
-# Iterates all predictors, yielding (schema_id, entity_id, predictor).
-# Used by the server snapshot broadcast loop.
-func iter_entities() -> Array:
+# Iterates predictors. Default merges both registries (server first); explicit
+# `prefer_server` restricts to one side. Server-only entries are emitted
+# first so order-sensitive callers (lag-comp rewind) see authoritative state.
+func iter_entities(prefer_server: Variant = null) -> Array:
 	var out: Array = []
-	for key in _entities:
+	if prefer_server != null:
+		var registry: Dictionary = _server_entities if bool(prefer_server) else _client_entities
+		for key in registry:
+			var k: Vector2i = key
+			out.append([k.x, k.y, registry[key]])
+		return out
+	for key in _server_entities:
 		var k: Vector2i = key
-		out.append([k.x, k.y, _entities[key]])
+		out.append([k.x, k.y, _server_entities[key]])
+	for key in _client_entities:
+		if _server_entities.has(key):
+			continue
+		var k: Vector2i = key
+		out.append([k.x, k.y, _client_entities[key]])
 	return out
 
 
 func _on_net_state(packet) -> void:
-	var predictor = get_entity(packet.schema_id, packet.entity_id)
+	# State packets target client-side proxies — server doesn't replay its own
+	# snapshots back into its auth instances. Always look up in client registry.
+	var key := Vector2i(packet.schema_id, packet.entity_id)
+	var predictor = _client_entities.get(key, null)
 	if predictor == null:
-		# Phase 9c: queue for when the entity registers. FIFO trim drops oldest
-		# to bound memory; the most recent entries are most useful because a
-		# subsequent keyframe will land within KEYFRAME_INTERVAL ticks.
-		var key := Vector2i(packet.schema_id, packet.entity_id)
+		# Phase 9c: queue for when the proxy registers. FIFO trim drops oldest
+		# to bound memory; recent entries are most useful because a subsequent
+		# keyframe will land within KEYFRAME_INTERVAL ticks.
 		var pending: Array = _pending_packets.get(key, [])
 		pending.append(packet)
 		while pending.size() > MAX_PENDING_PER_ENTITY:

@@ -84,5 +84,8 @@ func _capture(schema_id: int, entity_id: int, scene_path: String, owner_peer_id:
 
 class _FakePredictor extends Node:
 	var received_count: int = 0
+	# Buffered state packets target client-side proxies; register as proxy so
+	# the pending-packet drain on register_entity flushes into this fake.
+	var is_authoritative_instance: bool = false
 	func handle_net_state_packet(_packet) -> void:
 		received_count += 1

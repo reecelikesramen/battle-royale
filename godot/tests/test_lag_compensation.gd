@@ -145,4 +145,8 @@ func _make_predictor() -> NetPredictor:
 	n.shadow_state = n.state_template.duplicate(true) as NetState
 	n.render_state = n.state_template.duplicate(true) as NetState
 	n.state_field_names = NetPredictor._user_field_names(n.shadow_state)
+	# Lag-comp tests simulate server-side rewind — these predictors are the
+	# authoritative instances that hold shadow_state. Mark as such so they
+	# register into _server_entities and iter_entities finds them.
+	n.is_authoritative_instance = true
 	return n
