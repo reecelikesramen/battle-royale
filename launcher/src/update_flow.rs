@@ -19,28 +19,18 @@ pub enum UpdateMessage {
     Error(String),
 }
 
-pub fn run(tx: Sender<UpdateMessage>) -> Result<()> {
-    // Consume any leftover restart sentinel from a previous session. If the
-    // server kicked clients via Sprint 7's RestartListener, the game wrote
-    // this file before quitting; its presence tells us a re-update is
-    // expected. We always run the manifest check, but this is a useful
-    // diagnostic for logs.
-    if let Ok(install) = crate::platform::install_dir() {
-        let sentinel = crate::platform::restart_sentinel_path(&install);
-        if sentinel.exists() {
-            eprintln!("found restart sentinel at {} — running update flow", sentinel.display());
-            let _ = std::fs::remove_file(&sentinel);
-        }
-    }
-
-    let _ = tx.send(UpdateMessage::Status("Fetching manifest...".into()));
-
-    let client = reqwest::blocking::Client::builder()
+/// Build the shared http client used by both the prefetch and the worker.
+pub fn http_client() -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
         .user_agent(concat!("battle-royale-launcher/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(60))
         .build()
-        .context("build http client")?;
+        .context("build http client")
+}
 
+/// Fetch manifest + signature from GCS and verify. Returns the parsed manifest
+/// so callers can decide whether work is needed before opening a GUI window.
+pub fn fetch_manifest(client: &reqwest::blocking::Client) -> Result<Manifest> {
     let bust = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -66,12 +56,60 @@ pub fn run(tx: Sender<UpdateMessage>) -> Result<()> {
         .context("read signature body")?
         .to_vec();
 
-    let _ = tx.send(UpdateMessage::Status("Verifying signature...".into()));
     manifest::verify_signature(&manifest_bytes, &sig_bytes)?;
+    manifest::parse(&manifest_bytes)
+}
 
-    let manifest = manifest::parse(&manifest_bytes)?;
-    apply_updates(&client, &manifest, &tx)?;
+/// Quick check used to decide whether the GUI is needed at all. Returns true
+/// when the installed VERSION.txt matches manifest.latest AND no restart
+/// sentinel is pending — i.e. there's nothing to download and nothing to
+/// re-apply. Does NOT walk per-file sha256s; that's the worker's job.
+pub fn is_up_to_date(manifest: &Manifest) -> bool {
+    let Ok(install) = install_dir() else {
+        return false;
+    };
+    if crate::platform::restart_sentinel_path(&install).exists() {
+        // Game asked for a re-update before relaunch; force the slow path.
+        return false;
+    }
+    installed_version(&install) == manifest.latest
+}
 
+/// Options passed into the update run. The dedicated-server `--update-only`
+/// path opts out of launcher self-update because the binary is invoked
+/// (and then re-invoked on every boot) by systemd; launcher-updater's normal
+/// "swap then relaunch" behavior would double-spawn against systemd's
+/// ExecStart and confuse the unit lifecycle.
+#[derive(Clone, Copy, Default)]
+pub struct RunOpts {
+    pub skip_launcher_self_update: bool,
+}
+
+/// Worker entry: run the full update path against a pre-fetched manifest and
+/// report progress via `tx`. Splits cleanly from `fetch_manifest` so main can
+/// silent-launch on the fast path without spinning up Slint.
+pub fn run(tx: Sender<UpdateMessage>, manifest: Manifest) -> Result<()> {
+    run_with_opts(tx, manifest, RunOpts::default())
+}
+
+pub fn run_with_opts(
+    tx: Sender<UpdateMessage>,
+    manifest: Manifest,
+    opts: RunOpts,
+) -> Result<()> {
+    // Consume any leftover restart sentinel from a previous session. Logged so
+    // we know the slow path was forced by the in-game RestartListener rather
+    // than a real manifest change.
+    if let Ok(install) = install_dir() {
+        let sentinel = crate::platform::restart_sentinel_path(&install);
+        if sentinel.exists() {
+            eprintln!("consumed restart sentinel at {}", sentinel.display());
+            let _ = std::fs::remove_file(&sentinel);
+        }
+    }
+
+    let client = http_client()?;
+    apply_updates(&client, &manifest, &tx, opts)?;
     let _ = tx.send(UpdateMessage::Done);
     Ok(())
 }
@@ -80,6 +118,7 @@ fn apply_updates(
     client: &reqwest::blocking::Client,
     manifest: &Manifest,
     tx: &Sender<UpdateMessage>,
+    opts: RunOpts,
 ) -> Result<()> {
     let plat_key = platform_key();
     let install = install_dir()?;
@@ -104,16 +143,20 @@ fn apply_updates(
         ensure_executable(&path)?;
     }
 
-    // game_binary is intentionally skipped: the manifest URL points at the
-    // full platform .zip (mac/linux/windows), not a single binary file. The
-    // initial install delivers the binary via that zip download out-of-band;
-    // in-place game-binary updates require Godot-version-bump release and
-    // re-downloading the zip. PCK patches + launcher self-update cover the
-    // common per-tag change set without touching the binary.
+    // game_binary handling: when the manifest entry points at a standalone
+    // binary (linux dedicated-server bundle, post-v0.1.14), apply normal
+    // atomic-swap updates. When it points at a full platform .zip
+    // (windows/mac client bundles), skip — we don't have an in-place "unpack
+    // zip" path, and those clients re-bootstrap from the launcher
+    // distribution when the binary actually changes.
+    let game_binary = target_plat
+        .game_binary
+        .as_ref()
+        .filter(|c| !c.url.ends_with(".zip"));
     let components = [
+        ("game_binary", game_binary),
         ("rust_lib", target_plat.rust_lib.as_ref()),
         ("pck_base", target_plat.pck_base.as_ref()),
-        ("pck_patch", target_plat.pck_patch.as_ref()),
     ];
 
     let total = components.iter().filter(|(_, c)| c.is_some()).count() as f32;
@@ -187,6 +230,11 @@ fn apply_updates(
     // Self-update last. We can't overwrite the running launcher binary, so we
     // download to <launcher>.new and hand off to the launcher-updater
     // bootstrap, which waits for us to exit, swaps the file, and relaunches.
+    // --update-only callers (the dedicated-server systemd unit) opt out
+    // because the relaunch would race systemd's own ExecStart.
+    if opts.skip_launcher_self_update {
+        return Ok(());
+    }
     if let Some(launcher_component) = target_plat.launcher.as_ref() {
         if launcher_self_update_needed(&install, launcher_component)? {
             let current_launcher = std::env::current_exe().context("current_exe")?;

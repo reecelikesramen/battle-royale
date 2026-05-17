@@ -143,18 +143,16 @@ steps:
         mkdir -p build/windows
         cd ${_PROJECT_PATH}
         godot --headless --export-release "Windows" ../build/windows/${_EXPORT_NAME}.exe || true
-        
-        # Copy base PCK
+
+        # pck_base is the only pck artifact shipped now. Per-tag pck deltas are
+        # produced by generate-deltas (zstd zpatch against the prior tag's
+        # pck_base); the launcher applies them in-place before spawning the
+        # game. The legacy godot --export-patch chain (runtime-loaded patches
+        # via ProjectSettings.load_resource_pack) is gone.
         if [ -f "../build/windows/${_EXPORT_NAME}.pck" ]; then
           cp "../build/windows/${_EXPORT_NAME}.pck" "../build/windows/windows-base.pck"
         fi
-        
-        # Generate patch if previous exists
-        if [ -f "../previous-pcks/windows-base.pck" ]; then
-          godot --headless --export-patch "Windows" "../build/windows/${_TAG_NAME}.pck" \
-            --patches "$$(readlink -f ../previous-pcks/windows-base.pck)" || true
-        fi
-        
+
         ls -la ../build/windows/
 
   # ============ EXPORT LINUX ============
@@ -168,18 +166,13 @@ steps:
         mkdir -p build/linux
         cd ${_PROJECT_PATH}
         godot --headless --export-release "Linux" ../build/linux/${_EXPORT_NAME}.x86_64 || true
-        
-        # Copy base PCK
+
+        # See export-windows step: pck deltas now come from generate-deltas
+        # (zstd zpatch). No more --export-patch runtime-loaded patches.
         if [ -f "../build/linux/${_EXPORT_NAME}.pck" ]; then
           cp "../build/linux/${_EXPORT_NAME}.pck" "../build/linux/linux-base.pck"
         fi
-        
-        # Generate patch if previous exists
-        if [ -f "../previous-pcks/linux-base.pck" ]; then
-          godot --headless --export-patch "Linux" "../build/linux/${_TAG_NAME}.pck" \
-            --patches "$$(readlink -f ../previous-pcks/linux-base.pck)" || true
-        fi
-        
+
         ls -la ../build/linux/
 
   # ============ EXPORT MACOS ============
@@ -214,15 +207,10 @@ steps:
         # Clean up extracted app (save space)
         rm -rf "${_PROJECT_NAME}.app" || true
         cd ../..
-        
-        # Generate patch if previous exists
-        if [ -f "previous-pcks/mac-base.pck" ]; then
-          cd ${_PROJECT_PATH}
-          godot --headless --export-patch "macOS" "../build/mac/${_TAG_NAME}.pck" \
-            --patches "$$(readlink -f ../previous-pcks/mac-base.pck)" || true
-          cd ..
-        fi
-        
+
+        # See export-windows step: pck deltas now come from generate-deltas
+        # (zstd zpatch). No more --export-patch runtime-loaded patches.
+
         ls -la build/mac/
 
   # ============ OS CODESIGNING (must run before zip so signed exes ship in release zips) ============
@@ -307,25 +295,41 @@ steps:
         cp BUILD_SHA build/windows/build-sha.txt
         cp BUILD_SHA build/linux/build-sha.txt
 
+        # VERSION.txt next to the launcher so launcher::installed_version()
+        # picks up the freshly-installed tag and does a fast no-op when the
+        # download already matches manifest.latest. Without it the launcher
+        # defaults to "v0.0.0" and forces a full re-download every run.
+        # Mac path handled inside build-mac-app.sh.
+        echo -n "${_TAG_NAME}" > build/windows/VERSION.txt
+        echo -n "${_TAG_NAME}" > build/linux/VERSION.txt
+
         # Windows
         (cd build && zip -r ../release/windows.zip windows)
         mv build/windows/windows-base.pck release/ 2>/dev/null || true
-        mv build/windows/${_TAG_NAME}.pck release/windows-${_TAG_NAME}.pck 2>/dev/null || true
 
         # Linux
         (cd build && zip -r ../release/linux.zip linux)
         mv build/linux/linux-base.pck release/ 2>/dev/null || true
-        mv build/linux/${_TAG_NAME}.pck release/linux-${_TAG_NAME}.pck 2>/dev/null || true
+        # Standalone Linux game binary so the dedicated-server VM can update
+        # via launcher --update-only (atomic swap + zstd delta against the
+        # prior tag's binary) rather than re-downloading a 1+ GB linux.zip on
+        # every release. Client builds keep using the zip for cold install.
+        cp build/linux/${_EXPORT_NAME}.x86_64 release/linux-battle-royale.x86_64 2>/dev/null || true
 
         # Mac: rewrap Godot's exported .app so the launcher is the entry point.
         # Double-click of Battle Royale.app then opens the launcher UI directly
         # instead of running the raw game in a Terminal session. Gatekeeper
         # approval covers the whole bundle in one right-click → Open.
-        BUILD_SHA_FILE="$$PWD/BUILD_SHA" _EXPORT_NAME=${_EXPORT_NAME} \
+        # VERSION.txt for the mac bundle is generated on the fly from the
+        # cloud-build substitution (rather than relying on _PROJECT_PATH/VERSION.txt
+        # which is consumed by Godot's export and may or may not be on disk
+        # here depending on workflow ordering).
+        echo -n "${_TAG_NAME}" > VERSION_FOR_LAUNCHER.txt
+        BUILD_SHA_FILE="$$PWD/BUILD_SHA" VERSION_FILE="$$PWD/VERSION_FOR_LAUNCHER.txt" \
+          _EXPORT_NAME=${_EXPORT_NAME} \
           bash infrastructure/cloudbuild-steps/build-mac-app.sh
         mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
         mv build/mac/mac-base.pck release/ 2>/dev/null || true
-        mv build/mac/${_TAG_NAME}.pck release/mac-${_TAG_NAME}.pck 2>/dev/null || true
 
         # Promote BUILD_SHA into the release dir so the manifest gen step can
         # publish it alongside versions.json (gives launcher + wake-fn a

@@ -89,6 +89,14 @@ if [[ -n "${BUILD_SHA_FILE:-}" && -f "$BUILD_SHA_FILE" ]]; then
   install -m 0644 "$BUILD_SHA_FILE" "$MACOS/build-sha.txt"
 fi
 
+# VERSION.txt next to the launcher inside the .app — launcher reads this
+# (via install_dir/VERSION.txt) to decide if the on-disk install matches
+# manifest.latest. Missing it = launcher reports "v0.0.0" = full update
+# on every cold launch even after a fresh download.
+if [[ -n "${VERSION_FILE:-}" && -f "$VERSION_FILE" ]]; then
+  install -m 0644 "$VERSION_FILE" "$MACOS/VERSION.txt"
+fi
+
 # Patch Info.plist: CFBundleExecutable -> launcher. PlistBuddy isn't on
 # Cloud Build's Linux runners, so we use a small Python rewrite via plistlib.
 python3 - "$PLIST" <<'PY'

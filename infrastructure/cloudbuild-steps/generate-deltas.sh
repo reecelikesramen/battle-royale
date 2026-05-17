@@ -9,8 +9,8 @@
 #
 # This step runs after exports (so the new build artifacts exist locally
 # under build/) and after download-previous-pcks (which already fetches
-# previous-pcks/*.pck for the PCK delta path, but we need a wider download
-# for binaries — done inline below).
+# previous-pcks/{windows,linux,mac}-base.pck for the PCK delta path; we
+# fetch the wider binary set inline below).
 
 set -euo pipefail
 
@@ -93,6 +93,14 @@ make_delta "$PREV_MAC_BIN" "$NEW_MAC_BIN"   ${out_root}/mac/game_binary.zpatch
 make_delta prev/mac/librust.dylib           ${_PROJECT_PATH:-godot}/addons/rust/bin/librust.dylib ${out_root}/mac/rust_lib.zpatch
 make_delta prev/mac/launcher                launchers/mac/launcher ${out_root}/mac/launcher.zpatch
 make_delta prev/mac/launcher-updater        launchers/mac/launcher-updater ${out_root}/mac/launcher_updater.zpatch
+
+# pck_base deltas — the dominant payload (1+GB each). Previous bases come from
+# download-previous-pcks at previous-pcks/{platform}-base.pck. Per-tag patch
+# is applied by the launcher via apply_zstd_patch before spawning the game,
+# so the user only downloads the diff (typically tens of MB).
+make_delta previous-pcks/windows-base.pck build/windows/windows-base.pck ${out_root}/windows/pck_base.zpatch
+make_delta previous-pcks/linux-base.pck   build/linux/linux-base.pck     ${out_root}/linux/pck_base.zpatch
+make_delta previous-pcks/mac-base.pck     build/mac/mac-base.pck         ${out_root}/mac/pck_base.zpatch
 
 # Upload all deltas.
 if compgen -G "deltas/${_TAG_NAME}/*/*.zpatch" > /dev/null; then

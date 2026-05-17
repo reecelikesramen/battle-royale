@@ -8,12 +8,23 @@ Type=simple
 User=gameserver
 Group=gameserver
 WorkingDirectory=/opt/battle-royale
+# refresh.sh is the bootstrap path: when the game binary is missing (fresh
+# VM / blown install dir) it downloads + unpacks linux.zip with manifest
+# signature verification. On a healthy install it short-circuits to no-op
+# and lets the launcher do incremental delta updates.
 ExecStartPre=/opt/battle-royale/refresh.sh
+ExecStartPre=/opt/battle-royale/launcher --update-only
 ExecStart=/opt/battle-royale/battle-royale.x86_64 --server --headless
 Restart=always
 RestartSec=5s
 KillSignal=SIGTERM
 TimeoutStopSec=60s
+# ExecStartPre runs refresh.sh which downloads + unzips the linux.zip
+# (~1.3 GB on e2-small). Default systemd start timeout is 90s — well under
+# the time it takes on this VM size, so previously the first boot after a
+# release would loop on "start-pre operation timed out". 10 min is plenty
+# of headroom; refresh.sh is fast-no-op on later boots when current==latest.
+TimeoutStartSec=600
 
 # Logs to systemd journal
 StandardOutput=journal

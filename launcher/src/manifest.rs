@@ -31,8 +31,11 @@ pub struct PlatformEntry {
     pub launcher_updater: Option<Component>,
     pub game_binary: Option<Component>,
     pub rust_lib: Option<Component>,
+    // pck_base now ships zstd deltas (see generate-deltas.sh) so the launcher
+    // patches an existing install in place rather than re-downloading 1+ GB.
+    // The legacy pck_patch field was removed when the godot --export-patch
+    // chain was retired in v0.1.14.
     pub pck_base: Option<Component>,
-    pub pck_patch: Option<Component>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

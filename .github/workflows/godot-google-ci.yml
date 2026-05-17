@@ -477,35 +477,34 @@ jobs:
           # List files in the release
           FILES=$(gsutil ls "gs://$GCS_BUCKET/releases/$TAG_NAME/" | xargs -n1 basename)
           
-          # Build markdown body
+          # Build markdown body. Per-tag pck patches are gone — deltas now
+          # live under gs://$GCS_BUCKET/deltas/$TAG_NAME and are wired into
+          # versions.json automatically, so no need to surface them here.
           BODY="## Downloads
 
-          | Platform | Full Build | Base PCK | Patch |
-          |----------|------------|----------|-------|"
-          
+          | Platform | Full Build | Base PCK |
+          |----------|------------|----------|"
+
           # Windows
-          WIN_FULL=""; WIN_BASE=""; WIN_PATCH=""
+          WIN_FULL=""; WIN_BASE=""
           echo "$FILES" | grep -q "windows.zip" && WIN_FULL="[Download]($BASE_URL/windows.zip)"
           echo "$FILES" | grep -q "windows-base.pck" && WIN_BASE="[Download]($BASE_URL/windows-base.pck)"
-          echo "$FILES" | grep -q "windows-$TAG_NAME.pck" && WIN_PATCH="[Download]($BASE_URL/windows-$TAG_NAME.pck)"
           BODY="$BODY
-          | Windows | $WIN_FULL | $WIN_BASE | $WIN_PATCH |"
-          
+          | Windows | $WIN_FULL | $WIN_BASE |"
+
           # Linux
-          LIN_FULL=""; LIN_BASE=""; LIN_PATCH=""
+          LIN_FULL=""; LIN_BASE=""
           echo "$FILES" | grep -q "linux.zip" && LIN_FULL="[Download]($BASE_URL/linux.zip)"
           echo "$FILES" | grep -q "linux-base.pck" && LIN_BASE="[Download]($BASE_URL/linux-base.pck)"
-          echo "$FILES" | grep -q "linux-$TAG_NAME.pck" && LIN_PATCH="[Download]($BASE_URL/linux-$TAG_NAME.pck)"
           BODY="$BODY
-          | Linux | $LIN_FULL | $LIN_BASE | $LIN_PATCH |"
-          
+          | Linux | $LIN_FULL | $LIN_BASE |"
+
           # Mac
-          MAC_FULL=""; MAC_BASE=""; MAC_PATCH=""
+          MAC_FULL=""; MAC_BASE=""
           echo "$FILES" | grep -q "mac.zip" && MAC_FULL="[Download]($BASE_URL/mac.zip)"
           echo "$FILES" | grep -q "mac-base.pck" && MAC_BASE="[Download]($BASE_URL/mac-base.pck)"
-          echo "$FILES" | grep -q "mac-$TAG_NAME.pck" && MAC_PATCH="[Download]($BASE_URL/mac-$TAG_NAME.pck)"
           BODY="$BODY
-          | macOS | $MAC_FULL | $MAC_BASE | $MAC_PATCH |"
+          | macOS | $MAC_FULL | $MAC_BASE |"
           
           # Output using heredoc
           echo "body<<EOF" >> $GITHUB_OUTPUT

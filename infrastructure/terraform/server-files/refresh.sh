@@ -1,20 +1,31 @@
 #!/usr/bin/env bash
 #
-# Runs as ExecStartPre for the game server. Fetches the current
-# versions.json, verifies its ed25519 signature, downloads the latest
-# Linux dedicated-server build if not already on disk, and unpacks it
-# into /opt/battle-royale/.
+# Runs as the first ExecStartPre for the game server. Bootstrap-only:
+# downloads + unpacks linux.zip with manifest signature verification when
+# the game binary is missing (fresh VM, blown install dir, etc.). On a
+# healthy install, short-circuits to no-op — the second ExecStartPre
+# (launcher --update-only) does incremental delta updates.
 #
-# Idempotent: if the installed version already matches manifest.latest,
-# this is a fast no-op (one HTTPS GET).
+# This split exists because unpacking the full 1+ GB linux.zip on an
+# e2-small can exceed the systemd start-pre timeout, and we only need to
+# pay that cost once per VM lifetime. After bootstrap, per-release updates
+# are tiny zstd zpatches applied in-place by the launcher.
 
 set -euo pipefail
 
 INSTALL=/opt/battle-royale
+GAME_BIN="$INSTALL/battle-royale.x86_64"
 META_FILE=/etc/battle-royale/meta.env
 BUCKET="$(awk -F= '/^BUCKET=/ {print $2}' "$META_FILE")"
 
 cd "$INSTALL"
+
+if [[ -x "$GAME_BIN" ]]; then
+  echo "refresh.sh: bootstrap already complete; skipping full zip pull"
+  exit 0
+fi
+
+echo "refresh.sh: no game binary on disk — running bootstrap install"
 
 # Fetch manifest to a file (NOT via command substitution, which strips
 # trailing newlines and breaks the signature, since the signer signs the
@@ -38,36 +49,24 @@ PUB_RAW=/etc/battle-royale/manifest_pub.ed25519
 } | openssl pkey -pubin -inform DER -pubout -outform PEM > "$PUB_PEM"
 
 if ! openssl pkeyutl -verify -pubin -inkey "$PUB_PEM" -rawin -in "$MANIFEST_FILE" -sigfile /tmp/manifest.sig; then
-  echo "manifest signature verify FAILED — refusing to update" >&2
+  echo "manifest signature verify FAILED — refusing to bootstrap" >&2
   exit 1
 fi
 
 latest=$(jq -r '.latest' "$MANIFEST_FILE")
-current=$(cat "$INSTALL/VERSION.txt" 2>/dev/null || echo "v0.0.0")
+echo "refresh.sh: bootstrapping $latest"
 
-if [[ "$latest" == "$current" ]]; then
-  echo "Server already on $latest"
-  exit 0
-fi
-
-echo "Refreshing $current -> $latest"
-
-# Download the linux release zip and unpack. We use the linux dedicated-server
-# build (same binary, just runs with --server).
-URL=$(jq -r --arg p linux '.versions[.latest].platforms[$p].game_binary.url' "$MANIFEST_FILE")
-SHA=$(jq -r --arg p linux '.versions[.latest].platforms[$p].game_binary.sha256' "$MANIFEST_FILE")
-
+# Pull the linux release zip and unpack everything. The zip carries the
+# full file set the launcher needs on disk (pck_base, rust_lib, launcher,
+# launcher-updater, game binary). After this, the launcher's --update-only
+# pass owns incremental updates.
+URL="https://storage.googleapis.com/${BUCKET}/releases/${latest}/linux.zip"
 STAGING=$(mktemp -d); trap 'rm -rf "$STAGING" "$PUB_PEM" "$MANIFEST_FILE" /tmp/manifest.sig' EXIT
 curl -fsSL "$URL" -o "$STAGING/linux.zip"
-got=$(sha256sum "$STAGING/linux.zip" | awk '{print $1}')
-if [[ "$got" != "$SHA" ]]; then
-  echo "sha256 mismatch on game_binary: expected $SHA got $got" >&2
-  exit 1
-fi
 
 unzip -qo "$STAGING/linux.zip" -d "$STAGING"
-# The zip contains `linux/{battle-royale.x86_64, *.pck, *.so, ...}`.
+# The zip contains `linux/{battle-royale.x86_64, *.pck, *.so, launcher, ...}`.
 install -m 0755 -D -t "$INSTALL" "$STAGING"/linux/*
 echo "$latest" > "$INSTALL/VERSION.txt"
 chown -R gameserver:gameserver "$INSTALL"
-echo "Updated to $latest"
+echo "refresh.sh: bootstrap complete (installed $latest)"

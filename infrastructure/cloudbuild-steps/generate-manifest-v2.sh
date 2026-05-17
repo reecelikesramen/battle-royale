@@ -50,19 +50,20 @@ windows|launcher_updater|launcher/{tag}/windows/launcher-updater.exe|launcher-up
 windows|game_binary|releases/{tag}/windows.zip|battle-royale.exe
 windows|rust_lib|rust-libs/{tag}/rust.dll|rust.dll
 windows|pck_base|releases/{tag}/windows-base.pck|battle-royale.pck
-windows|pck_patch|releases/{tag}/windows-{tag}.pck|windows-{tag}.pck
 linux|launcher|launcher/{tag}/linux/launcher|launcher
 linux|launcher_updater|launcher/{tag}/linux/launcher-updater|launcher-updater
-linux|game_binary|releases/{tag}/linux.zip|battle-royale.x86_64
+# Linux's game_binary points at the standalone binary (not the full linux.zip
+# that windows/mac entries reference) so the dedicated-server VM can apply
+# atomic per-file updates via launcher --update-only — no 1+ GB zip extract
+# in systemd's ExecStartPre window. See cloudbuild.yaml's zip-builds step.
+linux|game_binary|releases/{tag}/linux-battle-royale.x86_64|battle-royale.x86_64
 linux|rust_lib|rust-libs/{tag}/librust.so|librust.so
 linux|pck_base|releases/{tag}/linux-base.pck|battle-royale.pck
-linux|pck_patch|releases/{tag}/linux-{tag}.pck|linux-{tag}.pck
 mac|launcher|launcher/{tag}/mac/launcher|launcher
 mac|launcher_updater|launcher/{tag}/mac/launcher-updater|launcher-updater
 mac|game_binary|releases/{tag}/mac.zip|battle-royale
 mac|rust_lib|rust-libs/{tag}/librust.dylib|librust.dylib
 mac|pck_base|releases/{tag}/mac-base.pck|battle-royale.pck
-mac|pck_patch|releases/{tag}/mac-{tag}.pck|mac-{tag}.pck
 EOF
 )
 
@@ -143,9 +144,9 @@ jq_input=$(echo "$jq_input" | jq --arg tag "$tag" --arg rel "$released_at" \
 while IFS='|' read -r platform component path_tpl installed_name; do
   [[ -z "$platform" ]] && continue
   full_path=${path_tpl//\{tag\}/$tag}
-  # installed_name may also contain {tag} (e.g. pck_patch "<plat>-{tag}.pck")
-  # — substitute or the manifest ends up with a literal "{tag}" in the path
-  # and the launcher writes the file to a bogus location.
+  # installed_name may legitimately contain {tag} for future components — leave
+  # the substitution in place so a literal "{tag}" never leaks into the
+  # manifest and confuses the launcher's atomic-rename path.
   installed_name=${installed_name//\{tag\}/$tag}
   if ! get_blob_info "$full_path"; then
     continue
@@ -159,8 +160,10 @@ while IFS='|' read -r platform component path_tpl installed_name; do
     --arg installed_name "$installed_name" \
     '{url: $url, sha256: $sha, size: $size, installed_name: $installed_name}')
 
-  # Optional delta block.
-  if [[ "$component" != "pck_base" && "$component" != "pck_patch" && -n "$prev_tag" ]]; then
+  # Optional delta block. Every component supports zstd deltas now that
+  # pck_patch is gone — pck_base in particular is the dominant payload and
+  # benefits the most.
+  if [[ -n "$prev_tag" ]]; then
     delta_path="deltas/${tag}/${platform}/${component}.zpatch"
     if get_blob_info "$delta_path" 2>/dev/null; then
       delta_json=$(jq -n \

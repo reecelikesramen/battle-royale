@@ -5,42 +5,21 @@ mod platform;
 mod update_flow;
 mod updater;
 
-use std::sync::Mutex;
-use std::sync::OnceLock;
 use std::sync::mpsc;
 use std::thread;
-
-/// Handle to the currently-supervised game child so we can SIGTERM it if the
-/// user closes the launcher window.
-static SUPERVISED_CHILD: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
-
-fn record_child(pid: u32) {
-    let slot = SUPERVISED_CHILD.get_or_init(|| Mutex::new(None));
-    *slot.lock().unwrap() = Some(pid);
-}
-
-fn kill_supervised_child() {
-    if let Some(slot) = SUPERVISED_CHILD.get() {
-        if let Some(pid) = slot.lock().unwrap().take() {
-            #[cfg(unix)]
-            unsafe {
-                // SIGTERM the game so it can exit cleanly.
-                libc::kill(pid as i32, libc::SIGTERM);
-            }
-            #[cfg(windows)]
-            {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/T", "/F"])
-                    .status();
-            }
-        }
-    }
-}
 
 #[cfg(feature = "gui")]
 slint::include_modules!();
 
 fn main() -> anyhow::Result<()> {
+    // --update-only: run the update flow then exit without spawning the game.
+    // Used by the dedicated-server systemd unit as ExecStartPre so the same
+    // launcher binary that handles client updates also drives server updates
+    // (delta + sig verify + atomic swap), and systemd owns the game lifecycle.
+    if std::env::args().any(|a| a == "--update-only") {
+        return run_update_only();
+    }
+
     #[cfg(feature = "gui")]
     {
         return run_gui();
@@ -51,16 +30,89 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+/// One-shot headless update. Exits 0 on success (update applied OR no work
+/// needed). Exits non-zero on manifest fetch / signature / download failure
+/// so systemd surfaces the failure instead of starting the game on a
+/// half-installed bundle.
+fn run_update_only() -> anyhow::Result<()> {
+    let client = update_flow::http_client()?;
+    let manifest = update_flow::fetch_manifest(&client)?;
+    if update_flow::is_up_to_date(&manifest) {
+        eprintln!("launcher --update-only: already on {}", manifest.latest);
+        return Ok(());
+    }
+    let (tx, rx) = mpsc::channel::<update_flow::UpdateMessage>();
+    let worker_tx = tx.clone();
+    let opts = update_flow::RunOpts {
+        skip_launcher_self_update: true,
+    };
+    let handle = thread::spawn(move || update_flow::run_with_opts(worker_tx, manifest, opts));
+    while let Ok(msg) = rx.recv() {
+        match msg {
+            update_flow::UpdateMessage::Status(s) => eprintln!("[update] {s}"),
+            update_flow::UpdateMessage::Progress(_) => {}
+            update_flow::UpdateMessage::Done => eprintln!("[update] done"),
+            update_flow::UpdateMessage::Error(e) => eprintln!("[update] ERROR {e}"),
+        }
+    }
+    handle.join().unwrap()?;
+    Ok(())
+}
+
+/// Spawn the game then exit the launcher. The launcher is intentionally NOT a
+/// long-lived supervisor — once the game is up, we get out of the way so we
+/// don't sit in the user's process list / Dock / taskbar.
+fn spawn_game_and_exit() -> ! {
+    match platform::install_dir().and_then(|d| launch::spawn_game(&d).map_err(Into::into)) {
+        Ok(_) => std::process::exit(0),
+        Err(e) => {
+            eprintln!("launcher: failed to spawn game: {e:#}");
+            std::process::exit(1);
+        }
+    }
+}
+
 #[cfg(feature = "gui")]
 fn run_gui() -> anyhow::Result<()> {
+    // Fast path: try to silent-launch when the install already matches the
+    // latest published manifest. Failure to reach the manifest (offline, GCS
+    // hiccup) falls through to the GUI so the user gets a visible "Launch
+    // anyway" affordance rather than a silent no-op.
+    match update_flow::http_client().and_then(|c| update_flow::fetch_manifest(&c)) {
+        Ok(manifest) => {
+            if update_flow::is_up_to_date(&manifest) {
+                spawn_game_and_exit();
+            }
+            run_window_with_manifest(Some(manifest))
+        }
+        Err(e) => {
+            eprintln!("launcher: manifest prefetch failed: {e:#}");
+            run_window_with_manifest(None)
+        }
+    }
+}
+
+#[cfg(feature = "gui")]
+fn run_window_with_manifest(manifest: Option<manifest::Manifest>) -> anyhow::Result<()> {
     let window = LauncherWindow::new()?;
 
     let (tx, rx) = mpsc::channel::<update_flow::UpdateMessage>();
 
+    // Worker: either run the update flow with the pre-fetched manifest, or —
+    // if prefetch failed — push a single Error event so the user sees what
+    // happened and can launch with the current install.
     let worker_tx = tx.clone();
-    thread::spawn(move || {
-        if let Err(e) = update_flow::run(worker_tx.clone()) {
-            let _ = worker_tx.send(update_flow::UpdateMessage::Error(format!("{e:#}")));
+    thread::spawn(move || match manifest {
+        Some(m) => {
+            if let Err(e) = update_flow::run(worker_tx.clone(), m) {
+                let _ = worker_tx.send(update_flow::UpdateMessage::Error(format!("{e:#}")));
+            }
+        }
+        None => {
+            let _ = worker_tx.send(update_flow::UpdateMessage::Error(
+                "Couldn't reach the update server. You can launch with the current install."
+                    .into(),
+            ));
         }
     });
 
@@ -76,14 +128,22 @@ fn run_gui() -> anyhow::Result<()> {
                             win.set_progress(p.clamp(0.0, 1.0));
                         }
                         update_flow::UpdateMessage::Done => {
-                            win.set_status_text("Ready to launch.".into());
+                            // Update finished cleanly → spawn game and tear
+                            // down the window. The slint event loop returns
+                            // from window.run() and main exits, so the
+                            // launcher process is gone before the game window
+                            // appears.
+                            win.set_status_text("Launching game...".into());
                             win.set_progress(1.0);
-                            win.set_launch_enabled(true);
+                            spawn_game_or_record_error(&win);
+                            slint::quit_event_loop().ok();
                         }
                         update_flow::UpdateMessage::Error(e) => {
                             win.set_error_text(e.into());
                             win.set_show_error(true);
-                            win.set_launch_enabled(true); // allow launch with current install
+                            // Error path keeps the "Launch" button so the user
+                            // can still try with whatever is on disk.
+                            win.set_launch_enabled(true);
                         }
                     }
                 }
@@ -92,94 +152,62 @@ fn run_gui() -> anyhow::Result<()> {
         }
     });
 
+    // The Launch button is only reachable on the error path now (the success
+    // path auto-spawns on Done). Spawning here then quitting the event loop
+    // gives the same end-state: launcher gone, game running.
     let win_weak = window.as_weak();
     window.on_launch(move || {
-        let Some(win) = win_weak.upgrade() else {
-            return;
-        };
-        let install = match platform::install_dir() {
-            Ok(p) => p,
-            Err(e) => {
-                win.set_error_text(format!("install_dir: {e:#}").into());
-                win.set_show_error(true);
-                return;
-            }
-        };
-        // Supervise the game process: when it exits, check for the
-        // Sprint 7 restart sentinel and re-run the update flow if present.
-        // Launcher stays alive throughout.
-        let win_weak = win.as_weak();
-        std::thread::spawn(move || loop {
-            let child = match launch::spawn_game(&install) {
-                Ok(c) => {
-                    record_child(c.id());
-                    c
-                }
-                Err(e) => {
-                    let win_weak = win_weak.clone();
-                    let err = format!("{e:#}");
-                    slint::invoke_from_event_loop(move || {
-                        if let Some(w) = win_weak.upgrade() {
-                            w.set_error_text(err.into());
-                            w.set_show_error(true);
-                        }
-                    })
-                    .ok();
-                    return;
-                }
-            };
-            let exit_status = wait_for_child(child);
-            eprintln!("game exited: {exit_status:?}");
-            let sentinel = platform::restart_sentinel_path(&install);
-            if !sentinel.exists() {
-                slint::quit_event_loop().ok();
-                return;
-            }
-            eprintln!("restart sentinel present; re-running update flow");
-            let _ = std::fs::remove_file(&sentinel);
-            let (tx, rx) = mpsc::channel::<update_flow::UpdateMessage>();
-            let worker_tx = tx.clone();
-            let h = std::thread::spawn(move || update_flow::run(worker_tx));
-            // Drain progress into stderr while we wait for update to finish.
-            while let Ok(msg) = rx.recv() {
-                eprintln!("re-update: {msg:?}");
-            }
-            let _ = h.join();
-        });
+        if let Some(win) = win_weak.upgrade() {
+            spawn_game_or_record_error(&win);
+            slint::quit_event_loop().ok();
+        }
     });
 
+    let win_weak = window.as_weak();
     window.on_retry(move || {
-        // Sprint 3: just exit and let the user restart the launcher.
-        // Sprint 4 will re-run the update flow in place.
+        // Sprint 3 placeholder: dismissing the error just closes the launcher.
+        let _ = win_weak.upgrade();
         slint::quit_event_loop().ok();
     });
 
     window.run()?;
-    // User closed the launcher window. Make sure the game child gets SIGTERM
-    // so we don't orphan it.
-    kill_supervised_child();
     Ok(())
 }
 
-fn wait_for_child(mut child: std::process::Child) -> std::io::Result<std::process::ExitStatus> {
-    child.wait()
+#[cfg(feature = "gui")]
+fn spawn_game_or_record_error(win: &LauncherWindow) {
+    match platform::install_dir().and_then(|d| launch::spawn_game(&d).map_err(Into::into)) {
+        Ok(_) => {}
+        Err(e) => {
+            win.set_error_text(format!("Failed to launch game: {e:#}").into());
+            win.set_show_error(true);
+        }
+    }
 }
 
 #[cfg(not(feature = "gui"))]
 fn run_headless() -> anyhow::Result<()> {
-    let (tx, rx) = mpsc::channel::<update_flow::UpdateMessage>();
-    let worker_tx = tx.clone();
-    let handle = thread::spawn(move || update_flow::run(worker_tx));
-    while let Ok(msg) = rx.recv() {
-        match msg {
-            update_flow::UpdateMessage::Status(s) => println!("[status] {s}"),
-            update_flow::UpdateMessage::Progress(p) => println!("[progress] {:.1}%", p * 100.0),
-            update_flow::UpdateMessage::Done => println!("[done]"),
-            update_flow::UpdateMessage::Error(e) => eprintln!("[error] {e}"),
+    // Mirror the GUI fast path: try silent launch when manifest matches.
+    if let Ok(client) = update_flow::http_client() {
+        if let Ok(manifest) = update_flow::fetch_manifest(&client) {
+            if update_flow::is_up_to_date(&manifest) {
+                spawn_game_and_exit();
+            }
+            let (tx, rx) = mpsc::channel::<update_flow::UpdateMessage>();
+            let worker_tx = tx.clone();
+            let handle = thread::spawn(move || update_flow::run(worker_tx, manifest));
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    update_flow::UpdateMessage::Status(s) => println!("[status] {s}"),
+                    update_flow::UpdateMessage::Progress(p) => {
+                        println!("[progress] {:.1}%", p * 100.0)
+                    }
+                    update_flow::UpdateMessage::Done => println!("[done]"),
+                    update_flow::UpdateMessage::Error(e) => eprintln!("[error] {e}"),
+                }
+            }
+            handle.join().unwrap()?;
         }
     }
-    handle.join().unwrap()?;
-    let install = platform::install_dir()?;
-    launch::spawn_game(&install)?;
-    Ok(())
+    spawn_game_and_exit();
 }

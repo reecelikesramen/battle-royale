@@ -13,6 +13,8 @@ locals {
     "cloudfunctions.googleapis.com",
     "run.googleapis.com",
     "artifactregistry.googleapis.com",
+    # Weekly GCS pruning cron — see cleanup.tf.
+    "cloudscheduler.googleapis.com",
   ])
 }
 
