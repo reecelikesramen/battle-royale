@@ -13,12 +13,12 @@ func test_decode_spawn_payload_emits_signal() -> void:
 	# Crafts a SPAWN_TOPIC wire payload and feeds it through the client-side
 	# handler. The signal must surface every field intact.
 	_last_args.clear()
-	NetReplication.entity_spawn_requested.connect(_capture)
+	NetReplication.client_entity_spawn_requested.connect(_capture)
 
 	var payload := NetReplication._encode_spawn(7, 42, "res://entities/dummy.tscn", 99)
 	NetReplication._on_spawn_payload(payload)
 
-	NetReplication.entity_spawn_requested.disconnect(_capture)
+	NetReplication.client_entity_spawn_requested.disconnect(_capture)
 	assert_eq(_last_args.size(), 4, "signal not emitted")
 	assert_eq(_last_args[0], 7, "schema_id mismatch")
 	assert_eq(_last_args[1], 42, "entity_id mismatch")
@@ -31,12 +31,12 @@ func test_negative_owner_peer_id_round_trips() -> void:
 	# preserves the sign across encode + decode rather than truncating to a
 	# u32 (which would surface as 4294967295).
 	_last_args.clear()
-	NetReplication.entity_spawn_requested.connect(_capture)
+	NetReplication.client_entity_spawn_requested.connect(_capture)
 
 	var payload := NetReplication._encode_spawn(1, 1, "res://nope.tscn", -1)
 	NetReplication._on_spawn_payload(payload)
 
-	NetReplication.entity_spawn_requested.disconnect(_capture)
+	NetReplication.client_entity_spawn_requested.disconnect(_capture)
 	assert_eq(_last_args[3], -1, "owner_peer_id should round-trip as -1")
 
 

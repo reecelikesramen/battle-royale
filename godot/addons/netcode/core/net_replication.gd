@@ -7,15 +7,22 @@ extends Node
 signal entity_registered(schema_id: int, entity_id: int)
 signal entity_unregistered(schema_id: int, entity_id: int)
 
-# Sprint 7: spawn replication. The server calls spawn_entity() to request that
-# every peer instantiate a networked entity; the receiver emits this signal
-# and the world controller (e.g. a level script) listens, loads the scene at
-# `scene_path`, sets the predictor's owner/entity ids, and adds it to the
-# tree. Snapshot packets that arrived ahead of the spawn are already buffered
-# by _on_net_state -> _pending_packets and drain automatically when the new
-# predictor's _ready calls register_entity. (`min_spawn_seq` from the design
-# doc is implicit: state packets queue until their target exists.)
-signal entity_spawn_requested(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int)
+# Spawn dispatch is split per role so listen-server can create distinct
+# server-authoritative + client-proxy instances of the same logical entity.
+#
+# `server_entity_spawn_requested` fires on the server-side path (spawn_entity
+# local emit). Subscribers parent the entity under their ServerEntitiesRoot
+# and set NetPredictor.is_authoritative_instance = true.
+#
+# `client_entity_spawn_requested` fires when the reliable SPAWN_TOPIC payload
+# is received (remote clients in multiplayer; loopback receipt in listen
+# mode). Subscribers parent under ClientEntitiesRoot with auth = false.
+#
+# Snapshot packets that arrived ahead of the proxy spawn are buffered by
+# _on_net_state -> _pending_packets and drain when the predictor's _ready
+# calls register_entity. (`min_spawn_seq` from the design doc is implicit.)
+signal server_entity_spawn_requested(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int)
+signal client_entity_spawn_requested(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int)
 
 # Reliable-hub topic id reserved for spawn dispatch. Picked from the high end
 # of the int range to avoid colliding with user-defined topics; userspace
@@ -203,25 +210,26 @@ func pending_count(schema_id: int, entity_id: int) -> int:
 	return _pending_packets.get(key, []).size()
 
 
-# Sprint 7: server-side spawn dispatch. Broadcasts a reliable SPAWN_TOPIC
-# message to every peer carrying (schema_id, entity_id, scene_path, owner_peer_id),
-# then fires entity_spawn_requested locally so the server's own world script
-# spawns alongside. World controllers subscribe to entity_spawn_requested and
-# decide how to actually instantiate (PackedScene load + add_child). The
-# `owner_peer_id` is the peer that owns the entity's input stream (-1 for
-# unowned entities like AI / props).
+# Server-side spawn dispatch. Broadcasts a reliable SPAWN_TOPIC message to
+# every peer carrying (schema_id, entity_id, scene_path, owner_peer_id), then
+# fires server_entity_spawn_requested locally so the server's own world script
+# spawns the authoritative instance alongside. Remote clients (and the loop-
+# back client in listen mode) receive the broadcast and emit the client
+# variant of the signal — see _on_spawn_payload.
 func spawn_entity(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int = -1) -> void:
 	if not NetSession.has_server_role:
 		push_warning("NetReplication.spawn_entity called on a non-server peer; ignored")
 		return
 	var payload: PackedByteArray = _encode_spawn(schema_id, entity_id, scene_path, owner_peer_id)
 	NetReliableHub.broadcast(SPAWN_TOPIC, payload)
-	entity_spawn_requested.emit(schema_id, entity_id, scene_path, owner_peer_id)
+	server_entity_spawn_requested.emit(schema_id, entity_id, scene_path, owner_peer_id)
 
 
-# Client-side reliable-hub callback. Decodes the wire payload and emits the
-# signal that world scripts listen on. Tests can call this directly with a
-# crafted payload to drive the spawn path without a NetSession.
+# Reliable-hub callback that fires on any peer receiving a SPAWN_TOPIC payload
+# (remote clients in multiplayer, loopback client in listen mode). Decodes the
+# wire payload and emits the client-side spawn signal so the local world
+# script can instantiate the proxy. Tests can call this directly to drive the
+# decode path without a NetSession.
 func _on_spawn_payload(payload: PackedByteArray) -> void:
 	var sp := StreamPeerBuffer.new()
 	sp.data_array = payload
@@ -229,7 +237,7 @@ func _on_spawn_payload(payload: PackedByteArray) -> void:
 	var entity_id: int = sp.get_u32()
 	var owner_peer_id: int = sp.get_32()
 	var scene_path: String = sp.get_string()
-	entity_spawn_requested.emit(schema_id, entity_id, scene_path, owner_peer_id)
+	client_entity_spawn_requested.emit(schema_id, entity_id, scene_path, owner_peer_id)
 
 
 func _encode_spawn(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int) -> PackedByteArray:

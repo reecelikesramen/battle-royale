@@ -8,9 +8,25 @@ var _grenade_scene: PackedScene = preload("res://entities/grenade/grenade.tscn")
 var _next_entity_id: int = 1
 var _last_throw_us: Dictionary = {}  # peer_id -> usec
 
+# Per-role parent nodes. Authoritative + proxy instances of the same grenade
+# coexist in listen mode as siblings under these distinct roots — physics
+# share one space but the proxy keeps freeze + collider-disabled (set on the
+# Grenade itself by NetPredictor.is_authoritative_instance gate) so it never
+# touches the auth's collisions. Single-mode runs populate just one root.
+var _server_root: Node3D
+var _client_root: Node3D
+
 
 func _ready() -> void:
-	NetReplication.entity_spawn_requested.connect(_on_spawn_requested)
+	_server_root = Node3D.new()
+	_server_root.name = "ServerGrenades"
+	add_child(_server_root)
+	_client_root = Node3D.new()
+	_client_root.name = "ClientGrenades"
+	add_child(_client_root)
+
+	NetReplication.server_entity_spawn_requested.connect(_on_server_spawn_requested)
+	NetReplication.client_entity_spawn_requested.connect(_on_client_spawn_requested)
 	if NetSession.has_server_role:
 		NetReliableHub.subscribe(Enums.ReliableTopic.THROW_GRENADE, _on_throw_request)
 	print("[GRENADE] spawner ready mode=%d" % NetSession.mode)
@@ -41,7 +57,12 @@ func _on_throw_request(peer_id: int, payload: PackedByteArray) -> void:
 
 	NetReplication.spawn_entity(GRENADE_SCHEMA_ID, entity_id, GRENADE_SCENE_PATH, -1)
 
-	var predictor: NetPredictor = NetReplication.get_entity(GRENADE_SCHEMA_ID, entity_id)
+	# Server-side spawn fires synchronously inside spawn_entity → look up the
+	# auth instance specifically. In listen mode the client proxy hasn't
+	# spawned yet (waits for loopback reliable receipt) so a server-priority
+	# get_entity must explicitly say so to avoid hitting a leftover proxy
+	# from a previous spawn cycle.
+	var predictor: NetPredictor = NetReplication.get_entity(GRENADE_SCHEMA_ID, entity_id, true)
 	if predictor == null or predictor.shadow_state == null:
 		push_error("[GRENADE] spawn_entity called but predictor or shadow_state is null")
 		return
@@ -60,19 +81,25 @@ func _on_throw_request(peer_id: int, payload: PackedByteArray) -> void:
 	print("[GRENADE] spawned id=%d at %v vel=%v" % [entity_id, origin, velocity])
 
 
-func _on_spawn_requested(schema_id: int, entity_id: int, scene_path: String, _owner_peer_id: int) -> void:
-	if schema_id != GRENADE_SCHEMA_ID:
+func _on_server_spawn_requested(schema_id: int, entity_id: int, scene_path: String, _owner_peer_id: int) -> void:
+	if schema_id != GRENADE_SCHEMA_ID or scene_path != GRENADE_SCENE_PATH:
 		return
-	if scene_path != GRENADE_SCENE_PATH:
+	_instantiate_under(_server_root, entity_id, "_Server", true)
+
+
+func _on_client_spawn_requested(schema_id: int, entity_id: int, scene_path: String, _owner_peer_id: int) -> void:
+	if schema_id != GRENADE_SCHEMA_ID or scene_path != GRENADE_SCENE_PATH:
 		return
+	_instantiate_under(_client_root, entity_id, "_Client", false)
+
+
+func _instantiate_under(parent: Node, entity_id: int, suffix: String, is_auth: bool) -> void:
+	# Distinct names so listen-mode siblings don't collide ("Grenade_5_Server"
+	# vs "Grenade_5_Client"). Single-mode operation creates only one of them.
 	var grenade: Grenade = _grenade_scene.instantiate()
-	grenade.name = "Grenade_%d" % entity_id
+	grenade.name = "Grenade_%d%s" % [entity_id, suffix]
 	var predictor: NetPredictor = grenade.get_node("NetPredictor")
 	predictor.entity_id = entity_id
-	# Per-entity role stamp. _on_spawn_requested fires on both server (local
-	# self-emit during spawn_entity) and client (reliable broadcast receipt),
-	# so today the flag follows process role. Phase E splits the dispatch so
-	# listen-server gets distinct auth + proxy instances.
-	predictor.is_authoritative_instance = NetSession.has_server_role
-	add_child(grenade)
-	print("[GRENADE] instantiated id=%d (auth=%s mode=%d)" % [entity_id, predictor.is_authoritative_instance, NetSession.mode])
+	predictor.is_authoritative_instance = is_auth
+	parent.add_child(grenade)
+	print("[GRENADE] instantiated id=%d auth=%s mode=%d" % [entity_id, is_auth, NetSession.mode])
