@@ -7,8 +7,10 @@
 [ext_resource type="Terrain3DMaterial" uid="uid://ch0b00b8rksr0" path="res://world/playtest_map/terrain3d/playtest_map.res" id="5_yrwhe"]
 [ext_resource type="Terrain3DAssets" uid="uid://dyglb77usrkay" path="res://world/playtest_map/terrain3d/playtest_assets.res" id="6_1h5pq"]
 [ext_resource type="Shape3D" uid="uid://c8t4a7cpr2net" path="res://world/playtest_map/resources/kozari_shape.tres" id="7_vk2od"]
+[ext_resource type="Script" path="res://world/playtest_map/playtest_map.gd" id="8_mapscr"]
 
 [node name="PlayTestMap" type="Node3D" unique_id=2147210313]
+script = ExtResource("8_mapscr")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1785416251]
 environment = ExtResource("1_8qm8h")

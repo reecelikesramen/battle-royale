@@ -261,6 +261,14 @@ var is_dedicated_server: bool:
 var is_listen_mode_requested: bool:
 	get: return "--listen" in OS.get_cmdline_user_args()
 
+# Race-safe boot handoff for listen mode. Main menu sets this before changing
+# scene to the map; the map's root _ready (which runs AFTER spawners' _ready
+# subscribe to NetReplication signals, since Godot calls _ready bottom-up)
+# consumes the flag and triggers start_listen_mode. Eliminates the window where
+# the loopback handshake fires on_peer_connect / IdAssignmentPacket before
+# spawners are subscribed.
+var pending_listen_mode: bool = false
+
 # Role surface — use these instead of reading `is_server` directly. In listen
 # mode both halves are true; the backward-compat `is_server` alias still
 # returns true (server side is dominant), and entity-level role goes on

@@ -52,7 +52,11 @@ func _on_play_solo_pressed() -> void:
 		push_error("Already connected; disconnect first")
 		return
 	NetClient.username = "Host_%d" % (Time.get_ticks_msec() % 10000)
-	NetSession.start_listen_mode()
+	# Set flag + change scene. The map root _ready calls start_listen_mode
+	# AFTER its child spawners have subscribed to NetReplication signals, so
+	# the loopback handshake's on_peer_connect / IdAssignmentPacket reach
+	# subscribers instead of racing past them.
+	NetSession.pending_listen_mode = true
 	get_tree().change_scene_to_file(Constants.MAP_SCENE_PATH)
 
 
@@ -70,7 +74,7 @@ func _maybe_autoconnect() -> void:
 	# listen-server mode. Equivalent to pressing the Play Solo button.
 	if args.find("--listen") != -1:
 		NetClient.username = "Host_%d" % (Time.get_ticks_msec() % 10000)
-		NetSession.start_listen_mode()
+		NetSession.pending_listen_mode = true
 		get_tree().call_deferred("change_scene_to_file", Constants.MAP_SCENE_PATH)
 		print("Auto-starting listen mode")
 		return
