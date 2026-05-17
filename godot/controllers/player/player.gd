@@ -39,7 +39,12 @@ const THROW_POWER := 12.0
 @onready var camera_animation_player: AnimationPlayer = $CameraAnimationPlayer
 @onready var crouch_shapecast: ShapeCast3D = %CrouchShapeCast3D
 
-var is_authority: bool:
+# True when this instance is the one the local user sees + controls: own
+# camera is current, input is gathered, debug HUDs render. Distinct from
+# is_predicting (NetPredictor.is_local_authority): in listen mode the local
+# proxy is_local_view=true (camera + input) but is_predicting=false (server-
+# auth sibling owns simulation, this side is interp-only).
+var is_local_view: bool:
 	get: return !_net.is_authoritative_instance && _owner_id == NetClient.id
 
 var is_replaying_inputs: bool:
@@ -163,7 +168,17 @@ func _ready():
 
 	global_position = Constants.MAP_SPAWN
 
-	if is_authority:
+	# Listen mode: server-auth + client-proxy instances coexist in the same
+	# physics space. With both capsule colliders live, server-auth's
+	# move_and_slide bounces off its own proxy sibling each tick — feedback
+	# loop sends instances flying. Proxy doesn't simulate (NetPredictor routes
+	# listen-mode proxies through _proxy_tick), so its collider is pure hazard.
+	# Gate on has_server_role to scope to listen mode: client-only remote
+	# proxies keep their colliders so the local player still bumps into them.
+	if not _net.is_authoritative_instance and NetSession.has_server_role:
+		%VisualCollider.set_deferred("disabled", true)
+
+	if is_local_view:
 		camera.make_current()
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	else:
@@ -173,7 +188,7 @@ func _ready():
 
 
 func _unhandled_input(event):
-	if !is_authority:
+	if !is_local_view:
 		return
 
 	if event is InputEventMouseMotion and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
@@ -182,7 +197,7 @@ func _unhandled_input(event):
 
 
 func _input(event: InputEvent) -> void:
-	if !is_authority:
+	if !is_local_view:
 		return
 	if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		return
@@ -311,7 +326,7 @@ func _gather_command(delta: float) -> PlayerInput:
 
 
 func _physics_process(_delta: float) -> void:
-	if is_authority:
+	if is_local_view:
 		_update_tiredness_release_gate()
 
 
@@ -353,7 +368,7 @@ func _update_tiredness_release_gate() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not TIREDNESS_DEBUG or not is_authority:
+	if not TIREDNESS_DEBUG or not is_local_view:
 		return
 	_tiredness_log_ctr += 1
 	if _tiredness_log_ctr < TIREDNESS_LOG_INTERVAL_TICKS:
@@ -659,7 +674,7 @@ func update_camera(look_abs: Vector2) -> void:
 	# peek animation owns CameraController:rotation (lean transform) — writing
 	# basis here unconditionally would nuke that animation each tick, killing
 	# first-person peek visuals.
-	if is_authority and (Input.is_action_pressed("free_look") \
+	if is_local_view and (Input.is_action_pressed("free_look") \
 			or _free_look_abs.length_squared() > 0.0001):
 		var free_look := Vector3(_free_look_abs.x, _free_look_abs.y, 0.0)
 		$CameraController.basis = Basis.from_euler(free_look)
@@ -669,7 +684,7 @@ func update_camera(look_abs: Vector2) -> void:
 	tp_camera.transform.basis = Basis.from_euler(_camera_rotation)
 	tp_camera.rotation.z = 0
 
-	if is_authority:
+	if is_local_view:
 		global_transform.basis = Basis.from_euler(_player_rotation)
 	else:
 		global_transform.basis = Basis.from_euler(Vector3(0, look_abs.y, 0))
@@ -717,7 +732,7 @@ func update_velocity() -> void:
 
 func despawn() -> void:
 	print("I'm (%s) being despawned!" % name)
-	if is_authority: get_tree().change_scene_to_file(Constants.MAIN_MENU_SCENE_PATH)
+	if is_local_view: get_tree().change_scene_to_file(Constants.MAIN_MENU_SCENE_PATH)
 
 
 # Toggle dead visual: hide capsule + collision mesh while dead. CameraController

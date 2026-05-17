@@ -48,7 +48,7 @@ func logic_enter() -> void:
 		# Fresh crouch (not a replay) — bump tiredness for the down-transition.
 		# Standing-up edge in logic_transitions bumps again for the up-transition.
 		player.bump_tiredness("crouch_enter")
-	#if player.is_authority:
+	#if player.is_local_view:
 		#print("[CR-ENTER f=%d] replay=%s progress=%.4f wants_uncrouch=%s" % [
 				#Engine.get_physics_frames(), player.is_replaying_inputs, progress, _wants_to_uncrouch])
 
@@ -105,13 +105,13 @@ func logic_physics(delta: float) -> void:
 			player.tiredness_hold_peak("full_crouch")
 		elif step < 0.0 and prev_progress > 0.0 and progress <= 0.0:
 			player.tiredness_hold_peak("crouch_stood_up")
-	if player.TIREDNESS_DEBUG and player.is_authority:
+	if player.TIREDNESS_DEBUG and player.is_local_view:
 		print("[TIRED crouch] tired=%.3f  slowdown=%.2fx  step=%+.4f  progress=%.3f  want_un=%s" % [
 				player.current_tiredness(), slowdown, step, progress, _wants_to_uncrouch])
 		
 	
 	progress = clampf(progress, 0.0, _crouch_anim_length)
-	#if player.is_authority:
+	#if player.is_local_view:
 		## Backward jump while crouching (shouldn't happen).
 		#if _dbg_last_logic_progress > 0.001 and progress < _dbg_last_logic_progress - 0.001 and not _wants_to_uncrouch:
 			#print("[CR-LOG-BACK f=%d] %.4f -> %.4f (uncrouch=%s)" % [
@@ -162,7 +162,7 @@ func logic_transitions() -> void:
 func visual_physics(_delta: float) -> void:
 	# Sync animation to logic progress via TimeSeek
 	animation_tree.set("parameters/CrouchTimeSeek/seek_request", progress)
-	#if player.is_authority:
+	#if player.is_local_view:
 		## Detect visual reading a smaller progress than last visual tick (rubber-band).
 		#if _dbg_last_visual_progress > 0.001 and progress < _dbg_last_visual_progress - 0.001 and not _wants_to_uncrouch:
 			#print("[CR-VIS-BACK f=%d] visual progress went %.4f -> %.4f (uncrouch=%s)" % [

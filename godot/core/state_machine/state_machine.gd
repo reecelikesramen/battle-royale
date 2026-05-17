@@ -23,7 +23,7 @@ var _show_in_debug: bool:
 		if not NetSession.has_client_role: return false
 		if not NetClient.debug: return false
 		var player: PlayerController = owner
-		return player.is_authority
+		return player.is_local_view
 
 
 func _ready() -> void:

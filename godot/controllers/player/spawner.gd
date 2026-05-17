@@ -55,7 +55,7 @@ func _relay_chat_to_clients(_peer_id: int, payload: PackedByteArray) -> void:
 # on_peer_connect fires server-side when any peer (including the loopback host)
 # joins. The auth instance carries shadow_state + server-tick simulation and
 # is invisible (no camera, no input) since PlayerController gates rendering on
-# is_authority.
+# is_local_view.
 func _spawn_server_player(id: int) -> void:
 	if _server_players.has(id):
 		return  # idempotent — backfill + on_peer_connect can race for same id

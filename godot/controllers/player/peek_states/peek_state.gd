@@ -11,4 +11,4 @@ var animation_player: AnimationPlayer:
 var animation_tree: AnimationTree:
 	get: return player.animation_tree
 var is_remote_player: bool:
-	get: return !player.is_authority and !player._net.is_authoritative_instance
+	get: return !player.is_local_view and !player._net.is_authoritative_instance

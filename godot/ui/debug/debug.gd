@@ -27,7 +27,7 @@ func _ready() -> void:
 	if not NetSession.has_client_role:
 		return
 
-	if not player or not player.is_authority:
+	if not player or not player.is_local_view:
 		return
 	
 	NetClient.debug = self

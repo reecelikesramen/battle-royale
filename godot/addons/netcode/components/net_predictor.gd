@@ -118,11 +118,23 @@ var host: Node:
 	get: return get_parent()
 
 
-# True when this peer is the local authority for the entity (owns the input
-# stream + runs prediction). False on the server-authoritative instance and
-# on remote-peer proxy instances. In listen mode, the auth instance returns
-# false (this side IS the server), the local-peer proxy returns true.
+# True when this peer runs client-side prediction + reconciliation for the
+# entity. False on server-authoritative instances, on remote-peer proxies,
+# and on listen-mode local proxies (server-auth sibling owns simulation —
+# zero-latency snapshots make prediction unnecessary and create capsule-vs-
+# capsule physics feedback with the sibling).
 var is_local_authority: bool:
+	get:
+		if NetSession.has_server_role:
+			return false
+		return not is_authoritative_instance and owner_id == NetClient.id
+
+# True when this peer owns the local input stream for the entity — gathers
+# commands and ships them to the server. Differs from is_local_authority only
+# in listen mode: the local proxy still collects + sends input (server-auth
+# sibling drains it via the normal NetCommand path through loopback GNS) but
+# does NOT run prediction.
+var is_input_source: bool:
 	get: return not is_authoritative_instance and owner_id == NetClient.id
 
 # Server tick we last received a state snapshot for. Echoed in every outbound
@@ -1072,10 +1084,14 @@ func handle_net_state_packet(packet) -> void:
 		return
 	# Phase 6.1: REPLICATED has no authority client — every receiver buffers for
 	# interp. PREDICTED's local authority prunes its unacked ring + reconciles;
-	# everyone else buffers.
+	# everyone else buffers. Listen-mode local proxy is an is_input_source but
+	# NOT is_local_authority: it prunes (we still send inputs and the ring would
+	# grow forever) but skips reconcile (no prediction to reconcile against —
+	# we interp from the same server-auth snapshot like any other proxy).
 	var is_predicted: bool = schema != null and schema.archetype == NetSchema.Archetype.PREDICTED
-	if is_predicted and is_local_authority:
+	if is_predicted and is_input_source:
 		unacked_inputs.prune_up_to(last_input_seq)
+	if is_predicted and is_local_authority:
 		if PacketSequence.is_newer(last_input_seq, _last_reconciled_input_seq):
 			_reconcile_replay(last_input_seq)
 	else:
@@ -1410,6 +1426,12 @@ func _physics_process(delta: float) -> void:
 			_replicator_server_tick(scaled_dt)
 	elif schema.archetype == NetSchema.Archetype.PREDICTED and is_local_authority:
 		_authority_tick(delta)
+	elif schema.archetype == NetSchema.Archetype.PREDICTED and is_input_source:
+		# Listen-mode local proxy: gather + send input so the server-auth sibling
+		# has commands to drain, then interp like any remote proxy. No predict,
+		# no reconcile — server is local so its snapshot is the truth, zero RTT.
+		_send_input_packet(delta)
+		_proxy_tick(delta)
 	else:
 		# REPLICATED on any client + PREDICTED on remote clients both interp.
 		_proxy_tick(delta)
@@ -1427,6 +1449,36 @@ func _replicator_server_tick(delta: float) -> void:
 	if host.has_method(&"_capture_state"):
 		host._capture_state(shadow_state, delta)
 	server_broadcast_snapshot(0)
+
+
+# Input-collection phase shared by the predicting local authority path and the
+# listen-mode local-proxy path. Returns the gathered NetCommand on success so
+# the caller can drive simulate/reconcile; returns null when there's no host
+# hook or no command this frame, in which case the caller should bail.
+func _send_input_packet(delta: float) -> Variant:
+	if host == null or not host.has_method(&"_gather_command"):
+		return null
+	var cmd = host._gather_command(delta)
+	if cmd == null:
+		return null
+	# Phase 6: predictor owns the infra fields (sequence_id, timestamp_us,
+	# last_received_tick). Host-returned cmd is a typed NetCommand carrying only
+	# user-authored @export fields; we wrap it in a NetCommandPacket with
+	# schema-driven encoded payload.
+	var packet := NetCommandPacket.new()
+	packet.schema_id = schema.id if schema else 0
+	packet.entity_id = entity_id
+	packet.sequence_id = input_sequence.next()
+	packet.timestamp_us = Time.get_ticks_usec()
+	packet.last_received_tick = last_received_tick
+	packet.payload = encode_command_payload(cmd)
+	unacked_inputs.insert(packet.sequence_id, -1, packet.timestamp_us, cmd)
+	input_redundancy_ring.append(packet)
+	while input_redundancy_ring.size() > INPUT_REDUNDANCY:
+		input_redundancy_ring.pop_front()
+	for redundant in input_redundancy_ring:
+		NetSession.send_packet(redundant.to_payload())
+	return cmd
 
 
 # Local authority: gather input, advance shadow, sync visuals, capture render
@@ -1451,28 +1503,9 @@ func _replicator_server_tick(delta: float) -> void:
 # pair; render_state then defaults to a shadow snapshot and no scene write
 # happens via the corrections path.
 func _authority_tick(delta: float) -> void:
-	if host == null or not host.has_method(&"_gather_command"):
-		return
-	var cmd = host._gather_command(delta)
+	var cmd = _send_input_packet(delta)
 	if cmd == null:
 		return
-	# Phase 6: predictor owns the infra fields (sequence_id, timestamp_us,
-	# last_received_tick). Host-returned cmd is a typed NetCommand carrying only
-	# user-authored @export fields; we wrap it in a NetCommandPacket with
-	# schema-driven encoded payload.
-	var packet := NetCommandPacket.new()
-	packet.schema_id = schema.id if schema else 0
-	packet.entity_id = entity_id
-	packet.sequence_id = input_sequence.next()
-	packet.timestamp_us = Time.get_ticks_usec()
-	packet.last_received_tick = last_received_tick
-	packet.payload = encode_command_payload(cmd)
-	unacked_inputs.insert(packet.sequence_id, -1, packet.timestamp_us, cmd)
-	input_redundancy_ring.append(packet)
-	while input_redundancy_ring.size() > INPUT_REDUNDANCY:
-		input_redundancy_ring.pop_front()
-	for redundant in input_redundancy_ring:
-		NetSession.send_packet(redundant.to_payload())
 
 	# Phase 4: canonical-pos snap before _simulate. The visible body sits at
 	# shadow.pos + offset between ticks (see end of this function); if we leave

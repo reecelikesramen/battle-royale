@@ -77,12 +77,12 @@ func logic_physics(delta: float) -> void:
 			player.tiredness_hold_peak("full_prone")
 		elif step < 0.0 and prev_progress > 0.0 and progress <= 0.0:
 			player.tiredness_hold_peak("prone_stood_up")
-	if player.TIREDNESS_DEBUG and player.is_authority:
+	if player.TIREDNESS_DEBUG and player.is_local_view:
 		print("[TIRED prone ] tired=%.3f  slowdown=%.2fx  step=%+.4f  progress=%.3f  want_un=%s" % [
 				player.current_tiredness(), slowdown, step, progress, _wants_to_unprone])
 	
 	progress = clampf(progress, 0.0, _prone_anim_length)
-	#if player.is_authority`: print("progress: ", progress, " ", _wants_to_unprone)
+	#if player.is_local_view`: print("progress: ", progress, " ", _wants_to_unprone)
 
 
 func logic_transitions() -> void:
@@ -94,7 +94,7 @@ func logic_transitions() -> void:
 	if player.input.is_prone_just_pressed() and _toggle_debounce_us() > 50_000:
 		_last_toggle_time = Time.get_ticks_usec()
 		_wants_to_unprone = !_wants_to_unprone
-		if player.TIREDNESS_DEBUG and player.is_authority:
+		if player.TIREDNESS_DEBUG and player.is_local_view:
 			print("[TIRED prone toggle] _wants_to_unprone=%s  prev=%s  progress=%.3f" % [
 					_wants_to_unprone, _prev_wants_to_unprone, progress])
 
