@@ -59,6 +59,12 @@ fi
 
 # Helper: make a zstd delta if both files exist. zstd is invoked with
 # --long=27 to match `--patch-from`'s long-range mode.
+#
+# -T0 fans the compressor across all available cores; on Cloud Build's
+# default 2-vCPU runner this is roughly a 2× speedup. -12 trades a small
+# bit of delta size (PCK is already godot-compressed so the top levels
+# squeeze little) for a 3× speedup over -19. Together: pck_base deltas
+# (1+ GB each, three platforms) drop from ~10 min to ~2-3 min.
 make_delta() {
   local prev_file="$1"
   local new_file="$2"
@@ -67,7 +73,7 @@ make_delta() {
     return 0
   fi
   mkdir -p "$(dirname "$out")"
-  zstd -19 --long=27 --patch-from="$prev_file" "$new_file" -o "$out" \
+  zstd -12 -T0 --long=27 --patch-from="$prev_file" "$new_file" -o "$out" \
     2>/dev/null || echo "zstd patch failed for $new_file (continuing)"
 }
 
