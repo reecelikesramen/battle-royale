@@ -29,7 +29,31 @@ func _ready() -> void:
 	if num_regex.compile("^\\d+$") != OK:
 		push_error("Numeric regex failed to compile")
 
+	_install_play_solo_button()
 	_maybe_autoconnect()
+
+
+# Adds a "Play Solo" button between Connect and FullScreen in the existing
+# VBoxContainer. Done programmatically so the menu scene doesn't need editing.
+func _install_play_solo_button() -> void:
+	var vbox: Node = %ConnectButton.get_parent()
+	var play_solo := Button.new()
+	play_solo.text = "Play Solo (Listen Server)"
+	play_solo.pressed.connect(_on_play_solo_pressed)
+	vbox.add_child(play_solo)
+	vbox.move_child(play_solo, %ConnectButton.get_index() + 1)
+
+
+func _on_play_solo_pressed() -> void:
+	if NetSession.is_dedicated_server:
+		push_error("Dedicated server cannot enter listen mode")
+		return
+	if NetSession.is_connected:
+		push_error("Already connected; disconnect first")
+		return
+	NetClient.username = "Host_%d" % (Time.get_ticks_msec() % 10000)
+	NetSession.start_listen_mode()
+	get_tree().change_scene_to_file(Constants.MAP_SCENE_PATH)
 
 
 # Skip the menu and connect immediately. Honors any of:
@@ -42,6 +66,14 @@ func _ready() -> void:
 # or pass via the CLI: `godot --path godot/ -- --autojoin` to bypass the menu.
 func _maybe_autoconnect() -> void:
 	var args := OS.get_cmdline_user_args()
+	# --listen is a CLI shortcut for headless / autotest entry into solo
+	# listen-server mode. Equivalent to pressing the Play Solo button.
+	if args.find("--listen") != -1:
+		NetClient.username = "Host_%d" % (Time.get_ticks_msec() % 10000)
+		NetSession.start_listen_mode()
+		get_tree().call_deferred("change_scene_to_file", Constants.MAP_SCENE_PATH)
+		print("Auto-starting listen mode")
+		return
 	var idx := args.find("--client")
 	if idx == -1:
 		idx = args.find("--autojoin")
