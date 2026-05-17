@@ -97,9 +97,8 @@ var entity_id: int = -1
 # in listen-server mode the process is BOTH server and client, so the same
 # logical entity has two scene instances — one server-authoritative (this flag
 # true), one client-rendered proxy (this flag false). Spawners stamp it at
-# instantiation. In single-mode (CLIENT_ONLY / DEDICATED_SERVER) it tracks
-# what NetSession.is_server tracked before, so existing entity-level role
-# checks migrate to this field 1:1.
+# instantiation. In single-mode (CLIENT_ONLY / DEDICATED_SERVER) matches the
+# process role 1:1 for entity-level authority checks.
 var is_authoritative_instance: bool = false
 
 # Authority + replay flags read by states & systems.

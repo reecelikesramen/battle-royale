@@ -76,8 +76,6 @@ struct NetworkDriver {
     /* common vars */
     #[var]
     is_connected: bool,
-    #[var]
-    is_server: bool,
     gns_global: Arc<GnsGlobal>,
     // last_update: Instant,
 
@@ -100,7 +98,6 @@ impl INode for NetworkDriver {
         Self {
             base,
             is_connected: false,
-            is_server: false,
             gns_global,
             server: None,
             // last_update: Instant::now(),
@@ -152,7 +149,6 @@ impl NetworkDriver {
             })
             .ok();
 
-        self.is_server = self.server.is_some();
         self.is_connected = self.server.is_some() || self.client.is_some();
     }
 
@@ -186,9 +182,6 @@ impl NetworkDriver {
             .connect(ip_address, port.try_into().unwrap())
             .ok();
 
-        // is_server stays whatever it was — listen mode keeps it true after the
-        // server side already started; pure client mode leaves it false.
-        self.is_server = self.server.is_some();
         self.is_connected = self.server.is_some() || self.client.is_some();
     }
 
@@ -249,7 +242,6 @@ impl NetworkDriver {
     #[func]
     fn destroy_server(&mut self) {
         self.server = None;
-        self.is_server = false;
         self.is_connected = self.client.is_some();
     }
 
