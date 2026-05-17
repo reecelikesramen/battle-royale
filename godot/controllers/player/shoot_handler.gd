@@ -70,6 +70,26 @@ void fragment() {
 
 
 func _ready() -> void:
+	# Reliable-hub subscriptions are mode-agnostic — both server and client
+	# need to react to confirms/deaths, and the hub no-ops for messages a
+	# given role wouldn't receive. Wire those eagerly.
+	NetReliableHub.subscribe(Enums.ReliableTopic.HIT_CONFIRM, _on_hit_confirm)
+	NetReliableHub.subscribe(Enums.ReliableTopic.SHOT_FIRED, _on_shot_fired)
+	NetReliableHub.subscribe(Enums.ReliableTopic.PLAYER_DIED, _on_player_died)
+	NetReliableHub.subscribe(Enums.ReliableTopic.PLAYER_RESPAWN, _on_player_respawn)
+	tree_exiting.connect(_unsubscribe_all)
+	# Role-gated setup is deferred to end-of-frame. In listen mode the map
+	# root's _ready calls NetSession.start_listen_mode AFTER its children's
+	# _readys have run (Godot calls _ready bottom-up), so has_server_role /
+	# has_client_role are still false at this point. call_deferred runs after
+	# every _ready in the current frame — by that time listen mode is active
+	# and the flags reflect the intended role. Dedicated server / client-only
+	# modes set the flags in NetSession boot, so the deferred call sees the
+	# correct values there too.
+	call_deferred("_finish_setup")
+
+
+func _finish_setup() -> void:
 	if NetSession.has_server_role:
 		_comp = NetLagCompensator.new()
 		# Subscribe to player-predictor command_received signals as they spawn.
@@ -78,11 +98,6 @@ func _ready() -> void:
 		for entry in NetReplication.iter_entities():
 			if entry[0] == PLAYER_SCHEMA_ID:
 				_bind_predictor(entry[2])
-	NetReliableHub.subscribe(Enums.ReliableTopic.HIT_CONFIRM, _on_hit_confirm)
-	NetReliableHub.subscribe(Enums.ReliableTopic.SHOT_FIRED, _on_shot_fired)
-	NetReliableHub.subscribe(Enums.ReliableTopic.PLAYER_DIED, _on_player_died)
-	NetReliableHub.subscribe(Enums.ReliableTopic.PLAYER_RESPAWN, _on_player_respawn)
-	tree_exiting.connect(_unsubscribe_all)
 	if NetSession.has_client_role:
 		_tracer_root = Node3D.new()
 		_tracer_root.name = "TracerRoot"

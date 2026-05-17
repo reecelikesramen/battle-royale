@@ -27,6 +27,13 @@ func _ready() -> void:
 
 	NetReplication.server_entity_spawn_requested.connect(_on_server_spawn_requested)
 	NetReplication.client_entity_spawn_requested.connect(_on_client_spawn_requested)
+	# Listen-mode: NetSession.has_server_role flips to true inside
+	# playtest_map._ready (which runs AFTER children's _ready), so we can't
+	# read it here. Defer to end-of-frame; by then start_listen_mode has run.
+	call_deferred("_finish_setup")
+
+
+func _finish_setup() -> void:
 	if NetSession.has_server_role:
 		NetReliableHub.subscribe(Enums.ReliableTopic.THROW_GRENADE, _on_throw_request)
 	print("[GRENADE] spawner ready mode=%d" % NetSession.mode)

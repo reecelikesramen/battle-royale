@@ -173,17 +173,20 @@ func _ready():
 	# Without these gates you get:
 	#   - server-auth's move_and_slide bouncing off the proxy's collider each
 	#     tick (capsule-vs-capsule feedback loop sends both flying)
-	#   - both capsules rendered, so the user sees two players at their spawn
+	#   - every visible node on both instances rendered (capsule + FPS hand
+	#     mesh under CameraController/Camera3D + any future view models), so
+	#     the user sees doubled hands / bodies at their spawn
 	# Gate on has_server_role to scope these to listen mode: in client-only
 	# mode the local player has no server-auth sibling and remote proxies need
 	# colliders so the local player bumps into them correctly.
 	if NetSession.has_server_role and NetSession.has_client_role:
 		if _net.is_authoritative_instance:
-			# Server-auth: keep collider (physics truth) but hide the mesh — the
-			# proxy sibling under ClientPlayers is the body the user renders.
-			# Visibility propagates to PlaceholderMesh; CollisionShape3D.disabled
-			# is unaffected so physics queries still work.
-			$VisualCollider.visible = false
+			# Server-auth: hide the whole instance. Visibility is a Node3D
+			# property — propagates to every MeshInstance3D under this player
+			# (capsule, hands, view models) without touching physics, which is
+			# shape-driven. Mirrors what dedicated-server mode gets implicitly
+			# (no rendering at all on a headless server).
+			visible = false
 		else:
 			# Client-proxy: kill physics so it doesn't shove the auth sibling
 			# around. Mesh stays visible — this is the body the camera follows

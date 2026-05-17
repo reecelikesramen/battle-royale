@@ -26,6 +26,16 @@ func _ready() -> void:
 	NetClient.handle_remote_id_assignment.connect(_spawn_client_player)
 	NetClient.handle_player_disconnected.connect(_despawn)
 
+	# Role-gated setup: backfill of pre-existing peers + chat relay subscribe.
+	# In listen mode, role flags flip true inside playtest_map._ready AFTER
+	# this _ready runs (Godot's bottom-up order), so we read them on the next
+	# frame via call_deferred. In dedicated/client modes the flags are set in
+	# NetSession boot before scene tree loads, so the deferred call still sees
+	# correct state.
+	call_deferred("_finish_role_setup")
+
+
+func _finish_role_setup() -> void:
 	# Backfill: signals can fire on autoloads before this scene's spawner is
 	# in the tree. Without backfill the local client gets the default scene
 	# camera and the server's spectator view shows zero capsules.
