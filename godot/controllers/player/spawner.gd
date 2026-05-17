@@ -16,11 +16,13 @@ func _ready() -> void:
 	# fire on the autoload before this scene's spawner is in the tree, so the
 	# signals emit to zero listeners. Without backfill the local client gets the
 	# default scene camera (own PlayerController never spawned) and the server's
-	# spectator view shows zero/stale capsules.
-	if NetSession.is_server:
+	# spectator view shows zero/stale capsules. Listen mode runs both branches;
+	# spawn_player's idempotency guard collapses overlapping ids today (Phase E
+	# splits the spawn paths to create both auth and proxy instances).
+	if NetSession.has_server_role:
 		for peer_id in NetServer.peer_ids:
 			spawn_player(peer_id)
-	else:
+	if NetSession.has_client_role:
 		if NetClient.id != -1:
 			spawn_player(NetClient.id)
 		for remote_id in NetClient.remote_ids:
@@ -32,7 +34,7 @@ func _ready() -> void:
 	# a peer sends, the server re-broadcasts the same payload to all peers so
 	# every client sees it. Fresh idem_key per fan-out is fine; the hub's per-
 	# topic dedup ring isolates client and server views.
-	if NetSession.is_server:
+	if NetSession.has_server_role:
 		NetReliableHub.subscribe(Enums.ReliableTopic.CHAT, _relay_chat_to_clients)
 
 
@@ -66,7 +68,7 @@ func spawn_player(id: int) -> void:
 
 
 func despawn_player(id: int) -> void:
-	if NetSession.is_server:
+	if NetSession.has_server_role:
 		var disconnect_packet := PlayerDisconnectedPacket.new()
 		disconnect_packet.player_id = id
 		NetSession.broadcast_packet(disconnect_packet.to_payload())

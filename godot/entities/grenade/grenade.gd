@@ -35,11 +35,14 @@ var _armed_for_thrower: bool = false
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
-	if not NetSession.is_server:
-		# Clients are pure render targets — engine never simulates. Collision
-		# shape stays disabled so the local thrower's visual move_and_slide and
-		# any other peer's local physics never bump off the replicated grenade
-		# (which would cause a visual divergence and a reconcile snap).
+	if not _net.is_authoritative_instance:
+		# Proxy instances are pure render targets — engine never simulates.
+		# Collision shape stays disabled so the local thrower's visual
+		# move_and_slide and any other peer's local physics never bump off the
+		# replicated grenade (which would cause a visual divergence and a
+		# reconcile snap). In listen mode the same scene has both a server-
+		# auth grenade (collider live) and a client-proxy grenade (collider
+		# disabled) under sibling parents — see Phase E.
 		freeze = true
 		freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 		_shape.disabled = true
@@ -196,9 +199,10 @@ func _render_visuals(s: GrenadeState) -> void:
 	var exploding := s.state == STATE_EXPLODING
 	_body.visible = flying
 	_explosion.visible = exploding
-	# Server owns the collider; clients keep it permanently disabled (set in
-	# _ready). Toggling here from the client would re-enable it on FLYING.
-	if NetSession.is_server:
+	# Authoritative instance owns the collider; proxy instances keep it
+	# permanently disabled (set in _ready). Toggling here from a proxy would
+	# re-enable it on FLYING.
+	if _net.is_authoritative_instance:
 		_shape.disabled = not flying
 	if exploding:
 		var scale_now: float = lerp(0.2, 3.0, clamp(s.explosion_progress, 0.0, 1.0))

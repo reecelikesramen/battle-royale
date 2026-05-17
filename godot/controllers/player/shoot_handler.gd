@@ -70,7 +70,7 @@ void fragment() {
 
 
 func _ready() -> void:
-	if NetSession.is_server:
+	if NetSession.has_server_role:
 		_comp = NetLagCompensator.new()
 		# Subscribe to player-predictor command_received signals as they spawn.
 		# Predictors registered before us also need binding — walk current set.
@@ -83,7 +83,7 @@ func _ready() -> void:
 	NetReliableHub.subscribe(Enums.ReliableTopic.PLAYER_DIED, _on_player_died)
 	NetReliableHub.subscribe(Enums.ReliableTopic.PLAYER_RESPAWN, _on_player_respawn)
 	tree_exiting.connect(_unsubscribe_all)
-	if not NetSession.is_server:
+	if NetSession.has_client_role:
 		_tracer_root = Node3D.new()
 		_tracer_root.name = "TracerRoot"
 		add_child(_tracer_root)
@@ -92,7 +92,7 @@ func _ready() -> void:
 		_tracer_mat = ShaderMaterial.new()
 		_tracer_mat.shader = shader
 		set_process(true)
-	print("[SHOOT] handler ready is_server=%s" % NetSession.is_server)
+	print("[SHOOT] handler ready mode=%d" % NetSession.mode)
 
 
 func _unsubscribe_all() -> void:
@@ -285,7 +285,10 @@ func _broadcast_hit_confirm(shooter_id: int, target_id: int, damage: int, remain
 # (payload) on client. We only act on the client branch; server already
 # logged inside _on_command.
 func _on_hit_confirm(arg1, arg2 = null) -> void:
-	if NetSession.is_server:
+	# Reliable hub fires twice in listen mode (server + client subscriptions).
+	# Branch on arg2 — server invocations supply (peer_id, payload), client
+	# invocations supply (payload,) — so we only process the client-render side.
+	if arg2 != null:
 		return
 	var payload: PackedByteArray = arg1 if arg2 == null else arg2
 	var sp := StreamPeerBuffer.new()
@@ -318,7 +321,7 @@ func _broadcast_shot_fired(shooter_id: int, origin: Vector3, endpoint: Vector3) 
 
 
 func _on_shot_fired(arg1, arg2 = null) -> void:
-	if NetSession.is_server:
+	if arg2 != null:
 		return
 	var payload: PackedByteArray = arg1 if arg2 == null else arg2
 	var sp := StreamPeerBuffer.new()
@@ -438,7 +441,7 @@ func _broadcast_player_respawn(victim_id: int, pos: Vector3) -> void:
 
 
 func _on_player_died(arg1, arg2 = null) -> void:
-	if NetSession.is_server:
+	if arg2 != null:
 		return
 	var payload: PackedByteArray = arg1 if arg2 == null else arg2
 	var sp := StreamPeerBuffer.new()
@@ -450,7 +453,7 @@ func _on_player_died(arg1, arg2 = null) -> void:
 
 
 func _on_player_respawn(arg1, arg2 = null) -> void:
-	if NetSession.is_server:
+	if arg2 != null:
 		return
 	var payload: PackedByteArray = arg1 if arg2 == null else arg2
 	var sp := StreamPeerBuffer.new()
@@ -463,7 +466,7 @@ func _on_player_respawn(arg1, arg2 = null) -> void:
 
 # Public hook for grenade / other damage sources. Server-only.
 func apply_damage(victim_id: int, damage: int, attacker_id: int = -1) -> void:
-	if not NetSession.is_server:
+	if not NetSession.has_server_role:
 		return
 	var victim: NetPredictor = NetReplication.get_entity(PLAYER_SCHEMA_ID, victim_id) as NetPredictor
 	if victim == null or victim.shadow_state == null:

@@ -40,7 +40,7 @@ const THROW_POWER := 12.0
 @onready var crouch_shapecast: ShapeCast3D = %CrouchShapeCast3D
 
 var is_authority: bool:
-	get: return !NetSession.is_server && _owner_id == NetClient.id
+	get: return !_net.is_authoritative_instance && _owner_id == NetClient.id
 
 var is_replaying_inputs: bool:
 	get: return _net.is_replaying_inputs
@@ -139,7 +139,7 @@ func _enter_tree() -> void:
 	# Server-only: when NetLagCompensator rewinds/restores shadow_state, push
 	# pos onto the CharacterBody3D so ShootHandler's raycast intersects rewound
 	# bodies. Live state restoration also fires this; harmless when shadow == scene.
-	if NetSession.is_server:
+	if net.is_authoritative_instance:
 		net.shadow_state_applied.connect(_on_shadow_state_applied)
 
 
@@ -513,7 +513,7 @@ func _apply_state(state: PlayerState) -> void:
 		global_position = Constants.GRAVEYARD
 		velocity = Vector3.ZERO
 		return
-	if NetSession.is_server:
+	if _net.is_authoritative_instance:
 		global_position = state.pos
 		velocity = state.velocity
 		global_transform.basis = Basis.from_euler(Vector3(0, state.look.y, 0))
@@ -539,7 +539,7 @@ func _apply_state(state: PlayerState) -> void:
 # offset path. State scripts retain visual_physics only for animation seek
 # updates (CrouchTimeSeek, ProneTimeSeek, etc.). Skipped on the server.
 func _visualize(delta: float, _state: PlayerState) -> void:
-	if NetSession.is_server:
+	if _net.is_authoritative_instance:
 		return
 	%MovementStateMachine.run_visual(delta)
 	%PeekStateMachine.run_visual(delta)
@@ -562,7 +562,7 @@ func _capture_render_state(state: PlayerState) -> void:
 # path; this hook is debug-only. Emit the reconcile signal so the network
 # debug overlay still sees pre-corrections deltas.
 func _apply_corrections(_state: PlayerState) -> void:
-	if NetSession.is_server:
+	if _net.is_authoritative_instance:
 		return
 	var shadow: PlayerState = _net.shadow_state as PlayerState
 	if shadow != null:

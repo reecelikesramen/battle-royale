@@ -16,7 +16,7 @@ func _ready() -> void:
 
 
 func _physics_process(_delta: float) -> void:
-	if not NetSession.is_server:
+	if not NetSession.has_server_role:
 		return
 	if peer_ids.is_empty():
 		return

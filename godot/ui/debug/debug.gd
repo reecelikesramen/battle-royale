@@ -21,10 +21,12 @@ func _exit_tree() -> void:
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	visible = false
-	
-	if NetSession.is_server:
+
+	# Listen-server has both roles; the HUD lives on the client side. Dedicated
+	# server returns early since it has no rendering.
+	if not NetSession.has_client_role:
 		return
-	
+
 	if not player or not player.is_authority:
 		return
 	

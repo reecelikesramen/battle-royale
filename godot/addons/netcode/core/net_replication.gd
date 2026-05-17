@@ -163,7 +163,7 @@ func pending_count(schema_id: int, entity_id: int) -> int:
 # `owner_peer_id` is the peer that owns the entity's input stream (-1 for
 # unowned entities like AI / props).
 func spawn_entity(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int = -1) -> void:
-	if not NetSession.is_server:
+	if not NetSession.has_server_role:
 		push_warning("NetReplication.spawn_entity called on a non-server peer; ignored")
 		return
 	var payload: PackedByteArray = _encode_spawn(schema_id, entity_id, scene_path, owner_peer_id)

@@ -11,9 +11,9 @@ var _last_throw_us: Dictionary = {}  # peer_id -> usec
 
 func _ready() -> void:
 	NetReplication.entity_spawn_requested.connect(_on_spawn_requested)
-	if NetSession.is_server:
+	if NetSession.has_server_role:
 		NetReliableHub.subscribe(Enums.ReliableTopic.THROW_GRENADE, _on_throw_request)
-	print("[GRENADE] spawner ready is_server=%s" % NetSession.is_server)
+	print("[GRENADE] spawner ready mode=%d" % NetSession.mode)
 
 
 func _on_throw_request(peer_id: int, payload: PackedByteArray) -> void:
@@ -75,4 +75,4 @@ func _on_spawn_requested(schema_id: int, entity_id: int, scene_path: String, _ow
 	# listen-server gets distinct auth + proxy instances.
 	predictor.is_authoritative_instance = NetSession.has_server_role
 	add_child(grenade)
-	print("[GRENADE] instantiated id=%d (is_server=%s)" % [entity_id, NetSession.is_server])
+	print("[GRENADE] instantiated id=%d (auth=%s mode=%d)" % [entity_id, predictor.is_authoritative_instance, NetSession.mode])

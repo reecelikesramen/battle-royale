@@ -120,9 +120,11 @@ var host: Node:
 
 
 # True when this peer is the local authority for the entity (owns the input
-# stream + runs prediction). False on the server and on remote-proxy clients.
+# stream + runs prediction). False on the server-authoritative instance and
+# on remote-peer proxy instances. In listen mode, the auth instance returns
+# false (this side IS the server), the local-peer proxy returns true.
 var is_local_authority: bool:
-	get: return not NetSession.is_server and owner_id == NetClient.id
+	get: return not is_authoritative_instance and owner_id == NetClient.id
 
 # Server tick we last received a state snapshot for. Echoed in every outbound
 # input so the server can advance its per-client baseline and delta-encode the
@@ -313,7 +315,7 @@ func _ready() -> void:
 	# into a typed NetCommand, and enqueues for the next _server_tick. Clients
 	# never see the signal so the connect is a no-op for them. REPLICATED and
 	# LOCAL_ONLY archetypes never fan out inputs.
-	if schema != null and schema.archetype == NetSchema.Archetype.PREDICTED and NetSession.is_server:
+	if schema != null and schema.archetype == NetSchema.Archetype.PREDICTED and is_authoritative_instance:
 		NetServer.handle_net_command.connect(_on_server_net_command)
 		_subscribed_to_input = true
 
@@ -736,7 +738,7 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 	# and on the server, bytes for proxy_only refs are still consumed from the
 	# stream (the wire format isn't conditional) but the node.set() is
 	# suppressed so the host's locally-driven values aren't clobbered.
-	var suppress_child_writes: bool = NetSession.is_server or is_local_authority
+	var suppress_child_writes: bool = is_authoritative_instance or is_local_authority
 	if is_keyframe:
 		# Phase 6b: pass 1 reads non-bool fields inline. Bools skipped here.
 		for i in state_field_names.size():
@@ -1067,7 +1069,7 @@ func handle_net_state_packet(packet) -> void:
 	decode_payload_into(shadow_state, packet.payload)
 	state_snapshot_received.emit(shadow_state, last_input_seq, last_received_tick)
 
-	if NetSession.is_server:
+	if is_authoritative_instance:
 		return
 	# Phase 6.1: REPLICATED has no authority client — every receiver buffers for
 	# interp. PREDICTED's local authority prunes its unacked ring + reconciles;
@@ -1390,7 +1392,7 @@ func _physics_process(delta: float) -> void:
 	# for state lifecycle + host hook plumbing on the local peer.
 	if schema.archetype == NetSchema.Archetype.LOCAL_ONLY:
 		return
-	if NetSession.is_server:
+	if is_authoritative_instance:
 		# Per-entity tick-rate gate. Skip server tick on intermediate ticks so
 		# low-priority entities (props, projectiles) cost a fraction of what
 		# players cost. Effective dt scales with the gate so time-based fields

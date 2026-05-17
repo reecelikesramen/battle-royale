@@ -9,4 +9,4 @@ var animation_tree: AnimationTree:
 var camera_animation_player: AnimationPlayer:
 	get: return player.camera_animation_player
 var is_remote_player: bool:
-	get: return !player.is_authority and !NetSession.is_server
+	get: return !player.is_authority and !player._net.is_authoritative_instance

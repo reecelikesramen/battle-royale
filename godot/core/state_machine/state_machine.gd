@@ -18,7 +18,9 @@ var _pending_transition: StringName = &""
 var _show_in_debug: bool:
 	get:
 		if !SHOW_IN_DEBUG: return false
-		if NetSession.is_server: return false
+		# Listen-server runs both halves; show the HUD only when this process
+		# has a client role to render it (dedicated server has no HUD).
+		if not NetSession.has_client_role: return false
 		if not NetClient.debug: return false
 		var player: PlayerController = owner
 		return player.is_authority
