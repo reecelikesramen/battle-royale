@@ -52,6 +52,13 @@ func spawn_player(id: int) -> void:
 	var player: PlayerController = PLAYER.instantiate()
 	player._owner_id = id
 	player.name = "Player_%d" % id # Optional, but it beats the name "@CharacterBody2D@2/3/4..."
+	# Per-entity role stamp. In CLIENT_ONLY / DEDICATED_SERVER this matches the
+	# old NetSession.is_server check 1:1; in LISTEN_SERVER the two spawn paths
+	# (peer-connect → auth, id-assignment → proxy) will each stamp their own
+	# instance once Phase E splits the dispatch. Today both signals collapse
+	# onto this same spawn flow, so the flag follows process role.
+	var pred: NetPredictor = player.get_node("NetPredictor")
+	pred.is_authoritative_instance = NetSession.has_server_role
 	players[id] = player
 	if id == NetClient.id:
 		NetClient.player = player

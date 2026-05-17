@@ -69,5 +69,10 @@ func _on_spawn_requested(schema_id: int, entity_id: int, scene_path: String, _ow
 	grenade.name = "Grenade_%d" % entity_id
 	var predictor: NetPredictor = grenade.get_node("NetPredictor")
 	predictor.entity_id = entity_id
+	# Per-entity role stamp. _on_spawn_requested fires on both server (local
+	# self-emit during spawn_entity) and client (reliable broadcast receipt),
+	# so today the flag follows process role. Phase E splits the dispatch so
+	# listen-server gets distinct auth + proxy instances.
+	predictor.is_authoritative_instance = NetSession.has_server_role
 	add_child(grenade)
 	print("[GRENADE] instantiated id=%d (is_server=%s)" % [entity_id, NetSession.is_server])

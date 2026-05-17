@@ -93,6 +93,15 @@ static func _schema_has_smoothed_offset_pos_channel(s: NetSchema) -> bool:
 var owner_id: int = -1
 var entity_id: int = -1
 
+# Per-instance authority. Distinct from process-level NetSession.has_server_role:
+# in listen-server mode the process is BOTH server and client, so the same
+# logical entity has two scene instances — one server-authoritative (this flag
+# true), one client-rendered proxy (this flag false). Spawners stamp it at
+# instantiation. In single-mode (CLIENT_ONLY / DEDICATED_SERVER) it tracks
+# what NetSession.is_server tracked before, so existing entity-level role
+# checks migrate to this field 1:1.
+var is_authoritative_instance: bool = false
+
 # Authority + replay flags read by states & systems.
 var is_replaying_inputs: bool = false
 
