@@ -87,7 +87,7 @@ func _finish_setup() -> void:
 		# Subscribe to player-predictor command_received signals as they spawn.
 		# Predictors registered before us also need binding — walk current set.
 		NetReplication.entity_registered.connect(_on_entity_registered)
-		for entry in NetReplication.iter_entities():
+		for entry in NetReplication.iter_entities(true):
 			if entry[0] == PLAYER_SCHEMA_ID:
 				_bind_predictor(entry[2])
 	if NetSession.has_client_role:
@@ -109,10 +109,12 @@ func _unsubscribe_all() -> void:
 	NetReliableHub.unsubscribe(Enums.ReliableTopic.PLAYER_RESPAWN, _on_player_respawn)
 
 
-func _on_entity_registered(schema_id: int, entity_id: int) -> void:
-	if schema_id != PLAYER_SCHEMA_ID:
+func _on_entity_registered(schema_id: int, entity_id: int, is_authoritative: bool) -> void:
+	if schema_id != PLAYER_SCHEMA_ID or not is_authoritative:
 		return
-	var pred: NetPredictor = NetReplication.get_entity(schema_id, entity_id)
+	# Only the auth predictor receives NetCommand fan-out; binding to a proxy
+	# would never see command_received fire.
+	var pred: NetPredictor = NetReplication.get_entity(schema_id, entity_id, true)
 	if pred != null:
 		_bind_predictor(pred)
 

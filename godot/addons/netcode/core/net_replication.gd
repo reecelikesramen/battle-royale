@@ -4,8 +4,8 @@ extends Node
 # routing and outbound iteration. Phase 6 uses a hard-coded schema_id=1 for the
 # player; later phases will assign ids as schemas register.
 
-signal entity_registered(schema_id: int, entity_id: int)
-signal entity_unregistered(schema_id: int, entity_id: int)
+signal entity_registered(schema_id: int, entity_id: int, is_authoritative: bool)
+signal entity_unregistered(schema_id: int, entity_id: int, is_authoritative: bool)
 
 # Spawn dispatch is split per role so listen-server can create distinct
 # server-authoritative + client-proxy instances of the same logical entity.
@@ -129,9 +129,11 @@ func register_entity(schema_id: int, entity_id: int, predictor) -> void:
 	var is_auth: bool = _is_authoritative(predictor)
 	if is_auth:
 		_server_entities[key] = predictor
+		_pending_auth_spawns.erase(key)
 	else:
 		_client_entities[key] = predictor
-	entity_registered.emit(schema_id, entity_id)
+		_pending_proxy_spawns.erase(key)
+	entity_registered.emit(schema_id, entity_id, is_auth)
 	# Phase 9c: drain any snapshots that arrived before this entity registered.
 	# Only proxies receive snapshots (state flows server → client), so only
 	# client-side registration triggers the flush. Authoritative-only single-
@@ -151,14 +153,20 @@ func unregister_entity(schema_id: int, entity_id: int) -> void:
 	# proxies get stuck rendering their final frame forever (grenades hung in
 	# EXPLODING on the explosion site). Auth unregister is the canonical
 	# "no more snapshots are coming" signal, so the proxy can free immediately.
-	if _server_entities.has(key) and _client_entities.has(key):
+	var was_auth: bool = _server_entities.has(key)
+	var was_proxy: bool = _client_entities.has(key)
+	if was_auth and was_proxy:
 		var proxy: NetPredictor = _client_entities[key]
 		if is_instance_valid(proxy) and is_instance_valid(proxy.host):
 			proxy.host.queue_free()
 	_server_entities.erase(key)
 	_client_entities.erase(key)
 	_pending_packets.erase(key)
-	entity_unregistered.emit(schema_id, entity_id)
+	# Use was_auth as the is_authoritative flag; if both sides existed the
+	# auth-side unregister fires first. Listeners that care can re-check via
+	# is_predictor_authoritative — but generally unregister handlers don't
+	# branch on role.
+	entity_unregistered.emit(schema_id, entity_id, was_auth)
 
 
 # Lookup defaults to "server registry first, fall back to client". In single-
@@ -261,3 +269,167 @@ func _encode_spawn(schema_id: int, entity_id: int, scene_path: String, owner_pee
 	sp.put_32(owner_peer_id)
 	sp.put_string(scene_path)
 	return sp.data_array
+
+
+# F1: framework-owned spawn placement. Game registers a scene + parent once
+# per schema; framework instantiates + parents + stamps is_authoritative_instance
+# whenever a spawn signal fires (whether from spawn_entity, bind_peer_entity, or
+# a SPAWN_TOPIC loopback receive). Game stops needing per-role spawner forks.
+var _entity_scene_config: Dictionary = {}  # schema_id -> {scene_path, parent}
+# Synchronous "we're about to spawn this" markers. NetPredictor.register_entity
+# happens inside NetPredictor._ready which is deferred via call_deferred(
+# "add_child"), so _server_entities / _client_entities aren't populated until
+# the next frame. Without a synchronous marker, a peer-event spawn followed by
+# a same-frame backfill spawn would both pass the registry-idempotency check
+# and double-instantiate. These dicts clear lazily in _instantiate_for_role.
+var _pending_auth_spawns: Dictionary = {}    # Vector2i -> true
+var _pending_proxy_spawns: Dictionary = {}   # Vector2i -> true
+
+
+func register_entity_scene(schema_id: int, scene_path: String, parent: Node) -> void:
+	_entity_scene_config[schema_id] = {"scene_path": scene_path, "parent": parent}
+	if not server_entity_spawn_requested.is_connected(_auto_instantiate_auth):
+		server_entity_spawn_requested.connect(_auto_instantiate_auth)
+	if not client_entity_spawn_requested.is_connected(_auto_instantiate_proxy):
+		client_entity_spawn_requested.connect(_auto_instantiate_proxy)
+
+
+# Per-peer auto-spawn driver. Wraps register_entity_scene + binds every peer
+# event (server-side connect/disconnect, client-side id-assignment / player-
+# disconnected / disconnect-from-server) to spawn or despawn the entity for
+# that peer. After this call the game spawner is just a one-liner — no roster
+# bookkeeping, no role bifurcation, no backfill loops.
+func bind_peer_entity(schema_id: int, scene_path: String, parent: Node) -> void:
+	register_entity_scene(schema_id, scene_path, parent)
+	NetSession.on_peer_connect.connect(
+			func(peer_id): _spawn_peer_auth(schema_id, peer_id, scene_path))
+	NetSession.on_peer_disconnect.connect(
+			func(peer_id): _despawn_peer_entity(schema_id, peer_id))
+	NetClient.handle_local_id_assignment.connect(
+			func(peer_id): _spawn_peer_proxy(schema_id, peer_id, scene_path))
+	NetClient.handle_remote_id_assignment.connect(
+			func(peer_id): _spawn_peer_proxy(schema_id, peer_id, scene_path))
+	NetClient.handle_player_disconnected.connect(
+			func(peer_id): _despawn_peer_entity(schema_id, peer_id))
+	NetClient.handle_disconnect_from_server.connect(
+			func(): _despawn_all_for_schema(schema_id))
+	# Backfill once role identity settles. Peer events that fired before this
+	# subscription (typical in listen mode: on_peer_connect fires inside
+	# start_listen_mode before downstream subscribers exist) are caught here.
+	NetSession.when_roles_ready(
+			func(): _backfill_peer_entities(schema_id, scene_path))
+
+
+func _backfill_peer_entities(schema_id: int, scene_path: String) -> void:
+	if NetSession.has_server_role:
+		for pid in NetServer.peer_ids:
+			_spawn_peer_auth(schema_id, pid, scene_path)
+	if NetSession.has_client_role:
+		if NetClient.id != -1:
+			_spawn_peer_proxy(schema_id, NetClient.id, scene_path)
+		for rid in NetClient.remote_ids:
+			if rid != NetClient.id:
+				_spawn_peer_proxy(schema_id, rid, scene_path)
+
+
+# Idempotent local-only spawn — no SPAWN_TOPIC broadcast. Peer entities are
+# discovered via id-assignment / peer-connect, not arbitrary spawn calls, so
+# they don't go on the reliable wire.
+func _spawn_peer_auth(schema_id: int, peer_id: int, scene_path: String) -> void:
+	var key := Vector2i(schema_id, peer_id)
+	if _server_entities.has(key) or _pending_auth_spawns.has(key):
+		return
+	server_entity_spawn_requested.emit(schema_id, peer_id, scene_path, peer_id)
+
+
+func _spawn_peer_proxy(schema_id: int, peer_id: int, scene_path: String) -> void:
+	var key := Vector2i(schema_id, peer_id)
+	if _client_entities.has(key) or _pending_proxy_spawns.has(key):
+		return
+	client_entity_spawn_requested.emit(schema_id, peer_id, scene_path, peer_id)
+
+
+func _auto_instantiate_auth(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int) -> void:
+	if not _entity_scene_config.has(schema_id):
+		return
+	_instantiate_for_role(_entity_scene_config[schema_id].parent,
+			schema_id, entity_id, scene_path, owner_peer_id, true)
+
+
+func _auto_instantiate_proxy(schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int) -> void:
+	if not _entity_scene_config.has(schema_id):
+		return
+	_instantiate_for_role(_entity_scene_config[schema_id].parent,
+			schema_id, entity_id, scene_path, owner_peer_id, false)
+
+
+func _instantiate_for_role(parent: Node, schema_id: int, entity_id: int, scene_path: String, owner_peer_id: int, is_auth: bool) -> void:
+	var key := Vector2i(schema_id, entity_id)
+	# Pending markers also guard the same-frame spawn_entity-then-loopback race
+	# (server emits server_entity_spawn_requested locally and the SPAWN_TOPIC
+	# loopback hits client_entity_spawn_requested; those go to separate auto-
+	# instantiate handlers so the per-side dict guards each independently).
+	var pending: Dictionary = _pending_auth_spawns if is_auth else _pending_proxy_spawns
+	var registry: Dictionary = _server_entities if is_auth else _client_entities
+	if registry.has(key) or pending.has(key):
+		return
+	pending[key] = true
+	var scene: PackedScene = load(scene_path) as PackedScene
+	if scene == null:
+		pending.erase(key)
+		push_error("[NetReplication] failed to load scene %s" % scene_path)
+		return
+	var instance: Node = scene.instantiate()
+	# Disambiguate auth vs proxy siblings in listen mode. Single-mode runs only
+	# spawn one side so name collisions wouldn't happen anyway.
+	instance.name = "E_%d_%d_%s" % [schema_id, entity_id, "auth" if is_auth else "proxy"]
+	var pred: NetPredictor = instance.get_node_or_null("NetPredictor") as NetPredictor
+	if pred == null:
+		push_error("[NetReplication] scene %s has no NetPredictor child — cannot wire" % scene_path)
+		instance.queue_free()
+		return
+	pred.entity_id = entity_id
+	pred.owner_id = owner_peer_id if owner_peer_id >= 0 else entity_id
+	pred.is_authoritative_instance = is_auth
+	# Convention: hosts with a `_owner_id` script var read it before NetPredictor
+	# registers (PlayerController does in _enter_tree). Fill it in alongside the
+	# predictor fields so scripts don't have to subscribe to entity_registered
+	# just to get their owner id.
+	if "_owner_id" in instance:
+		instance._owner_id = pred.owner_id
+	parent.call_deferred("add_child", instance)
+
+
+func _despawn_peer_entity(schema_id: int, peer_id: int) -> void:
+	_despawn_pair(schema_id, peer_id)
+
+
+func _despawn_pair(schema_id: int, entity_id: int) -> void:
+	var key := Vector2i(schema_id, entity_id)
+	if _server_entities.has(key):
+		var s = _server_entities[key]
+		if is_instance_valid(s) and is_instance_valid(s.host):
+			if s.host.has_method(&"despawn"):
+				s.host.despawn()
+			s.host.queue_free()
+	if _client_entities.has(key):
+		var c = _client_entities[key]
+		if is_instance_valid(c) and is_instance_valid(c.host):
+			if c.host.has_method(&"despawn"):
+				c.host.despawn()
+			c.host.queue_free()
+
+
+func _despawn_all_for_schema(schema_id: int) -> void:
+	for key in _server_entities.keys():
+		if key.x == schema_id:
+			_despawn_pair(schema_id, key.y)
+	for key in _client_entities.keys():
+		if key.x == schema_id:
+			_despawn_pair(schema_id, key.y)
+
+
+# Query helper: useful for entity_registered handlers that need to know which
+# side just registered without re-checking dicts by hand.
+func is_predictor_authoritative(schema_id: int, entity_id: int) -> bool:
+	return _server_entities.has(Vector2i(schema_id, entity_id))
