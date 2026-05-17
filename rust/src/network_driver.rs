@@ -18,6 +18,7 @@ use std::{
 };
 
 const DEFAULT_IP_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
+const LOOPBACK_IP_ADDRESS: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const DEFAULT_PORT: i64 = 45876;
 const PLAYER_COUNT: u8 = 100;
 const MAX_MESSAGES_PER_POLL: usize = 256;
@@ -136,8 +137,6 @@ impl NetworkDriver {
     fn on_client_packet(packet: Gd<Object>);
 
     fn _start_server(&mut self, ip_address: IpAddr, port: i64) {
-        self.is_server = true;
-
         // Setup debugging to log everything.
         // Use function pointer to safely queue messages from GNS thread
         self.gns_global.utils().enable_debug_output(
@@ -153,7 +152,8 @@ impl NetworkDriver {
             })
             .ok();
 
-        self.is_connected = true;
+        self.is_server = self.server.is_some();
+        self.is_connected = self.server.is_some() || self.client.is_some();
     }
 
     #[func]
@@ -176,8 +176,6 @@ impl NetworkDriver {
     }
 
     fn _start_client(&mut self, ip_address: IpAddr, port: i64) {
-        self.is_server = false;
-
         // Setup debugging using function pointer to safely queue messages from GNS thread
         self.gns_global.utils().enable_debug_output(
             ESteamNetworkingSocketsDebugOutputType::k_ESteamNetworkingSocketsDebugOutputType_None,
@@ -188,7 +186,10 @@ impl NetworkDriver {
             .connect(ip_address, port.try_into().unwrap())
             .ok();
 
-        self.is_connected = true;
+        // is_server stays whatever it was — listen mode keeps it true after the
+        // server side already started; pure client mode leaves it false.
+        self.is_server = self.server.is_some();
+        self.is_connected = self.server.is_some() || self.client.is_some();
     }
 
     #[func]
@@ -211,28 +212,65 @@ impl NetworkDriver {
         self._start_client(DEFAULT_IP_ADDRESS, DEFAULT_PORT);
     }
 
+    /// Listen-server boot: binds a server on 127.0.0.1:port then connects a
+    /// client to it in the same process. Same codec / encryption / reliable
+    /// path as remote play; near-zero latency. Both sockets coexist after this
+    /// call — `has_server()` and `has_client()` both report true.
+    #[func]
+    fn start_listen(&mut self, port: i64) {
+        self._start_server(LOOPBACK_IP_ADDRESS, port);
+        self._start_client(LOOPBACK_IP_ADDRESS, port);
+    }
+
+    #[func]
+    fn start_listen_default(&mut self) {
+        self.start_listen(DEFAULT_PORT);
+    }
+
+    /// True when this process holds a live server socket (dedicated or listen).
+    #[func]
+    fn has_server(&self) -> bool {
+        self.server.is_some()
+    }
+
+    /// True when this process holds a live client socket (pure client or listen).
+    #[func]
+    fn has_client(&self) -> bool {
+        self.client.is_some()
+    }
+
     #[func]
     fn disconnect_client(&mut self) {
         self.client = None;
-        self.is_connected = false;
+        self.is_connected = self.server.is_some();
         self.signals().on_disconnect_from_server().emit(1000);
     }
 
     #[func]
     fn destroy_server(&mut self) {
         self.server = None;
-        self.is_connected = false;
+        self.is_server = false;
+        self.is_connected = self.client.is_some();
+    }
+
+    /// Tear down both halves of a listen-server (or whichever halves are
+    /// active). Client first so its on_disconnect signal still observes the
+    /// server as up if any GDScript handler queries; then server.
+    #[func]
+    fn shutdown_all(&mut self) {
+        if self.client.is_some() {
+            self.disconnect_client();
+        }
+        if self.server.is_some() {
+            self.destroy_server();
+        }
     }
 
     fn _send_packet(&self, packet: &Packet) {
-        if self.is_server {
-            return;
-        }
-
-        let client = self.client.as_ref().unwrap_or_else(|| {
-            godot_print!("ERROR: Client not initialized");
-            panic!("Client socket not initialized");
-        });
+        let client = match self.client.as_ref() {
+            Some(c) => c,
+            None => return,
+        };
 
         client.send_messages(vec![self.gns_global.utils().allocate_message(
             client.connection(),
@@ -251,14 +289,10 @@ impl NetworkDriver {
     }
 
     fn _broadcast_packet(&self, packet: &Packet) {
-        if !self.is_server {
-            return;
-        }
-
-        let server = self.server.as_ref().unwrap_or_else(|| {
-            godot_print!("ERROR: Server not initialized");
-            panic!("Server socket not initialized");
-        });
+        let server = match self.server.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
 
         let messages = self
             .connected_clients
@@ -287,14 +321,10 @@ impl NetworkDriver {
     }
 
     fn _send_packet_to_peer(&self, peer_id: u8, packet: &Packet) {
-        if !self.is_server {
-            return;
-        }
-
-        let server = self.server.as_ref().unwrap_or_else(|| {
-            godot_print!("ERROR: Server not initialized");
-            panic!("Server socket not initialized");
-        });
+        let server = match self.server.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
 
         // Phase 11: targeted send used by interest management. Linear scan of
         // connected_clients to find the matching connection. PLAYER_COUNT=100
@@ -353,9 +383,12 @@ impl NetworkDriver {
             return;
         }
 
-        if self.is_server {
+        // Listen-server: both halves coexist; poll each independently. Pure
+        // server or pure client modes have exactly one side active.
+        if self.server.is_some() {
             self.handle_server_events();
-        } else {
+        }
+        if self.client.is_some() {
             self.handle_client_events();
         }
     }

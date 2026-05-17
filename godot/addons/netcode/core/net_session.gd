@@ -1,5 +1,11 @@
 extends NetworkDriver
 
+# Role discrimination — derived from which Rust sockets are open. In listen
+# mode both halves coexist; queries against process-level role pick the right
+# accessor and entity-level role lives on NetPredictor.is_authoritative_instance.
+enum Mode { CLIENT_ONLY, DEDICATED_SERVER, LISTEN_SERVER }
+
+
 # CLI overrides for per-instance lag/loss/jitter simulation.
 #
 # Usage: pass args after `--` when launching Godot, or set per-instance
@@ -249,6 +255,31 @@ func _apply_load_testing_preset(preset: LoadTestingPreset) -> void:
 var is_dedicated_server: bool:
 	get: return "--server" in OS.get_cmdline_user_args() or DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")
 
+# True when launched as a single-process listen-server (CLI `--listen` or via
+# the "Play Solo" menu button). Distinct from `is_dedicated_server` (headless,
+# no client) and from pure client mode.
+var is_listen_mode_requested: bool:
+	get: return "--listen" in OS.get_cmdline_user_args()
+
+# Role surface — use these instead of reading `is_server` directly. In listen
+# mode both halves are true; the backward-compat `is_server` alias still
+# returns true (server side is dominant), and entity-level role goes on
+# NetPredictor.is_authoritative_instance.
+var has_server_role: bool:
+	get: return has_server()
+
+var has_client_role: bool:
+	get: return has_client()
+
+var mode: Mode:
+	get:
+		if has_server_role and has_client_role:
+			return Mode.LISTEN_SERVER
+		elif has_server_role:
+			return Mode.DEDICATED_SERVER
+		else:
+			return Mode.CLIENT_ONLY
+
 # Test runner sets NETCODE_TEST_MODE=1 so headless startup doesn't bind the
 # server port; tests instantiate their own minimal scaffolding.
 var is_test_mode: bool:
@@ -267,6 +298,16 @@ func _ready() -> void:
 	# CLI overrides run last so per-instance flags can override either the
 	# scene defaults or a preset that was applied above.
 	_apply_cli_lag_overrides()
+
+
+# Listen-server boot: spins up both server + client sockets on 127.0.0.1 in
+# the same process. Callers (Play Solo menu button, map scene _ready) invoke
+# this once spawners are subscribed to NetReplication signals, so spawn
+# packets that fire during the loopback handshake reach the right handlers.
+func start_listen_mode(port: int = 45876) -> void:
+	print("[NetSession] starting listen mode on 127.0.0.1:%d" % port)
+	start_listen(port)
+	_reapply_fake_state()
 
 
 # Pushes every fake_* value through its property setter (which proxies into
@@ -367,7 +408,4 @@ static func _parse_kv(arg: String) -> Dictionary:
 
 func _notification(what):
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		if is_server:
-			destroy_server()
-		else:
-			disconnect_client()
+		shutdown_all()
