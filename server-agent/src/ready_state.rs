@@ -107,24 +107,53 @@ fn write_state(
     bucket: &str,
     state: &State,
 ) -> Result<()> {
-    // Simple media upload: POST body is the object bytes; no multipart.
-    // Cache-Control: no-cache stops Cloud Run / CDN edges from serving a
-    // stale object to wake-fn, which would defeat the freshness check.
+    // Multipart upload so we can set the object's *metadata* cacheControl —
+    // setting it as a request header (prior approach) only affected the
+    // upload PUT's cache behaviour, not the object's. The bucket grants
+    // allUsers objectViewer, so GCS defaults the object's cacheControl to
+    // `public, max-age=3600` and the GFE happily serves wake-fn a 30+ min
+    // stale generation, defeating the whole freshness check. With
+    // metadata.cacheControl = no-cache the CDN won't cache anywhere.
     let url = format!(
-        "https://storage.googleapis.com/upload/storage/v1/b/{}/o?uploadType=media&name={}",
-        bucket, STATE_OBJECT
+        "https://storage.googleapis.com/upload/storage/v1/b/{}/o?uploadType=multipart",
+        bucket
     );
-    let body = serde_json::to_vec(state).context("serialize state")?;
+    let body_json = serde_json::to_vec(state).context("serialize state")?;
+    let metadata = serde_json::json!({
+        "name": STATE_OBJECT,
+        "cacheControl": "no-cache, no-store, max-age=0",
+        "contentType": "application/json",
+    });
+    let boundary = "br-server-state-boundary";
+    let mut multipart: Vec<u8> = Vec::with_capacity(body_json.len() + 512);
+    use std::io::Write as _;
+    write!(
+        &mut multipart,
+        "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
+    )
+    .unwrap();
+    multipart.extend_from_slice(&serde_json::to_vec(&metadata).unwrap());
+    write!(
+        &mut multipart,
+        "\r\n--{boundary}\r\nContent-Type: application/json\r\n\r\n"
+    )
+    .unwrap();
+    multipart.extend_from_slice(&body_json);
+    write!(&mut multipart, "\r\n--{boundary}--\r\n").unwrap();
     let resp = client
         .post(&url)
         .bearer_auth(token.value())
-        .header("Content-Type", "application/json")
-        .header("Cache-Control", "no-cache, no-store, max-age=0")
-        .body(body)
+        .header(
+            "Content-Type",
+            format!("multipart/related; boundary={boundary}"),
+        )
+        .body(multipart)
         .send()
-        .context("storage.objects.insert")?;
+        .context("storage.objects.insert (multipart)")?;
     if !resp.status().is_success() {
-        anyhow::bail!("storage.objects.insert returned {}", resp.status());
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        anyhow::bail!("storage.objects.insert returned {status}: {body}");
     }
     Ok(())
 }

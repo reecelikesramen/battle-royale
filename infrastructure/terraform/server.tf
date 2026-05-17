@@ -110,8 +110,13 @@ resource "google_compute_firewall" "game_server_ssh" {
 
 # ─── Instance ─────────────────────────────────────────────────────────────────
 resource "google_compute_instance" "game_server" {
-  name         = "battle-royale-server"
-  machine_type = "e2-small"
+  name = "battle-royale-server"
+  # e2-medium (4 GB RAM) over e2-small (2 GB): the launcher's `zstd
+  # --patch-from --long=27` step keeps the 1.2 GB pck source in memory plus
+  # a 128 MB window, peak ~1.4 GB. On e2-small that pushed past the limit
+  # and the systemd ExecStartPre loop-OOMed during v0.1.15 → v0.1.16. ~$15/mo
+  # delta vs avoiding the full-download fallback every release.
+  machine_type = "e2-medium"
   zone         = local.server_zone
   tags         = ["game-server"]
 

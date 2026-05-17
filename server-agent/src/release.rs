@@ -1,139 +1,93 @@
 use anyhow::{Context, Result};
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as B64;
 use serde::Deserialize;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
-use crate::metadata::{AccessToken, Metadata};
-
-const SUBSCRIPTION: &str = "battle-royale-server-release";
+const POLL_INTERVAL_S: u64 = 60;
 const ADMIN_LOCALHOST_PORT: u16 = 45877;
 const DRAIN_SECS: u32 = 30;
+const VERSION_FILE: &str = "/opt/battle-royale/VERSION.txt";
 
-/// Long-poll the release pub/sub subscription. On message: tell the local
-/// game to drain + quit, ack the message, then return to the caller (who
-/// loops). systemd respawns the game; the new process pulls the latest
-/// version via refresh.sh.
-pub fn watch_loop(
-    client: &reqwest::blocking::Client,
-    md: &Metadata,
-    token: &mut AccessToken,
-) -> Result<()> {
+/// Manifest poller: replaces the prior Pub/Sub subscriber. The synchronous-pull
+/// API silently returned Ok(None) on the server-agent's threads even when
+/// messages were sitting in the subscription (~10 min of debugging confirmed:
+/// manual long-polls from the same VM with the same SA *did* receive
+/// messages; the agent's reqwest blocking calls did not). Rather than chase
+/// the StreamingPull gRPC port, we poll versions.json directly — it's already
+/// the source of truth, the client launcher already uses it, signature is
+/// verified at consume time by both client and (now) server.
+///
+/// Trade-off: ~60s polling latency vs Pub/Sub's ~1s push. For "release just
+/// landed, restart the dedicated server", 60s is fine. Also drops Pub/Sub
+/// topic + subscription + IAM binding from terraform (cleanup separate).
+#[derive(Deserialize)]
+struct Manifest {
+    #[serde(default)]
+    latest: String,
+}
+
+pub fn watch_loop(client: &reqwest::blocking::Client, bucket: &str) -> Result<()> {
+    let manifest_url = format!("https://storage.googleapis.com/{bucket}/versions.json");
+    eprintln!(
+        "release-watcher (manifest-poll): url={manifest_url} interval={POLL_INTERVAL_S}s"
+    );
     loop {
-        token.refresh_if_needed(client).ok();
-        match pull_one(client, md, token) {
-            Ok(Some(PullMessage { ack_id, payload })) => {
-                eprintln!("release-watcher: received {payload}");
-                // Ack first so a crash during drain/restart doesn't cause
-                // Pub/Sub to redeliver the same release and trigger a double
-                // restart loop.
-                if let Err(e) = ack(client, md, token, &ack_id) {
-                    eprintln!("release-watcher: ack failed: {e:#}");
-                }
-                if let Err(e) = drain_local_game(&payload, DRAIN_SECS) {
-                    eprintln!("release-watcher: drain RPC failed: {e:#} — forcing restart anyway");
+        match check_once(client, &manifest_url) {
+            Ok(None) => {}
+            Ok(Some(target)) => {
+                eprintln!(
+                    "release-watcher: installed != latest; target={target} — draining"
+                );
+                if let Err(e) = drain_local_game(&target, DRAIN_SECS) {
+                    eprintln!(
+                        "release-watcher: drain RPC failed: {e:#} — forcing restart anyway"
+                    );
                 }
                 std::thread::sleep(Duration::from_secs(u64::from(DRAIN_SECS) + 5));
-                let _ = std::process::Command::new("systemctl")
+                let status = std::process::Command::new("systemctl")
                     .args(["restart", "battle-royale-server.service"])
                     .status();
-            }
-            Ok(None) => {
-                // pull returned no messages within timeout; loop and try again
+                eprintln!("release-watcher: systemctl restart status={status:?}");
+                // Sleep before next check so the freshly-restarted game has
+                // time to install the new version (refresh.sh + launcher
+                // --update-only run via ExecStartPre, can take ~30-90s for
+                // delta apply). Without this, the next poll could re-fire
+                // drain on a still-old VERSION.txt.
+                std::thread::sleep(Duration::from_secs(120));
             }
             Err(e) => {
-                eprintln!("release-watcher: pull error: {e:#}");
-                std::thread::sleep(Duration::from_secs(15));
+                eprintln!("release-watcher: check failed: {e:#}");
             }
         }
+        std::thread::sleep(Duration::from_secs(POLL_INTERVAL_S));
     }
 }
 
-#[derive(Debug)]
-struct PullMessage {
-    ack_id: String,
-    payload: String,
-}
-
-#[derive(Deserialize)]
-struct PullResponse {
-    #[serde(default)]
-    received_messages: Vec<ReceivedMessage>,
-}
-
-#[derive(Deserialize)]
-struct ReceivedMessage {
-    #[serde(rename = "ackId")]
-    ack_id: String,
-    message: PubsubMessage,
-}
-
-#[derive(Deserialize)]
-struct PubsubMessage {
-    #[serde(default)]
-    data: String,
-}
-
-fn pull_one(
-    client: &reqwest::blocking::Client,
-    md: &Metadata,
-    token: &AccessToken,
-) -> Result<Option<PullMessage>> {
-    let url = format!(
-        "https://pubsub.googleapis.com/v1/projects/{}/subscriptions/{}:pull",
-        md.project_id, SUBSCRIPTION
-    );
+fn check_once(client: &reqwest::blocking::Client, url: &str) -> Result<Option<String>> {
     let resp = client
-        .post(&url)
-        .bearer_auth(token.value())
-        .json(&serde_json::json!({"maxMessages": 1, "returnImmediately": false}))
-        .timeout(Duration::from_secs(40))
+        .get(url)
+        .timeout(Duration::from_secs(15))
         .send()
-        .context("pubsub.pull")?;
+        .context("GET manifest")?;
     if !resp.status().is_success() {
-        anyhow::bail!("pull returned {}", resp.status());
+        anyhow::bail!("manifest GET returned {}", resp.status());
     }
-    let body: PullResponse = resp.json().context("parse pull response")?;
-    let Some(rm) = body.received_messages.into_iter().next() else {
-        return Ok(None);
-    };
-    let payload_bytes = B64
-        .decode(rm.message.data.as_bytes())
-        .context("decode pubsub message data (base64)")?;
-    let payload = String::from_utf8(payload_bytes).context("message data not utf-8")?;
-    Ok(Some(PullMessage {
-        ack_id: rm.ack_id,
-        payload,
-    }))
+    let manifest: Manifest = resp.json().context("parse manifest JSON")?;
+    if manifest.latest.is_empty() {
+        anyhow::bail!("manifest missing `latest`");
+    }
+    let installed = std::fs::read_to_string(VERSION_FILE)
+        .with_context(|| format!("read {VERSION_FILE}"))?
+        .trim()
+        .to_string();
+    if installed == manifest.latest {
+        Ok(None)
+    } else {
+        Ok(Some(manifest.latest))
+    }
 }
 
-fn ack(
-    client: &reqwest::blocking::Client,
-    md: &Metadata,
-    token: &AccessToken,
-    ack_id: &str,
-) -> Result<()> {
-    let url = format!(
-        "https://pubsub.googleapis.com/v1/projects/{}/subscriptions/{}:acknowledge",
-        md.project_id, SUBSCRIPTION
-    );
-    let resp = client
-        .post(&url)
-        .bearer_auth(token.value())
-        .json(&serde_json::json!({"ackIds": [ack_id]}))
-        .send()
-        .context("pubsub.ack")?;
-    if !resp.status().is_success() {
-        anyhow::bail!("ack returned {}", resp.status());
-    }
-    Ok(())
-}
-
-/// Open a TCP connection to the in-process AdminListener on localhost and
-/// ask the game to drain players and quit cleanly. Errors are propagated;
-/// the caller decides whether to force restart anyway.
 fn drain_local_game(target_version: &str, drain_secs: u32) -> Result<()> {
     let payload = serde_json::json!({
         "cmd": "shutdown_for_update",
@@ -151,4 +105,3 @@ fn drain_local_game(target_version: &str, drain_secs: u32) -> Result<()> {
     let _ = sock.read(&mut ack_buf);
     Ok(())
 }
-

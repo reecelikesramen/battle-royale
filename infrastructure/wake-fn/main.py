@@ -12,6 +12,7 @@ went green ~5s after wake even though the game needed 30-60s more to bind.
 """
 
 import json
+import logging
 import os
 import time
 
@@ -19,6 +20,9 @@ import functions_framework
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
 from googleapiclient import discovery
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("wake")
 
 PROJECT_ID = os.environ["PROJECT_ID"]
 INSTANCE_NAME = os.environ.get("INSTANCE_NAME", "battle-royale-server")
@@ -38,25 +42,62 @@ def _fetch_ready_state(session):
     `ready` is False if the state object is missing, malformed, stale, or the
     agent reported the game isn't bound. `stale` distinguishes "agent just
     hasn't reported yet" from "agent reported not-ready" for debugging.
+
+    Every failure path logs explicitly so Cloud Logging shows *why* the wake
+    button stays yellow — the previous bare `except Exception: return stale`
+    silently swallowed permission errors / parse failures, which left us
+    chasing the symptom (state_stale=true with healthy GCS object) for hours.
     """
     if not STATE_BUCKET:
+        log.warning("_fetch_ready_state: STATE_BUCKET env unset")
         return (False, "", "", True)
-    url = f"https://storage.googleapis.com/storage/v1/b/{STATE_BUCKET}/o/{STATE_OBJECT}?alt=media"
+    # Cache-bust query string + Cache-Control request header. GCS sets
+    # objects in public buckets to `cache-control: public, max-age=3600` by
+    # default — the JSON API and GFE happily serve a 30+ min stale object
+    # even though server-agent writes every 15s. The query string defeats
+    # any URL-keyed CDN entry; the header asks any well-behaved intermediate
+    # to revalidate. Proper fix is in server-agent (set the object's own
+    # cacheControl metadata to no-cache via multipart upload) — this layer
+    # makes wake-fn correct in the meantime and is harmless after that lands.
+    url = (
+        f"https://storage.googleapis.com/storage/v1/b/"
+        f"{STATE_BUCKET}/o/{STATE_OBJECT}?alt=media&_t={int(time.time())}"
+    )
     try:
-        resp = session.get(url, timeout=5)
-    except Exception:
+        resp = session.get(
+            url,
+            timeout=5,
+            headers={"Cache-Control": "no-cache, no-store, max-age=0"},
+        )
+    except Exception as e:
+        log.exception("_fetch_ready_state: GCS GET raised: %s", e)
         return (False, "", "", True)
     if resp.status_code != 200:
-        # 404 = agent hasn't written yet (fresh VM or first deploy).
+        # 404 = agent hasn't written yet. 401/403 = SA permission drift.
+        # 5xx = GCS hiccup. Log the body so the cause is in the journal.
+        body_snippet = resp.text[:300] if resp.text else "<empty>"
+        log.warning(
+            "_fetch_ready_state: GCS GET %s returned %s body=%r",
+            url, resp.status_code, body_snippet,
+        )
         return (False, "", "", True)
     try:
         data = resp.json()
-    except Exception:
+    except Exception as e:
+        log.exception(
+            "_fetch_ready_state: JSON parse failed: %s body=%r",
+            e, resp.text[:300],
+        )
         return (False, "", "", True)
     ts = int(data.get("ts", 0))
     age = int(time.time()) - ts
     stale = age > STATE_FRESH_SECS
     ready = bool(data.get("ready", False)) and not stale
+    if stale:
+        log.info(
+            "_fetch_ready_state: stale heartbeat age=%ss > %ss",
+            age, STATE_FRESH_SECS,
+        )
     return (ready, data.get("version", ""), data.get("sha", ""), stale)
 
 

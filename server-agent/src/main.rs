@@ -40,19 +40,23 @@ fn main() -> Result<()> {
         .build()?;
     let mut token = metadata::AccessToken::default();
 
-    // Spawn the release watcher on its own thread; the idle loop runs in main.
-    {
-        let md = metadata::Metadata::fetch().context("metadata for release watcher")?;
-        std::thread::spawn(move || {
-            let client = reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(60))
-                .build()
-                .expect("build http client");
-            let mut token = metadata::AccessToken::default();
-            if let Err(e) = release::watch_loop(&client, &md, &mut token) {
-                eprintln!("release-watcher exited: {e:#}");
-            }
-        });
+    // Spawn the release watcher: polls versions.json every 60s, triggers drain
+    // + systemd restart on installed != latest. Used to be a Pub/Sub
+    // subscriber but synchronous-pull on reqwest blocking turned out to
+    // silently miss messages (see release.rs preamble).
+    match std::env::var("BUCKET") {
+        Ok(bucket) if !bucket.is_empty() => {
+            std::thread::spawn(move || {
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .build()
+                    .expect("build http client");
+                if let Err(e) = release::watch_loop(&client, &bucket) {
+                    eprintln!("release-watcher exited: {e:#}");
+                }
+            });
+        }
+        _ => eprintln!("release-watcher: BUCKET env unset; not polling manifest"),
     }
 
     // Spawn the ready-state thread. It pings the game over the loopback
