@@ -230,9 +230,34 @@ fn apply_updates(
     // Self-update last. We can't overwrite the running launcher binary, so we
     // download to <launcher>.new and hand off to the launcher-updater
     // bootstrap, which waits for us to exit, swaps the file, and relaunches.
-    // --update-only callers (the dedicated-server systemd unit) opt out
-    // because the relaunch would race systemd's own ExecStart.
+    //
+    // --update-only callers (the dedicated-server systemd unit) opt out of
+    // that relaunch because it would race systemd's own ExecStart. But we
+    // still need to *install* a new launcher binary, otherwise the server
+    // gets stuck on an old version that doesn't recognise newer flags and
+    // the next boot fails ExecStartPre in a hard loop. On Linux a running
+    // ELF can be replaced via fs::rename safely: the kernel keeps the
+    // running process's inode open and the new file gets a fresh inode, so
+    // the swap is invisible to the in-flight launcher and picked up on the
+    // next systemd cycle.
     if opts.skip_launcher_self_update {
+        #[cfg(unix)]
+        {
+            if let Some(launcher_component) = target_plat.launcher.as_ref() {
+                let path = install.join(launcher_exe_name());
+                let _ = tx.send(UpdateMessage::Status(
+                    "Updating launcher (in-place, no relaunch)...".into(),
+                ));
+                updater::install_component(
+                    client,
+                    launcher_component,
+                    &path,
+                    &current,
+                    |_| {},
+                )?;
+                ensure_executable(&path)?;
+            }
+        }
         return Ok(());
     }
     if let Some(launcher_component) = target_plat.launcher.as_ref() {

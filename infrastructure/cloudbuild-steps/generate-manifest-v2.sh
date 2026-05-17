@@ -52,10 +52,6 @@ windows|rust_lib|rust-libs/{tag}/rust.dll|rust.dll
 windows|pck_base|releases/{tag}/windows-base.pck|battle-royale.pck
 linux|launcher|launcher/{tag}/linux/launcher|launcher
 linux|launcher_updater|launcher/{tag}/linux/launcher-updater|launcher-updater
-# Linux's game_binary points at the standalone binary (not the full linux.zip
-# that windows/mac entries reference) so the dedicated-server VM can apply
-# atomic per-file updates via launcher --update-only — no 1+ GB zip extract
-# in systemd's ExecStartPre window. See cloudbuild.yaml's zip-builds step.
 linux|game_binary|releases/{tag}/linux-battle-royale.x86_64|battle-royale.x86_64
 linux|rust_lib|rust-libs/{tag}/librust.so|librust.so
 linux|pck_base|releases/{tag}/linux-base.pck|battle-royale.pck
@@ -143,6 +139,10 @@ jq_input=$(echo "$jq_input" | jq --arg tag "$tag" --arg rel "$released_at" \
 
 while IFS='|' read -r platform component path_tpl installed_name; do
   [[ -z "$platform" ]] && continue
+  # Defensive: skip stray comment lines inside the heredoc above. Without
+  # this, a `# explainer` line gets `read` into $platform with empty
+  # $path_tpl, and get_blob_info "" trips a `bad array subscript`.
+  [[ "$platform" == \#* ]] && continue
   full_path=${path_tpl//\{tag\}/$tag}
   # installed_name may legitimately contain {tag} for future components — leave
   # the substitution in place so a literal "{tag}" never leaks into the

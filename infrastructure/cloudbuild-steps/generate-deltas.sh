@@ -95,12 +95,14 @@ make_delta prev/mac/launcher                launchers/mac/launcher ${out_root}/m
 make_delta prev/mac/launcher-updater        launchers/mac/launcher-updater ${out_root}/mac/launcher_updater.zpatch
 
 # pck_base deltas — the dominant payload (1+GB each). Previous bases come from
-# download-previous-pcks at previous-pcks/{platform}-base.pck. Per-tag patch
-# is applied by the launcher via apply_zstd_patch before spawning the game,
-# so the user only downloads the diff (typically tens of MB).
-make_delta previous-pcks/windows-base.pck build/windows/windows-base.pck ${out_root}/windows/pck_base.zpatch
-make_delta previous-pcks/linux-base.pck   build/linux/linux-base.pck     ${out_root}/linux/pck_base.zpatch
-make_delta previous-pcks/mac-base.pck     build/mac/mac-base.pck         ${out_root}/mac/pck_base.zpatch
+# download-previous-pcks at previous-pcks/{platform}-base.pck. The current
+# bases live in release/ at this point (zip-builds has already mv'd them out
+# of build/{platform}/), so we read from there. Per-tag patch is applied by
+# the launcher via apply_zstd_patch before spawning the game, so the user
+# only downloads the diff (typically tens of MB).
+make_delta previous-pcks/windows-base.pck release/windows-base.pck ${out_root}/windows/pck_base.zpatch
+make_delta previous-pcks/linux-base.pck   release/linux-base.pck   ${out_root}/linux/pck_base.zpatch
+make_delta previous-pcks/mac-base.pck     release/mac-base.pck     ${out_root}/mac/pck_base.zpatch
 
 # Upload all deltas.
 if compgen -G "deltas/${_TAG_NAME}/*/*.zpatch" > /dev/null; then
