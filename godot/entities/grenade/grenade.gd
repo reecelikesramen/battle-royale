@@ -46,6 +46,14 @@ func _ready() -> void:
 		freeze = true
 		freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 		_shape.disabled = true
+	elif NetSession.has_server_role and NetSession.has_client_role:
+		# Listen mode: this auth grenade has a proxy sibling under ClientGrenades
+		# at (nearly) the same world pose. Both rendering would show two grenades
+		# per throw and two explosions per detonation. Hide the auth's visuals —
+		# physics stays driven by the RigidBody3D shape, which is shape-resource-
+		# based and unaffected by Node3D.visible. Mirrors dedicated-server mode
+		# where the headless server has no rendering at all.
+		visible = false
 
 
 # Server hook: NetPredictor (archetype=REPLICATED) calls this once per gated
@@ -100,6 +108,18 @@ func _capture_state(state: GrenadeState, dt: float) -> void:
 # on state, LERP on scalars), and hands it here. All this method does is
 # push fields onto the scene.
 func _proxy_apply(blended: GrenadeState, _from_state: NetState, _to_state: NetState, _delta: float) -> void:
+	# Free as soon as either side of the buffer pair says the grenade is DONE.
+	# blended.state via DISCRETE only flips to `to` at alpha >= 0.5; if `to` is
+	# null (buffer drained, auth side already queue_freed and no future
+	# snapshots are coming) DISCRETE falls back to `from`. Without this gate
+	# the proxy can get stuck rendering its last EXPLODING frame forever — the
+	# shared explosion material's alpha is the only thing keeping it invisible,
+	# and a subsequent grenade's fade animation re-shows every stuck proxy at
+	# its original world position. Belt-and-suspenders: check from_state too so
+	# we free even before the blender mid-crosses to DONE.
+	if _from_state != null and (_from_state as GrenadeState).state == STATE_DONE:
+		queue_free()
+		return
 	global_position = blended.pos
 	global_basis = Basis(blended.rotation_quat)
 	_render_visuals(blended)
