@@ -28,14 +28,8 @@ func is_crouching() -> bool:
 func is_crouch_just_pressed() -> bool:
 	return input_packet.crouch and not prev_input_packet.crouch
 
-func is_jumping() -> bool:
-	return input_packet.jump
-
 func is_jump_just_pressed() -> bool:
 	return input_packet.jump and not prev_input_packet.jump
-
-func is_prone() -> bool:
-	return input_packet.prone
 
 func is_prone_just_pressed() -> bool:
 	return input_packet.prone and not prev_input_packet.prone
@@ -46,14 +40,5 @@ func is_peeking_left() -> bool:
 func is_peeking_right() -> bool:
 	return input_packet.peek_left_right > 0
 
-func is_shooting() -> bool:
-	return input_packet.shoot
-
 func is_shoot_just_pressed() -> bool:
 	return input_packet.shoot and not prev_input_packet.shoot
-
-func is_scoping() -> bool:
-	return input_packet.scope
-
-func is_scope_just_pressed() -> bool:
-	return input_packet.scope and not prev_input_packet.scope
