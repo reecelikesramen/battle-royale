@@ -55,6 +55,10 @@ linux|launcher_updater|launcher/{tag}/linux/launcher-updater|launcher-updater
 linux|game_binary|releases/{tag}/linux-battle-royale.x86_64|battle-royale.x86_64
 linux|rust_lib|rust-libs/{tag}/librust.so|librust.so
 linux|pck_base|releases/{tag}/linux-base.pck|battle-royale.pck
+linux-server|launcher|launcher/{tag}/linux/launcher|launcher
+linux-server|launcher_updater|launcher/{tag}/linux/launcher-updater|launcher-updater
+linux-server|game_binary|releases/{tag}/linux-server-battle-royale.x86_64|battle-royale.x86_64
+linux-server|rust_lib|rust-libs/{tag}/librust.so|librust.so
 mac|launcher|launcher/{tag}/mac/launcher|launcher
 mac|launcher_updater|launcher/{tag}/mac/launcher-updater|launcher-updater
 mac|game_binary|releases/{tag}/mac.zip|battle-royale

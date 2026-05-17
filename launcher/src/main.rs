@@ -16,8 +16,15 @@ fn main() -> anyhow::Result<()> {
     // Used by the dedicated-server systemd unit as ExecStartPre so the same
     // launcher binary that handles client updates also drives server updates
     // (delta + sig verify + atomic swap), and systemd owns the game lifecycle.
-    if std::env::args().any(|a| a == "--update-only") {
-        return run_update_only();
+    //
+    // --server (only meaningful alongside --update-only on Linux): pull the
+    // dedicated-server manifest entry (`linux-server`), which ships an
+    // embedded-pck binary and no separate pck_base. Avoids the OOM-prone
+    // 1.2 GB client pck on the server.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--update-only") {
+        let server_variant = args.iter().any(|a| a == "--server");
+        return run_update_only(server_variant);
     }
 
     #[cfg(feature = "gui")]
@@ -34,7 +41,7 @@ fn main() -> anyhow::Result<()> {
 /// needed). Exits non-zero on manifest fetch / signature / download failure
 /// so systemd surfaces the failure instead of starting the game on a
 /// half-installed bundle.
-fn run_update_only() -> anyhow::Result<()> {
+fn run_update_only(server_variant: bool) -> anyhow::Result<()> {
     let client = update_flow::http_client()?;
     let manifest = update_flow::fetch_manifest(&client)?;
     if update_flow::is_up_to_date(&manifest) {
@@ -45,6 +52,7 @@ fn run_update_only() -> anyhow::Result<()> {
     let worker_tx = tx.clone();
     let opts = update_flow::RunOpts {
         skip_launcher_self_update: true,
+        server_variant,
     };
     let handle = thread::spawn(move || update_flow::run_with_opts(worker_tx, manifest, opts));
     while let Ok(msg) = rx.recv() {

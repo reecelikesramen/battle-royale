@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 #
 # Runs as the first ExecStartPre for the game server. Bootstrap-only:
-# downloads + unpacks linux.zip with manifest signature verification when
-# the game binary is missing (fresh VM, blown install dir, etc.). On a
-# healthy install, short-circuits to no-op — the second ExecStartPre
-# (launcher --update-only) does incremental delta updates.
+# downloads + unpacks linux-server.zip with manifest signature verification
+# when the game binary is missing (fresh VM, blown install dir, etc.). On
+# a healthy install, short-circuits to no-op — the second ExecStartPre
+# (launcher --update-only --server) does incremental delta updates.
 #
-# This split exists because unpacking the full 1+ GB linux.zip on an
-# e2-small can exceed the systemd start-pre timeout, and we only need to
-# pay that cost once per VM lifetime. After bootstrap, per-release updates
-# are tiny zstd zpatches applied in-place by the launcher.
+# linux-server.zip carries the stripped dedicated-server build (embedded
+# pck, textures/audio stripped) at ~50-150 MB — vastly faster + less
+# memory-hungry to install than the 1+ GB client linux.zip we used to
+# pull here, which trapped the server in OOM-kill loops on the pck delta
+# apply path. The client variant is still produced and uploaded under
+# `releases/{tag}/linux.zip` for actual clients.
 
 set -euo pipefail
 
@@ -56,17 +58,19 @@ fi
 latest=$(jq -r '.latest' "$MANIFEST_FILE")
 echo "refresh.sh: bootstrapping $latest"
 
-# Pull the linux release zip and unpack everything. The zip carries the
-# full file set the launcher needs on disk (pck_base, rust_lib, launcher,
-# launcher-updater, game binary). After this, the launcher's --update-only
-# pass owns incremental updates.
-URL="https://storage.googleapis.com/${BUCKET}/releases/${latest}/linux.zip"
+# Pull the dedicated-server release zip and unpack everything. The zip
+# carries the embedded-pck server binary, rust_lib, launcher,
+# launcher-updater, build-sha.txt, VERSION.txt — no separate pck file,
+# because the server binary embeds the stripped pck. After this, the
+# launcher's `--update-only --server` pass owns incremental updates
+# against the `linux-server` manifest platform entry.
+URL="https://storage.googleapis.com/${BUCKET}/releases/${latest}/linux-server.zip"
 STAGING=$(mktemp -d); trap 'rm -rf "$STAGING" "$PUB_PEM" "$MANIFEST_FILE" /tmp/manifest.sig' EXIT
-curl -fsSL "$URL" -o "$STAGING/linux.zip"
+curl -fsSL "$URL" -o "$STAGING/linux-server.zip"
 
-unzip -qo "$STAGING/linux.zip" -d "$STAGING"
-# The zip contains `linux/{battle-royale.x86_64, *.pck, *.so, launcher, ...}`.
-install -m 0755 -D -t "$INSTALL" "$STAGING"/linux/*
+unzip -qo "$STAGING/linux-server.zip" -d "$STAGING"
+# The zip contains `linux-server/{battle-royale.x86_64, librust.so, launcher, ...}`.
+install -m 0755 -D -t "$INSTALL" "$STAGING"/linux-server/*
 echo "$latest" > "$INSTALL/VERSION.txt"
 chown -R gameserver:gameserver "$INSTALL"
 echo "refresh.sh: bootstrap complete (installed $latest)"

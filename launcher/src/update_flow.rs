@@ -83,6 +83,13 @@ pub fn is_up_to_date(manifest: &Manifest) -> bool {
 #[derive(Clone, Copy, Default)]
 pub struct RunOpts {
     pub skip_launcher_self_update: bool,
+    /// On Linux, select the stripped-pck dedicated-server platform entry
+    /// (`linux-server`) instead of the full client `linux` entry. systemd
+    /// passes `--server` to the launcher on the dedicated VM so server-side
+    /// updates pull the embedded-pck binary and skip the (huge, OOM-prone)
+    /// client pck_base path. No-op on Windows/macOS — there is no
+    /// server variant for those platforms.
+    pub server_variant: bool,
 }
 
 /// Worker entry: run the full update path against a pre-fetched manifest and
@@ -120,7 +127,7 @@ fn apply_updates(
     tx: &Sender<UpdateMessage>,
     opts: RunOpts,
 ) -> Result<()> {
-    let plat_key = platform_key();
+    let plat_key = platform_key(opts.server_variant);
     let install = install_dir()?;
     let current = installed_version(&install);
     let target_plat: &PlatformEntry = manifest::target_platform(manifest, plat_key)?;

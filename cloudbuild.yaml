@@ -175,6 +175,25 @@ steps:
 
         ls -la ../build/linux/
 
+  # ============ EXPORT LINUX DEDICATED SERVER (STRIPPED) ============
+  # Preset 5 in export_presets.cfg — `dedicated_server=true`,
+  # `customized_files={"res://":"strip"}`, `binary_format/embed_pck=true`.
+  # Produces a single self-contained ELF with the stripped pck embedded
+  # (textures/audio/visual meshes replaced with placeholders). Output is
+  # ~50-150 MB vs. the 1.3 GB client bundle — avoids the OOM-kill loop
+  # the server hit applying client pck zpatches under `--patch-from`.
+  - name: 'barichello/godot-ci:${_GODOT_VERSION}'
+    id: 'export-linux-server'
+    entrypoint: bash
+    env: ['HOME=/root']
+    args:
+      - -c
+      - |
+        mkdir -p build/linux-server
+        cd ${_PROJECT_PATH}
+        godot --headless --export-release "Linux Dedicated Server" ../build/linux-server/${_EXPORT_NAME}.x86_64 || true
+        ls -la ../build/linux-server/
+
   # ============ EXPORT MACOS ============
   - name: 'barichello/godot-ci:${_GODOT_VERSION}'
     id: 'export-mac'
@@ -315,6 +334,24 @@ steps:
         # prior tag's binary) rather than re-downloading a 1+ GB linux.zip on
         # every release. Client builds keep using the zip for cold install.
         cp build/linux/${_EXPORT_NAME}.x86_64 release/linux-battle-royale.x86_64 2>/dev/null || true
+
+        # Linux-server bundle (stripped pck embedded in the binary; no
+        # separate pck file). 50-150 MB self-contained ELF + the launcher
+        # chain + rust lib. Bootstrap zip mirrors linux.zip layout so
+        # refresh.sh can `unzip -o` it the same way. The standalone .x86_64
+        # is what manifest's `game_binary` for `linux-server` points at;
+        # generate-deltas builds its zpatch against the prior tag's.
+        if [ -f "build/linux-server/${_EXPORT_NAME}.x86_64" ]; then
+          cp launchers/linux/launcher               build/linux-server/launcher
+          cp launchers/linux/launcher-updater       build/linux-server/launcher-updater
+          chmod +x build/linux-server/launcher build/linux-server/launcher-updater
+          cp ${_PROJECT_PATH}/addons/rust/bin/librust.so build/linux-server/librust.so 2>/dev/null || true
+          cp infrastructure/cloudbuild-steps/linux-launcher.desktop build/linux-server/Battle\ Royale.desktop 2>/dev/null || true
+          cp BUILD_SHA build/linux-server/build-sha.txt
+          echo -n "${_TAG_NAME}" > build/linux-server/VERSION.txt
+          (cd build && zip -r ../release/linux-server.zip linux-server)
+          cp build/linux-server/${_EXPORT_NAME}.x86_64 release/linux-server-battle-royale.x86_64
+        fi
 
         # Mac: rewrap Godot's exported .app so the launcher is the entry point.
         # Double-click of Battle Royale.app then opens the launcher UI directly

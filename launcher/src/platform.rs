@@ -2,12 +2,15 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 /// String used in the manifest's `platforms` map. Mirrors `init.gd`'s
-/// `get_os_prefix()` so existing GCS layout works unchanged.
-pub fn platform_key() -> &'static str {
+/// `get_os_prefix()` so existing GCS layout works unchanged. When
+/// `server_variant` is true and we're on Linux, returns "linux-server" —
+/// the dedicated-server preset's manifest entry, which ships an
+/// embedded-pck binary and no `pck_base` component.
+pub fn platform_key(server_variant: bool) -> &'static str {
     if cfg!(target_os = "windows") {
         "windows"
     } else if cfg!(target_os = "linux") {
-        "linux"
+        if server_variant { "linux-server" } else { "linux" }
     } else if cfg!(target_os = "macos") {
         "mac"
     } else {

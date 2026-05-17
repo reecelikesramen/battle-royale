@@ -31,12 +31,13 @@ if [[ -z "$prev_tag" ]]; then
 fi
 
 echo "Generating deltas: $prev_tag -> ${_TAG_NAME}"
-mkdir -p prev/{windows,linux,mac} deltas
+mkdir -p prev/{windows,linux,linux-server,mac} deltas
 
 # Download the previous release's full builds.
-gsutil -q cp "gs://${_BUCKET}/releases/${prev_tag}/windows.zip" prev/windows.zip || true
-gsutil -q cp "gs://${_BUCKET}/releases/${prev_tag}/linux.zip"   prev/linux.zip   || true
-gsutil -q cp "gs://${_BUCKET}/releases/${prev_tag}/mac.zip"     prev/mac.zip     || true
+gsutil -q cp "gs://${_BUCKET}/releases/${prev_tag}/windows.zip"      prev/windows.zip      || true
+gsutil -q cp "gs://${_BUCKET}/releases/${prev_tag}/linux.zip"        prev/linux.zip        || true
+gsutil -q cp "gs://${_BUCKET}/releases/${prev_tag}/linux-server.zip" prev/linux-server.zip || true
+gsutil -q cp "gs://${_BUCKET}/releases/${prev_tag}/mac.zip"          prev/mac.zip          || true
 gsutil -q cp "gs://${_BUCKET}/rust-libs/${prev_tag}/librust.so"   prev/linux/librust.so   || true
 gsutil -q cp "gs://${_BUCKET}/rust-libs/${prev_tag}/librust.dylib" prev/mac/librust.dylib || true
 gsutil -q cp "gs://${_BUCKET}/rust-libs/${prev_tag}/rust.dll"     prev/windows/rust.dll   || true
@@ -48,7 +49,7 @@ gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/mac/launcher-updater"        
 gsutil -q cp "gs://${_BUCKET}/launcher/${prev_tag}/windows/launcher-updater.exe" prev/windows/launcher-updater.exe || true
 
 # Unpack the prev zips so we can grab the game binaries.
-for plat in windows linux; do
+for plat in windows linux linux-server; do
   if [[ -f "prev/$plat.zip" ]]; then
     (cd prev && unzip -q -o "$plat.zip")
   fi
@@ -91,6 +92,12 @@ make_delta prev/linux/${_EXPORT_NAME}.x86_64 build/linux/${_EXPORT_NAME}.x86_64 
 make_delta prev/linux/librust.so             ${_PROJECT_PATH:-godot}/addons/rust/bin/librust.so ${out_root}/linux/rust_lib.zpatch
 make_delta prev/linux/launcher               launchers/linux/launcher ${out_root}/linux/launcher.zpatch
 make_delta prev/linux/launcher-updater       launchers/linux/launcher-updater ${out_root}/linux/launcher_updater.zpatch
+
+# Linux dedicated server. Embedded-pck single-binary build — only the
+# `game_binary` component changes between releases; `rust_lib` /
+# `launcher` / `launcher_updater` reuse the client linux entries in the
+# manifest (same bytes), and there is no `pck_base` to delta.
+make_delta prev/linux-server/${_EXPORT_NAME}.x86_64 build/linux-server/${_EXPORT_NAME}.x86_64 ${out_root}/linux-server/game_binary.zpatch
 
 # macOS. The game binary lives inside the .app bundle.
 NEW_MAC_BIN="build/mac/${_PROJECT_NAME}.app/Contents/MacOS/${_PROJECT_NAME}"
