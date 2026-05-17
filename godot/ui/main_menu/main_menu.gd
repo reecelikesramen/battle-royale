@@ -12,6 +12,9 @@ var _wake_probe_http: HTTPRequest
 var _wake_action_http: HTTPRequest
 var _wake_probe_timer: Timer
 var _wake_in_progress := false
+# Tracks the most recent state pushed into _set_wake_button_state so the press
+# handler can decide whether to wake the VM or connect to the live server.
+var _wake_state := "offline"
 
 func _enter_tree() -> void:
 	# Listen for id-assignment, not raw GNS connect. on_connect_to_server fires
@@ -115,12 +118,14 @@ func _on_wake_probe_completed(_result: int, response_code: int, _headers: Packed
 
 # `state` ∈ {"offline", "starting", "running"}.
 func _set_wake_button_state(state: String, text: String) -> void:
+	_wake_state = state
 	%WakeButton.text = text
 	match state:
 		"running":
-			# Disabled-but-coloured: user can't click (no work to do), but the
-			# green tint communicates "server is up and connect will work".
-			%WakeButton.disabled = true
+			# Click becomes a one-tap join to the playtest server — no need to
+			# scroll up and retype the host into the IP field. _on_wake_button_pressed
+			# branches on _wake_state to decide between wake-POST and connect.
+			%WakeButton.disabled = false
 			%WakeButton.modulate = SERVER_ONLINE_COLOR
 		"starting":
 			%WakeButton.disabled = true
@@ -131,6 +136,12 @@ func _set_wake_button_state(state: String, text: String) -> void:
 
 
 func _on_wake_button_pressed() -> void:
+	# Green / "running" state: the VM is up AND the game has bound UDP, so the
+	# button doubles as a "join" shortcut. Skips needing to type the playtest
+	# host into the IP field.
+	if _wake_state == "running":
+		_connect_to_playtest_server()
+		return
 	if _wake_in_progress:
 		return
 	_wake_in_progress = true
@@ -242,7 +253,7 @@ func _on_connect_button_pressed() -> void:
 	if NetSession.is_dedicated_server:
 		push_error("Server tried to connect")
 		return
-		
+
 	var ip_address = %IPAddressEdit.text if !%IPAddressEdit.text.is_empty() else Constants.DEFAULT_SERVER_HOST
 	var port = int(%PortEdit.text) if !%PortEdit.text.is_empty() else Constants.DEFAULT_SERVER_PORT
 
@@ -252,6 +263,25 @@ func _on_connect_button_pressed() -> void:
 		print("Client started")
 	else:
 		push_error("Client tried to connect twice")
+
+
+# Shortcut used by the WakeButton when it's green/"running". Same connect path
+# as _on_connect_button_pressed but always targets the playtest host —
+# the typed-in IP/port fields are ignored.
+func _connect_to_playtest_server() -> void:
+	if NetSession.is_dedicated_server:
+		push_error("Server tried to connect")
+		return
+	if NetSession.is_connected:
+		push_error("Client tried to connect twice")
+		return
+	var username: String = %UsernameEdit.text
+	if username.is_empty():
+		push_error("Username required before joining")
+		return
+	NetSession.start_client(Constants.DEFAULT_SERVER_HOST, Constants.DEFAULT_SERVER_PORT)
+	NetClient.username = username
+	print("Joining playtest server as %s" % username)
 
 
 func _on_local_id_assigned(_id: int) -> void:
