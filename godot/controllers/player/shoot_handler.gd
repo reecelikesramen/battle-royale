@@ -348,14 +348,14 @@ func _on_shot_fired(payload: PackedByteArray) -> void:
 	# shooter doesn't see their own tracer in their face.
 	if shooter_id == NetClient.id and NetClient.player != null:
 		if SHOOT_LOG:
-			# End-to-end trigger-to-tracer delay. Reads the rising-edge stamp
-			# saved by PlayerController._gather_command. -1 if no edge tracked
-			# yet (continuous-hold tracers between edges still print, just with
-			# a stale delta — first one after a press is the meaningful number).
-			var edge_us: int = (NetClient.player as PlayerController)._shoot_local_edge_us
+			# Trigger-to-first-tracer delay. Read+clear so auto-fire's later
+			# tracers don't print a stale, monotonically-growing delta.
+			var pc := NetClient.player as PlayerController
+			var edge_us: int = pc._shoot_local_edge_us
 			if edge_us > 0:
 				var delta_ms: int = (Time.get_ticks_usec() - edge_us) / 1000
 				print("[SHOOT-RENDER local delta_ms=%d]" % delta_ms)
+				pc._shoot_local_edge_us = -1
 		var cam: Camera3D = NetClient.player.get_node_or_null("CameraController/Camera3D")
 		if cam != null:
 			var delta: Vector3 = cam.global_position - o
