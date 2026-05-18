@@ -237,6 +237,10 @@ func _on_wake_action_completed(_result: int, response_code: int, _headers: Packe
 # or pass via the CLI: `godot --path godot/ -- --autojoin` to bypass the menu.
 func _maybe_autoconnect() -> void:
 	var args := OS.get_cmdline_user_args()
+	# --quality-preset=low|balanced|high|auto pins SettingsStore for headless
+	# CI runs (or scripted playability tests). Applied before any connect so
+	# the first reconcile event uses the requested multipliers.
+	_apply_cli_quality_preset(args)
 	# --listen is a CLI shortcut for headless / autotest entry into solo
 	# listen-server mode. Equivalent to pressing the Play Solo button.
 	if args.find("--listen") != -1:
@@ -360,3 +364,24 @@ func set_disconnected_message() -> void:
 		%DisconnectedLabel.visible = true
 	else:
 		%DisconnectedLabel.visible = false
+
+
+# `--quality-preset=low|balanced|high|auto` override. Used by CI / headless
+# scripted playability tests. Persisted via the standard path so subsequent
+# runs without the flag remember the choice.
+func _apply_cli_quality_preset(args: PackedStringArray) -> void:
+	const PREFIX := "--quality-preset="
+	for a in args:
+		if not a.begins_with(PREFIX):
+			continue
+		var v: String = a.substr(PREFIX.length()).to_lower()
+		var preset: int = -1
+		match v:
+			"low": preset = SettingsStore.QualityPreset.LOW
+			"balanced": preset = SettingsStore.QualityPreset.BALANCED
+			"high": preset = SettingsStore.QualityPreset.HIGH
+			"auto": preset = SettingsStore.QualityPreset.AUTO
+		if preset >= 0:
+			SettingsStore.set_quality_preset(preset)
+			print("[SETTINGS] quality preset overridden by CLI → %s" % v)
+		return

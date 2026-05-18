@@ -133,6 +133,10 @@ text = "Graphics"
 layout_mode = 2
 text = "Audio"
 
+[node name="NetworkSettingsButton" type="Button" parent="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Network"
+
 [node name="ContentPanel" type="PanelContainer" parent="VBoxContainer/OptionsAreaHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
@@ -161,3 +165,4 @@ size_flags_horizontal = 3
 [connection signal="pressed" from="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer/DisplaySettingsButton" to="." method="_on_display_settings_button_pressed"]
 [connection signal="pressed" from="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer/GraphicsSettingsButton" to="." method="_on_graphics_settings_button_pressed"]
 [connection signal="pressed" from="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer/AudioSettingsButton" to="." method="_on_audio_settings_button_pressed"]
+[connection signal="pressed" from="VBoxContainer/OptionsAreaHBox/PanelContainer/MarginContainer/VBoxContainer/NetworkSettingsButton" to="." method="_on_network_settings_button_pressed"]

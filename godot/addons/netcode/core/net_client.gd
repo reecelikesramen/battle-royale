@@ -15,6 +15,24 @@ var debug
 var remote_ids: Array[int]
 var _disconnected_message: String = ""
 
+# Network Quality AUTO mode: samples NetSession.client_ping into an EMA, then
+# every AUTO_SAMPLE_PERIOD_S seconds picks LOW/BALANCED/HIGH based on the
+# bucketed value. Hysteresis prevents flap around bucket boundaries.
+# Only runs when SettingsStore.current_preset == AUTO; manual user picks
+# (escape-menu / main-menu UI) bypass this loop entirely.
+const AUTO_SAMPLE_PERIOD_S: float = 5.0
+const AUTO_SETTLE_INITIAL_S: float = 2.0
+const AUTO_PING_EMA_ALPHA: float = 0.1
+const AUTO_LOW_THRESHOLD_MS: int = 40
+const AUTO_HIGH_THRESHOLD_MS: int = 100
+const AUTO_HYSTERESIS_MS: int = 10
+
+var ping_ema_ms: float = 80.0
+var _auto_sample_accum_s: float = 0.0
+var _auto_active: bool = false
+var _auto_last_bucket: int = -1  # -1 = no decision yet this connection
+
+
 func _ready() -> void:
 	NetSession.on_client_packet.connect(on_client_packet)
 	NetSession.on_disconnect_from_server.connect(on_disconnect_from_server)
@@ -201,5 +219,69 @@ enum DisconnectReason {
 	MISC_TIMEOUT = 5003,
 	MISC_STEAM_CONNECTIVITY = 5005,
 	MISC_NO_RELAY_SESSIONS_TO_CLIENT = 5006,
-	MISC_PEER_SENT_NO_CONNECTION = 5010,	
+	MISC_PEER_SENT_NO_CONNECTION = 5010,
 }
+
+
+# Drives AUTO Network Quality mode. EMA-smoothes the GNS-measured ping, then
+# every AUTO_SAMPLE_PERIOD_S seconds picks a bucket and tells SettingsStore.
+# Hysteresis keeps borderline pings from flapping the preset back and forth.
+# No-op unless SettingsStore.current_preset == AUTO.
+func _process(delta: float) -> void:
+	if id < 0:
+		# Not connected — reset accumulator so first AUTO_SETTLE_INITIAL_S
+		# after reconnect lets the EMA stabilize before we pick.
+		ping_ema_ms = 80.0
+		_auto_sample_accum_s = 0.0
+		_auto_last_bucket = -1
+		_auto_active = false
+		return
+	if SettingsStore == null:
+		return
+	if SettingsStore.current_preset != SettingsStore.QualityPreset.AUTO:
+		_auto_last_bucket = -1
+		return
+	var raw_ping: int = NetSession.client_ping
+	if raw_ping > 0:
+		ping_ema_ms = lerp(ping_ema_ms, float(raw_ping), AUTO_PING_EMA_ALPHA)
+	_auto_sample_accum_s += delta
+	var settle_threshold: float = AUTO_SAMPLE_PERIOD_S if _auto_active else AUTO_SETTLE_INITIAL_S
+	if _auto_sample_accum_s < settle_threshold:
+		return
+	_auto_sample_accum_s = 0.0
+	_auto_active = true
+	var picked: int = _pick_quality_bucket(ping_ema_ms, _auto_last_bucket)
+	if picked != _auto_last_bucket:
+		_auto_last_bucket = picked
+		SettingsStore.apply_auto_preset(picked)
+
+
+# Hysteresis: from BALANCED, switch to LOW only when ema < 30ms; switch to
+# HIGH only when ema > 110ms. From LOW/HIGH, switch back when ema returns
+# above/below the +hys / -hys edge of the inflated bucket. First-call picks
+# directly from raw thresholds (no current bucket to widen).
+func _pick_quality_bucket(ema_ms: float, current: int) -> int:
+	var QP := SettingsStore.QualityPreset
+	var lo: float = AUTO_LOW_THRESHOLD_MS
+	var hi: float = AUTO_HIGH_THRESHOLD_MS
+	var hys: float = AUTO_HYSTERESIS_MS
+	match current:
+		QP.LOW:
+			if ema_ms > lo + hys:
+				return QP.BALANCED if ema_ms <= hi else QP.HIGH
+			return QP.LOW
+		QP.BALANCED:
+			if ema_ms < lo - hys:
+				return QP.LOW
+			if ema_ms > hi + hys:
+				return QP.HIGH
+			return QP.BALANCED
+		QP.HIGH:
+			if ema_ms < hi - hys:
+				return QP.LOW if ema_ms < lo else QP.BALANCED
+			return QP.HIGH
+	if ema_ms < lo:
+		return QP.LOW
+	if ema_ms > hi:
+		return QP.HIGH
+	return QP.BALANCED

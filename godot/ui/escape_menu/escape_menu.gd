@@ -116,6 +116,10 @@ func _on_audio_settings_button_pressed() -> void:
 	_show_coming_soon("Audio")
 
 
+func _on_network_settings_button_pressed() -> void:
+	_show_network_settings()
+
+
 func _clear_content() -> void:
 	for child in _content_vbox.get_children():
 		child.queue_free()
@@ -242,3 +246,87 @@ func _reset_action(action_name: StringName, btn: Button) -> void:
 	for event in default.get("events", []):
 		InputMap.action_add_event(action_name, event)
 	btn.text = _get_action_binding_string(action_name)
+
+
+# Network Quality preset picker. Lets the user trade visual accuracy for input
+# feel on bad networks (or the reverse for low-ping). AUTO defers to
+# NetClient's ping sampler. Anti-cheat note (also documented on SettingsStore):
+# this is client-local presentation. Server policy reads nothing from here.
+const _QUALITY_DESCRIPTIONS: Dictionary = {
+	0: "LOW — tightest reconcile. For local / wired connections under 40ms.",
+	1: "BALANCED — default. Sized for typical wifi (40-100ms).",
+	2: "HIGH — smoothest reconcile. For bad networks (>100ms). Your avatar may appear slightly behind where you actually are; aim is unaffected.",
+	3: "AUTO — measures your ping and picks LOW/BALANCED/HIGH automatically.",
+}
+
+
+func _show_network_settings() -> void:
+	_cancel_rebind()
+	_clear_content()
+	var header := Label.new()
+	header.text = "Network Quality"
+	header.add_theme_font_size_override("font_size", 18)
+	_content_vbox.add_child(header)
+	# Live ping readout — updates each _process tick via the timer below.
+	var ping_lbl := Label.new()
+	ping_lbl.name = "PingReadout"
+	ping_lbl.text = _format_ping_readout()
+	ping_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	_content_vbox.add_child(ping_lbl)
+	# Drive label refresh while menu is open. 0.5s cadence is plenty — value
+	# is EMA-smoothed anyway, won't jitter visibly.
+	var timer := Timer.new()
+	timer.wait_time = 0.5
+	timer.autostart = true
+	timer.timeout.connect(func():
+		if is_instance_valid(ping_lbl):
+			ping_lbl.text = _format_ping_readout())
+	_content_vbox.add_child(timer)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 8)
+	_content_vbox.add_child(spacer)
+	for preset_id in [
+			SettingsStore.QualityPreset.AUTO,
+			SettingsStore.QualityPreset.LOW,
+			SettingsStore.QualityPreset.BALANCED,
+			SettingsStore.QualityPreset.HIGH]:
+		_content_vbox.add_child(_build_quality_row(preset_id))
+
+
+func _build_quality_row(preset_id: int) -> VBoxContainer:
+	var row := VBoxContainer.new()
+	row.add_theme_constant_override("separation", 2)
+	var btn := Button.new()
+	var label_text: String = SettingsStore._preset_name(preset_id)
+	if SettingsStore.current_preset == preset_id:
+		label_text += "  ✓"
+	btn.text = label_text
+	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	btn.pressed.connect(func(): _on_quality_picked(preset_id))
+	row.add_child(btn)
+	var desc := Label.new()
+	desc.text = _QUALITY_DESCRIPTIONS.get(preset_id, "")
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.add_theme_font_size_override("font_size", 12)
+	desc.add_theme_color_override("font_color", Color(0.55, 0.55, 0.55))
+	row.add_child(desc)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 6)
+	row.add_child(spacer)
+	return row
+
+
+func _on_quality_picked(preset_id: int) -> void:
+	SettingsStore.set_quality_preset(preset_id)
+	# Re-render so the checkmark moves to the newly selected row.
+	_show_network_settings()
+
+
+func _format_ping_readout() -> String:
+	var ping: int = roundi(NetClient.ping_ema_ms)
+	if NetClient.id < 0:
+		return "Current RTT: — (not connected)"
+	var effective_name: String = SettingsStore._preset_name(SettingsStore.effective_preset)
+	if SettingsStore.current_preset == SettingsStore.QualityPreset.AUTO:
+		return "Current RTT: %d ms — AUTO → %s" % [ping, effective_name]
+	return "Current RTT: %d ms — applying %s" % [ping, effective_name]
