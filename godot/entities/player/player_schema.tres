@@ -38,7 +38,7 @@ metadata/_custom_type_script = "uid://cft1cl0nousye"
 script = ExtResource("3_x5rij")
 name = &"horizontal"
 fields = PackedStringArray("pos.xz")
-snap_threshold = 1.5
+snap_threshold = 3.0
 deadband = 0.07
 mode = 1
 

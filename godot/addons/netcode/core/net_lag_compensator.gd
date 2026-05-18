@@ -11,7 +11,16 @@ class_name NetLagCompensator extends RefCounted
 # scene graph (e.g. CharacterBody3D.position) for collision queries. Entities
 # not participating in lag-comp can ignore the signal.
 
-const DEFAULT_MAX_REWIND_TICKS: int = NetPredictor.HISTORY_TICK_CAPACITY
+# Decoupled from NetPredictor.HISTORY_TICK_CAPACITY on purpose: history is sized
+# for the worst-case legitimate `current_tick - last_received_tick` age under
+# mobile RTT + jitter + reorder (~500ms p99 for mobile-average preset). The
+# anti-cheat clamp is sized for that same legitimate worst case PLUS a small
+# headroom, NOT the full history depth. If history grows for memory reasons,
+# the clamp does not — otherwise a cheat can quote an ancient tick and rewind
+# world state to where targets used to be visible. 60 ticks @ 120Hz = 500ms;
+# CS:GO uses 200ms (`sv_maxunlag`) on lower-latency networks, we widen for
+# mobile but bound the cheat surface.
+const DEFAULT_MAX_REWIND_TICKS: int = 60
 
 # Anti-cheat clamp: max distance into the past a single rewind may target,
 # measured in server ticks. A malicious client quoting an ancient tick (e.g.

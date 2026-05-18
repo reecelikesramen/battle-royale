@@ -650,10 +650,19 @@ var _peer_baselines: Dictionary = {}
 
 # Phase 10: server-side historical state ring for lag-comp rewind. Keyed by
 # the server tick the snapshot was authoritative at. Bounded so memory stays
-# flat (32 entries @ 120Hz physics = 266ms rewind window). LagCompensator
+# flat (128 entries @ 120Hz physics = 1067ms rewind window). LagCompensator
 # (later commit) reads from this when verifying client-perspective hit
 # detection: rewind to client_tick, run intersect, restore.
-const HISTORY_TICK_CAPACITY: int = 32
+# Window sized for mobile RTT + jitter + reorder: 200ms RTT + 60ms jitter spread
+# + 110ms reorder ≈ 370ms worst-case age of `last_received_tick` at consumption;
+# bufferbloat preset can hit ~500ms. 1067ms gives headroom for real WAN networks
+# beyond the load-testing presets without ballooning memory (NetState dup × 128
+# per entity = negligible).
+# NOTE: history depth is decoupled from anti-cheat rewind clamp. See
+# NetLagCompensator.DEFAULT_MAX_REWIND_TICKS — that bounds how far a *single
+# rewind request* may target, regardless of how much history exists. Memory may
+# grow without widening the cheat surface.
+const HISTORY_TICK_CAPACITY: int = 128
 var _history_states: Dictionary = {}   # int (tick) -> NetState (duplicate)
 var _history_ticks: Array[int] = []    # insertion order, used for FIFO prune
 
