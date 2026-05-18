@@ -215,6 +215,15 @@ func _send_grenade_throw() -> void:
 	var fwd := -camera.global_basis.z
 	var origin := camera.global_position + fwd * 0.3
 	var velocity := fwd * THROW_POWER
+	# Predict locally: spawn a ghost grenade with the same initial conditions so
+	# the user sees the parabola start this frame instead of one RTT from now.
+	# The server's real grenade arrives via NetState and replaces the ghost's
+	# visuals on its first _proxy_apply (via GrenadeSpawner.try_match_ghost).
+	# Server still owns damage; ghost has none.
+	if GrenadeSpawner.instance != null:
+		GrenadeSpawner.instance.spawn_local_ghost(origin, velocity)
+		if SHOOT_DEBUG:
+			print("[GRENADE-LOCAL t=%d origin=%v vel=%v]" % [Time.get_ticks_usec(), origin, velocity])
 	var sp := StreamPeerBuffer.new()
 	sp.put_float(origin.x); sp.put_float(origin.y); sp.put_float(origin.z)
 	sp.put_float(velocity.x); sp.put_float(velocity.y); sp.put_float(velocity.z)

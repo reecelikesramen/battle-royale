@@ -1,0 +1,53 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://entities/grenade/ghost_grenade.gd" id="1_ghost"]
+
+[sub_resource type="StandardMaterial3D" id="BodyMat"]
+albedo_color = Color(0.18, 0.18, 0.18, 1)
+roughness = 0.6
+metallic = 0.4
+
+[sub_resource type="SphereMesh" id="BodyMesh"]
+material = SubResource("BodyMat")
+radius = 0.08
+height = 0.16
+
+[sub_resource type="SphereShape3D" id="BodyShape"]
+radius = 0.08
+
+[sub_resource type="PhysicsMaterial" id="GrenadePhysMat"]
+friction = 0.5
+bounce = 0.45
+
+[sub_resource type="StandardMaterial3D" id="ExplosionMat"]
+resource_local_to_scene = true
+transparency = 1
+albedo_color = Color(1.0, 0.55, 0.1, 1)
+emission_enabled = true
+emission = Color(1.0, 0.5, 0.05, 1)
+emission_energy_multiplier = 4.0
+
+[sub_resource type="SphereMesh" id="ExplosionMesh"]
+material = SubResource("ExplosionMat")
+radius = 1.0
+height = 2.0
+
+[node name="GhostGrenade" type="RigidBody3D"]
+collision_layer = 2
+collision_mask = 1
+mass = 0.4
+physics_material_override = SubResource("GrenadePhysMat")
+continuous_cd = true
+contact_monitor = false
+script = ExtResource("1_ghost")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BodyShape")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+mesh = SubResource("BodyMesh")
+
+[node name="Explosion" type="MeshInstance3D" parent="."]
+visible = false
+mesh = SubResource("ExplosionMesh")
+material_override = SubResource("ExplosionMat")

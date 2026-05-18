@@ -31,6 +31,10 @@ var _armed_for_thrower: bool = false
 @onready var _body: MeshInstance3D = $Body
 @onready var _explosion: MeshInstance3D = $Explosion
 
+# Client-side: tracks whether we've tried to match this proxy to a local ghost
+# grenade yet. First _proxy_apply attempts the match; subsequent frames skip.
+var _ghost_match_attempted: bool = false
+
 
 func _ready() -> void:
 	if Engine.is_editor_hint():
@@ -100,6 +104,16 @@ func _proxy_apply(blended: GrenadeState, _from_state: NetState, _to_state: NetSt
 	# Stuck-proxy cleanup is now framework-owned: when the auth queue_frees,
 	# NetReplication.unregister_entity cascades to the co-resident proxy so the
 	# buffer never has time to drain to null. This hook just renders.
+	if not _ghost_match_attempted:
+		_ghost_match_attempted = true
+		# Pop the local thrower's matching ghost (if any) so the real grenade's
+		# render takes over without a doubled visual. No-op for proxies whose
+		# corresponding throw came from a remote player.
+		if GrenadeSpawner.instance != null:
+			var matched: GhostGrenade = GrenadeSpawner.instance.try_match_ghost(blended.pos)
+			if matched != null:
+				var delta_ms: int = (Time.get_ticks_usec() - matched.spawn_time_us) / 1000
+				print("[GRENADE-SPAWN-CONFIRM local delta_ms=%d]" % delta_ms)
 	global_position = blended.pos
 	global_basis = Basis(blended.rotation_quat)
 	_render_visuals(blended)
