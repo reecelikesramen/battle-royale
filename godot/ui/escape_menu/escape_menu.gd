@@ -39,6 +39,7 @@ func _ready() -> void:
 	super._ready()
 	add_to_group("escape_menu")
 	get_window().focus_exited.connect(_on_window_focus_lost)
+	get_window().focus_entered.connect(_on_window_focus_gained)
 	$VBoxContainer/OptionsAreaHBox.visible = _options_visible
 
 
@@ -69,6 +70,21 @@ func _on_open() -> void:
 func _on_window_focus_lost() -> void:
 	if not open:
 		open = true
+
+
+# Godot releases MOUSE_MODE_CAPTURED on focus loss and restores it on regain.
+# That restore fights us when escape menu is open (we want VISIBLE) — user sees
+# the menu but with an invisible captured cursor. Re-assert VISIBLE here so the
+# menu's mouse state survives an alt-tab round-trip. Deferred because Godot's
+# internal restore runs after this signal handler.
+func _on_window_focus_gained() -> void:
+	if open and SHOW_MOUSE:
+		call_deferred("_force_visible_cursor")
+
+
+func _force_visible_cursor() -> void:
+	if open and SHOW_MOUSE:
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
 func _on_options_button_pressed() -> void:

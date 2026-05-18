@@ -1,0 +1,63 @@
+import { ProgressIndicator, Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component LauncherWindow inherits Window {
+    title: "Battle Royale Launcher";
+    preferred-width: 520px;
+    preferred-height: 280px;
+    background: #1c1f24;
+
+    in property <string> status-text: "Starting...";
+    in property <float> progress: 0.0;
+    in property <string> error-text: "";
+    in property <bool> launch-enabled: false;
+    in property <bool> show-error: false;
+
+    callback launch();
+    callback retry();
+
+    VerticalBox {
+        padding: 24px;
+        spacing: 16px;
+
+        Text {
+            text: "Battle Royale";
+            font-size: 28px;
+            color: #e6e6e6;
+        }
+
+        Text {
+            text: root.status-text;
+            color: #b0b0b0;
+            font-size: 14px;
+        }
+
+        ProgressIndicator {
+            indeterminate: false;
+            progress: root.progress;
+            min-height: 8px;
+        }
+
+        if root.show-error: Text {
+            text: root.error-text;
+            color: #ff6b6b;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+            alignment: end;
+
+            if root.show-error: Button {
+                text: "Retry";
+                clicked => { root.retry(); }
+            }
+            Button {
+                text: "Launch Game";
+                enabled: root.launch-enabled;
+                primary: true;
+                clicked => { root.launch(); }
+            }
+        }
+    }
+}

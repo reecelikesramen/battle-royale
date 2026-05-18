@@ -12,13 +12,31 @@ on:
         description: 'Tag to build (e.g., v1.0.0)'
         required: true
         type: string
-  # Keep cache warm
-  schedule:
-    - cron: '0 0 * * 0'  # Weekly on Sunday
+
+# Serialize workflow runs that share a commit. A tagged release on `main`
+# triggers TWO runs at the same SHA (one for the branch push, one for the
+# tag push); without this, both rebuild the Rust matrix in parallel instead
+# of the tag run hitting the cache the main run just populated.
+#
+# Push events arrive at GitHub in `git push` order — the branch ref is
+# delivered before the tag ref — so main's workflow registers first, runs
+# first, primes the rust-lib + rust-cache, and the tag run hits cache.
+#
+# `github.sha` is the same for both runs (same commit). For workflow_dispatch
+# where there's no concurrent peer, `run_id` keeps each run isolated.
+# All tag-push builds share one group so they serialize globally — prevents
+# Group by SHA so a `git push main` followed by `git push v0.1.x` (the
+# normal release flow — same commit, two refs) serialises through ONE
+# build queue: the main push warms the cargo cache, the tag push reuses
+# it. With distinct groups they ran in parallel and the tag rebuilt every
+# rust artifact from scratch.
+concurrency:
+  group: build-${{ github.sha }}
+  cancel-in-progress: false
 
 env:
   # ============ PROJECT CONFIG ============
-  GODOT_VERSION: "4.5"
+  GODOT_VERSION: "4.6"
   EXPORT_NAME: battle-royale
   PROJECT_NAME: Battle Royale
   PROJECT_PATH: godot
@@ -28,8 +46,16 @@ env:
   GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
   GCS_BUCKET: ${{ vars.GCS_BUCKET }}
 
+  # Strip upstream-crate debug info from rmeta/rlib intermediates as well as
+  # final artifacts. Pairs with profile.release.debug=false + strip="symbols"
+  # in the workspace Cargo.toml. Roughly halves Windows target/ size.
+  RUSTFLAGS: "-Cdebuginfo=0"
+
 jobs:
   # ============ RUST BUILDS (native runners) ============
+  # Builds two artifacts per platform from the same workspace:
+  #   1. the gdextension cdylib (rust crate)  →  target/release/{librust.*|rust.dll}
+  #   2. the launcher binary    (launcher crate) →  target/release/launcher{.exe}
   build-rust:
     strategy:
       fail-fast: false
@@ -39,54 +65,86 @@ jobs:
             target: aarch64-apple-darwin
             artifact-name: rust-macos
             library-name: librust.dylib
+            launcher-name: launcher
+            updater-name: launcher-updater
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact-name: rust-linux
             library-name: librust.so
+            launcher-name: launcher
+            updater-name: launcher-updater
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact-name: rust-windows
             library-name: rust.dll
+            launcher-name: launcher.exe
+            updater-name: launcher-updater.exe
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           lfs: false
 
-      # Ensure cache path exists for validation
+      # Stage dir lives outside target/ so Swatinem/rust-cache (which prunes
+      # workspace-crate outputs from target/ during its post-save) can't clobber
+      # the cached cdylib before our post-save runs.
       - name: Prepare cache directory
-        run: mkdir -p rust/target/release
+        shell: bash
+        run: mkdir -p prebuilt
 
-      # Check if we have a cached build for this exact source
+      # Cache the gdextension cdylib. Gates on rust/ source hash so unrelated
+      # launcher/server-agent edits don't invalidate the slow C++ build.
       - name: Cache built library
         id: cache-lib
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
-          path: rust/target/release/${{ matrix.library-name }}
-          key: rust-lib-${{ matrix.target }}-${{ hashFiles('rust/src/**', 'rust/Cargo.toml', 'rust/Cargo.lock') }}
+          path: prebuilt/${{ matrix.library-name }}
+          key: rust-lib-${{ matrix.target }}-${{ hashFiles('rust/src/**', 'rust/Cargo.toml', 'Cargo.toml', 'Cargo.lock') }}
 
-      # ===== All steps below only run on cache miss =====
+      # Cache the launcher binary. Source rarely changes between releases,
+      # so a tag bump that only touches game/PCK content can skip the
+      # launcher compile entirely. Key includes Cargo.lock + Cargo.toml so a
+      # dep bump (Slint, reqwest, etc.) invalidates.
+      - name: Cache built launcher
+        id: cache-launcher
+        uses: actions/cache@v5
+        with:
+          path: prebuilt/${{ matrix.launcher-name }}
+          key: launcher-${{ matrix.target }}-${{ hashFiles('launcher/**', 'Cargo.toml', 'Cargo.lock') }}
+
+      - name: Cache built launcher-updater
+        id: cache-updater
+        uses: actions/cache@v5
+        with:
+          path: prebuilt/${{ matrix.updater-name }}
+          key: launcher-updater-${{ matrix.target }}-${{ hashFiles('launcher-updater/**', 'Cargo.toml', 'Cargo.lock') }}
+
+      # ===== Toolchain + deps =====
+      # Skip entirely if every build cache hit AND we don't need to run tests
+      # on this runner. Linux always installs the toolchain because the
+      # launcher regression tests run there unconditionally; Windows/macOS
+      # short-circuit straight to the staging step on a full cache hit.
 
       - name: Setup Rust
-        if: steps.cache-lib.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' || steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust deps
-        if: steps.cache-lib.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' || steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust -> target
+          workspaces: . -> target
           shared-key: ${{ matrix.target }}
           cache-all-crates: true
 
-      # Linux deps
+      # Linux deps (only needed for the gdextension's GNS dep, not the launcher)
       - name: Cache protobuf (Linux)
         if: runner.os == 'Linux' && steps.cache-lib.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/protobuf-install
           key: linux-protobuf-21.12-v3
@@ -111,41 +169,177 @@ jobs:
           fi
           sudo ldconfig
 
-      # macOS deps
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS' && steps.cache-lib.outputs.cache-hit != 'true'
         run: |
           brew install openssl protobuf@21 pkg-config
           brew unlink protobuf@21 && brew link --force protobuf@21
 
-      # Windows
       - name: Enable long paths (Windows)
         if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
         shell: pwsh
         run: git config --global core.longpaths true
 
-      # Build
-      - name: Build Rust release
+      # GNS vendors a large C++ tree built via vcpkg. Caching the buildtrees
+      # cuts cold-build time on Windows from ~40min to ~10min.
+      - name: Cache vcpkg buildtrees (Windows)
+        if: runner.os == 'Windows' && steps.cache-lib.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: C:\vcpkg-buildtrees
+          key: vcpkg-buildtrees-${{ runner.os }}-${{ hashFiles('rust/Cargo.toml', 'Cargo.lock') }}
+          restore-keys: |
+            vcpkg-buildtrees-${{ runner.os }}-
+
+      # sccache wraps both cl.exe (vcpkg C++) AND rustc itself on Windows.
+      # rustc wrap helps the launcher/updater builds when their cache misses
+      # but dep tree is unchanged — caches individual crate compiles instead
+      # of rebuilding the whole slint/reqwest tree from scratch.
+      - name: Setup sccache (Windows)
+        if: runner.os == 'Windows' && (steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true')
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      # Expose GH Actions cache tokens to env so vcpkg's `x-gha` binary-cache
+      # backend can use them. These aren't normally in env for subsequent steps.
+      - name: Export GHA cache env (Windows)
+        if: runner.os == 'Windows' && (steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # GHA cache backend is occasionally down (we hit a 400 from the cache
+      # edge service mid-build). If sccache can't talk to it, the rustc/cl.exe
+      # wrappers exit non-zero and kill the build for no good reason. Probe
+      # once up-front and expose a flag the later steps gate on.
+      - name: Probe sccache (Windows)
+        id: sccache_probe
+        if: runner.os == 'Windows' && (steps.cache-lib.outputs.cache-hit != 'true' || steps.cache-launcher.outputs.cache-hit != 'true' || steps.cache-updater.outputs.cache-hit != 'true')
+        shell: pwsh
+        continue-on-error: true
+        env:
+          SCCACHE_GHA_ENABLED: 'true'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          sccache --start-server 2>&1 | Out-String | Write-Host
+          if ($LASTEXITCODE -eq 0) {
+            "ok=true"  | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Warning "sccache server failed to start (GHA cache likely degraded); building without rustc wrapper."
+            "ok=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - name: Build gdextension (rust crate)
         if: steps.cache-lib.outputs.cache-hit != 'true'
-        working-directory: rust
         env:
           CMAKE_PREFIX_PATH: ${{ runner.os == 'Linux' && '/usr/local' || '' }}
           GNS_VCPKG_BUILDTREES_ROOT: ${{ runner.os == 'Windows' && 'C:\vcpkg-buildtrees' || '' }}
-        run: cargo build --release --target ${{ matrix.target }}
+          # Skip debug build of vcpkg deps (~halves cold C++ time on Windows).
+          VCPKG_DEFAULT_TRIPLET: ${{ runner.os == 'Windows' && 'x64-windows-release' || '' }}
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ runner.os == 'Windows' && 'x64-windows-release' || '' }}
+          # vcpkg binary cache via GitHub Actions cache. After first run, subsequent
+          # builds (even on different commits) re-download prebuilt packages instead
+          # of recompiling — works across PRs, branches, lockfile bumps.
+          VCPKG_BINARY_SOURCES: ${{ runner.os == 'Windows' && 'clear;x-gha,readwrite' || '' }}
+          # Use all available CPU cores for cl.exe (vcpkg respects this).
+          CL: ${{ runner.os == 'Windows' && '/MP' || '' }}
+          # sccache wraps the C/C++ compiler for GNS's vendored build (Windows only;
+          # macOS/Linux protobuf paths are smaller and not worth the overhead).
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'true' || '' }}
+          CMAKE_C_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
+          CMAKE_CXX_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
+          # Wrap rustc with sccache on Windows so upstream-crate compiles get
+          # object-level caching. Linux/macOS are fast enough that the wrap
+          # overhead isn't worth it. Gated on the probe so a GHA cache outage
+          # doesn't kill the build — we'd rather pay the recompile.
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
+        run: cargo build --release --target ${{ matrix.target }} --package rust
 
-      # Copy to expected path for gdextension compatibility
-      - name: Copy library to release dir
-        if: steps.cache-lib.outputs.cache-hit != 'true'
+      - name: Build launcher (launcher crate)
+        if: steps.cache-launcher.outputs.cache-hit != 'true'
+        env:
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'true' || '' }}
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
+        run: cargo build --release --target ${{ matrix.target }} --package launcher
+
+      - name: Build launcher-updater
+        if: steps.cache-updater.outputs.cache-hit != 'true'
+        env:
+          SCCACHE_GHA_ENABLED: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'true' || '' }}
+          RUSTC_WRAPPER: ${{ runner.os == 'Windows' && steps.sccache_probe.outputs.ok == 'true' && 'sccache' || '' }}
+        run: cargo build --release --target ${{ matrix.target }} --package launcher-updater
+
+      - name: Build server-agent (Linux only)
+        if: runner.os == 'Linux'
+        run: cargo build --release --target ${{ matrix.target }} --package server-agent
+
+      # Launcher regression tests gate every PR + every tag against changes
+      # that would silently break the update path (signature verify, manifest
+      # parse, atomic file ops). Linux-only because the logic is portable and
+      # we want to keep Windows/macOS jobs fast.
+      - name: Run launcher tests (Linux only)
+        if: runner.os == 'Linux'
+        run: cargo test --release --target ${{ matrix.target }} --package launcher
+
+      - name: Stage release artifacts
         shell: bash
         run: |
-          mkdir -p rust/target/release
-          cp rust/target/${{ matrix.target }}/release/${{ matrix.library-name }} rust/target/release/
+          mkdir -p target/release prebuilt
+          # Each cacheable binary may be at one of two places:
+          #   1. prebuilt/<name>       (restored from actions/cache on hit)
+          #   2. target/<tgt>/release/ (just produced by cargo on miss)
+          # Promote build output → prebuilt (so post-save persists it), then
+          # copy prebuilt → target/release/ for the upload steps below.
+          # Fail loudly if neither location holds the file.
+          promote() {
+            local name="$1"
+            local built="target/${{ matrix.target }}/release/$name"
+            local cached="prebuilt/$name"
+            if [ -f "$built" ]; then
+              cp "$built" "$cached"
+            elif [ ! -f "$cached" ]; then
+              echo "ERROR: $name missing at both $built and $cached" >&2
+              ls -la "target/${{ matrix.target }}/release/" || true
+              ls -la prebuilt/ || true
+              exit 1
+            fi
+            cp "$cached" "target/release/$name"
+          }
+          promote "${{ matrix.library-name }}"
+          promote "${{ matrix.launcher-name }}"
+          promote "${{ matrix.updater-name }}"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp target/${{ matrix.target }}/release/server-agent target/release/server-agent
+          fi
 
-      # Upload as GitHub artifact (for next job)
-      - uses: actions/upload-artifact@v4
+      - name: Upload server-agent artifact (Linux only)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact-name }}-server-agent
+          path: target/release/server-agent
+          retention-days: 1
+
+      - name: Upload gdextension artifact
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact-name }}
-          path: rust/target/release/${{ matrix.library-name }}
+          path: target/release/${{ matrix.library-name }}
+          retention-days: 1
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact-name }}-launcher
+          path: target/release/${{ matrix.launcher-name }}
+          retention-days: 1
+
+      - name: Upload launcher-updater artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact-name }}-launcher-updater
+          path: target/release/${{ matrix.updater-name }}
           retention-days: 1
 
   # ============ UPLOAD TO GCS & TRIGGER CLOUD BUILD (only on tags) ============
@@ -161,21 +355,21 @@ jobs:
       tag_name: ${{ steps.tag.outputs.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           lfs: true
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       # Download all Rust artifacts
       - name: Download Rust libraries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: rust-libs
 
@@ -195,14 +389,38 @@ jobs:
           gsutil -m cp rust-libs/rust-macos/librust.dylib "gs://$GCS_BUCKET/rust-libs/$TAG_NAME/librust.dylib"
           gsutil -m cp rust-libs/rust-windows/rust.dll "gs://$GCS_BUCKET/rust-libs/$TAG_NAME/rust.dll"
 
+      - name: Upload launcher binaries to GCS
+        run: |
+          TAG_NAME="${{ steps.tag.outputs.name }}"
+          gsutil cp rust-libs/rust-linux-launcher/launcher    "gs://$GCS_BUCKET/launcher/$TAG_NAME/linux/launcher"
+          gsutil cp rust-libs/rust-macos-launcher/launcher    "gs://$GCS_BUCKET/launcher/$TAG_NAME/mac/launcher"
+          gsutil cp rust-libs/rust-windows-launcher/launcher.exe "gs://$GCS_BUCKET/launcher/$TAG_NAME/windows/launcher.exe"
+          gsutil cp rust-libs/rust-linux-launcher-updater/launcher-updater       "gs://$GCS_BUCKET/launcher/$TAG_NAME/linux/launcher-updater"
+          gsutil cp rust-libs/rust-macos-launcher-updater/launcher-updater       "gs://$GCS_BUCKET/launcher/$TAG_NAME/mac/launcher-updater"
+          gsutil cp rust-libs/rust-windows-launcher-updater/launcher-updater.exe "gs://$GCS_BUCKET/launcher/$TAG_NAME/windows/launcher-updater.exe"
+
+      - name: Upload server-agent to GCS
+        run: |
+          TAG_NAME="${{ steps.tag.outputs.name }}"
+          gsutil cp rust-libs/rust-linux-server-agent/server-agent "gs://$GCS_BUCKET/server-agent/$TAG_NAME/server-agent"
+          # Also publish as `latest` for the VM startup script to grab without
+          # needing to read the manifest.
+          gsutil cp rust-libs/rust-linux-server-agent/server-agent "gs://$GCS_BUCKET/server-agent/latest/server-agent"
+
       - name: Trigger Cloud Build
         id: trigger
         run: |
           TAG_NAME="${{ steps.tag.outputs.name }}"
           
+          # _COMMIT_SHA: the GH commit that produced this build. Used as the
+          # cross-platform BUILD_SHA written into build-sha.txt and exchanged
+          # during the connect handshake; same commit = same build = clients
+          # and server handshake-match.
+          COMMIT_SHA="${{ github.sha }}"
+
           BUILD_ID=$(gcloud builds submit \
             --config=cloudbuild.yaml \
-            --substitutions="_TAG_NAME=$TAG_NAME,_BUCKET=$GCS_BUCKET,_EXPORT_NAME=$EXPORT_NAME,_PROJECT_NAME=$PROJECT_NAME,_PROJECT_PATH=$PROJECT_PATH,_GODOT_VERSION=$GODOT_VERSION" \
+            --substitutions="_TAG_NAME=$TAG_NAME,_BUCKET=$GCS_BUCKET,_EXPORT_NAME=$EXPORT_NAME,_PROJECT_NAME=$PROJECT_NAME,_PROJECT_PATH=$PROJECT_PATH,_GODOT_VERSION=$GODOT_VERSION,_COMMIT_SHA=$COMMIT_SHA" \
             --format='value(id)' \
             --async)
           
@@ -220,12 +438,12 @@ jobs:
 
     steps:
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Wait for Cloud Build to complete
         run: |
@@ -261,35 +479,34 @@ jobs:
           # List files in the release
           FILES=$(gsutil ls "gs://$GCS_BUCKET/releases/$TAG_NAME/" | xargs -n1 basename)
           
-          # Build markdown body
+          # Build markdown body. Per-tag pck patches are gone — deltas now
+          # live under gs://$GCS_BUCKET/deltas/$TAG_NAME and are wired into
+          # versions.json automatically, so no need to surface them here.
           BODY="## Downloads
 
-          | Platform | Full Build | Base PCK | Patch |
-          |----------|------------|----------|-------|"
-          
+          | Platform | Full Build | Base PCK |
+          |----------|------------|----------|"
+
           # Windows
-          WIN_FULL=""; WIN_BASE=""; WIN_PATCH=""
+          WIN_FULL=""; WIN_BASE=""
           echo "$FILES" | grep -q "windows.zip" && WIN_FULL="[Download]($BASE_URL/windows.zip)"
           echo "$FILES" | grep -q "windows-base.pck" && WIN_BASE="[Download]($BASE_URL/windows-base.pck)"
-          echo "$FILES" | grep -q "windows-$TAG_NAME.pck" && WIN_PATCH="[Download]($BASE_URL/windows-$TAG_NAME.pck)"
           BODY="$BODY
-          | Windows | $WIN_FULL | $WIN_BASE | $WIN_PATCH |"
-          
+          | Windows | $WIN_FULL | $WIN_BASE |"
+
           # Linux
-          LIN_FULL=""; LIN_BASE=""; LIN_PATCH=""
+          LIN_FULL=""; LIN_BASE=""
           echo "$FILES" | grep -q "linux.zip" && LIN_FULL="[Download]($BASE_URL/linux.zip)"
           echo "$FILES" | grep -q "linux-base.pck" && LIN_BASE="[Download]($BASE_URL/linux-base.pck)"
-          echo "$FILES" | grep -q "linux-$TAG_NAME.pck" && LIN_PATCH="[Download]($BASE_URL/linux-$TAG_NAME.pck)"
           BODY="$BODY
-          | Linux | $LIN_FULL | $LIN_BASE | $LIN_PATCH |"
-          
+          | Linux | $LIN_FULL | $LIN_BASE |"
+
           # Mac
-          MAC_FULL=""; MAC_BASE=""; MAC_PATCH=""
+          MAC_FULL=""; MAC_BASE=""
           echo "$FILES" | grep -q "mac.zip" && MAC_FULL="[Download]($BASE_URL/mac.zip)"
           echo "$FILES" | grep -q "mac-base.pck" && MAC_BASE="[Download]($BASE_URL/mac-base.pck)"
-          echo "$FILES" | grep -q "mac-$TAG_NAME.pck" && MAC_PATCH="[Download]($BASE_URL/mac-$TAG_NAME.pck)"
           BODY="$BODY
-          | macOS | $MAC_FULL | $MAC_BASE | $MAC_PATCH |"
+          | macOS | $MAC_FULL | $MAC_BASE |"
           
           # Output using heredoc
           echo "body<<EOF" >> $GITHUB_OUTPUT
@@ -297,7 +514,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.trigger-cloud-build.outputs.tag_name }}
           body: ${{ steps.release_body.outputs.body }}

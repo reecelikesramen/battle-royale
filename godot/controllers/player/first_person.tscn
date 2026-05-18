@@ -1,0 +1,34 @@
+[gd_scene format=3 uid="uid://bc42jty26yrmo"]
+
+[ext_resource type="PackedScene" uid="uid://dw3q3i3rjuh11" path="res://assets/mesh/low_poly_hands/fps_arms.tscn" id="1_wmtma"]
+[ext_resource type="PackedScene" uid="uid://dhpjsqr0qac5k" path="res://assets/mesh/pistol_g17/Glock17.blend" id="2_wmtma"]
+
+[sub_resource type="Animation" id="Animation_3m6a3"]
+resource_name = "test"
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_cbt0t"]
+_data = {
+&"test": SubResource("Animation_3m6a3")
+}
+
+[node name="Node3D" type="Node3D" unique_id=416977092]
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=1275899676]
+root_node = NodePath("../Camera3D")
+libraries/ = SubResource("AnimationLibrary_cbt0t")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=604285506]
+fov = 60.0
+
+[node name="FPS Arms" parent="Camera3D" unique_id=1461950609 instance=ExtResource("1_wmtma")]
+transform = Transform3D(-1, 0, 8.742278e-08, 0, 1, 0, -8.742278e-08, 0, -1, 0, -1.8092641, -0.23)
+
+[node name="AnimationPlayer" parent="Camera3D/FPS Arms" index="3" unique_id=475191094]
+active = false
+
+[node name="Weapon" type="Node3D" parent="Camera3D" unique_id=536175476]
+
+[node name="Glock17" parent="Camera3D/Weapon" unique_id=1241877793 instance=ExtResource("2_wmtma")]
+transform = Transform3D(-1.0927848e-09, 0, 0.025, 0, 0.025, 0, -0.025, 0, -1.0927848e-09, 0.17046145, -0.21366163, -0.6531596)
+
+[editable path="Camera3D/FPS Arms"]

@@ -618,8 +618,11 @@ static func refresh_id_cache() -> void:
 	_id_paths_cache = {}
 	if not Engine.is_editor_hint():
 		return
-	# EditorInterface is a global singleton in @tool scripts in Godot 4.
-	var fs = EditorInterface.get_resource_filesystem()
+	# Resolve EditorInterface dynamically: a bare reference fails to PARSE
+	# in exported builds (the symbol doesn't exist outside the editor), even
+	# though the runtime guard above prevents the line from ever executing.
+	# Without this, exporting the dedicated server bricks the netcode addon.
+	var fs = Engine.get_singleton("EditorInterface").get_resource_filesystem()
 	if fs == null:
 		return
 	_scan_dir_for_schemas(fs.get_filesystem(), _id_paths_cache)

@@ -1,0 +1,38 @@
+[Unit]
+Description=Battle Royale dedicated game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gameserver
+Group=gameserver
+WorkingDirectory=/opt/battle-royale
+# refresh.sh is the bootstrap path: when the game binary is missing (fresh
+# VM / blown install dir) it downloads + unpacks linux-server.zip with
+# manifest signature verification. On a healthy install it short-circuits
+# to no-op and lets the launcher do incremental delta updates.
+#
+# The launcher's `--server` flag tells it to fetch from the manifest's
+# `linux-server` platform entry — an embedded-pck dedicated-server build
+# at ~50-150 MB with no separate pck_base. Without `--server` the
+# launcher would try to apply the 1.2 GB client pck zpatch and OOM-loop.
+ExecStartPre=/opt/battle-royale/refresh.sh
+ExecStartPre=/opt/battle-royale/launcher --update-only --server
+ExecStart=/opt/battle-royale/battle-royale.x86_64 --server --headless
+Restart=always
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=60s
+# 10 min ExecStartPre cap covers cold-boot bootstrap (curl + unzip of
+# linux-server.zip; much smaller than the legacy 1.3 GB client zip but
+# still slow on a fresh-from-disk VM). On later boots refresh.sh is a
+# fast no-op and launcher --update-only completes in seconds.
+TimeoutStartSec=600
+
+# Logs to systemd journal
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

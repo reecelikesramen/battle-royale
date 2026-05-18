@@ -309,7 +309,10 @@ func register_entity_scene(schema_id: int, scene_path: String, parent: Node) -> 
 # bookkeeping, no role bifurcation, no backfill loops.
 func bind_peer_entity(schema_id: int, scene_path: String, parent: Node) -> void:
 	register_entity_scene(schema_id, scene_path, parent)
-	NetSession.on_peer_connect.connect(
+	# Gate auth-side spawn on peer_admitted (post-version-handshake) instead of
+	# raw on_peer_connect — a build-mismatched peer is kicked before admission
+	# and must not have an authoritative entity briefly spawned for it.
+	NetServer.peer_admitted.connect(
 			func(peer_id): _spawn_peer_auth(schema_id, peer_id, scene_path))
 	NetSession.on_peer_disconnect.connect(
 			func(peer_id): _despawn_peer_entity(schema_id, peer_id))

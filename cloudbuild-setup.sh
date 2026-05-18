@@ -1,4 +1,10 @@
 #!/bin/bash
+#
+# DEPRECATED — replaced by Terraform in infrastructure/terraform/.
+# See infrastructure/README.md for the new bootstrap + import flow.
+# This script is kept for historical reference only and will be removed
+# once the Terraform import has been validated against the live project.
+#
 set -e
 
 # ============ CONFIGURATION ============
@@ -7,7 +13,7 @@ BUCKET_NAME="${PROJECT_ID}-game-builds"  # Uses project ID for global uniqueness
 REGION="us-central1"
 SA_NAME="github-actions-builder"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-GODOT_VERSION="4.5"
+GODOT_VERSION="4.6"
 
 echo "Setting up GCP project: $PROJECT_ID"
 

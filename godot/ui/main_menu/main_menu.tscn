@@ -61,6 +61,12 @@ unique_name_in_owner = true
 layout_mode = 2
 placeholder_text = "Port <45876>"
 
+[node name="WakeButton" type="Button" parent="PanelContainer/MarginContainer/VBoxContainer" unique_id=1612345678]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+text = "Checking server..."
+
 [node name="ConnectButton" type="Button" parent="PanelContainer/MarginContainer/VBoxContainer" unique_id=1526363843]
 unique_name_in_owner = true
 layout_mode = 2
@@ -80,6 +86,7 @@ text = "Quit"
 [connection signal="text_changed" from="PanelContainer/MarginContainer/VBoxContainer/UsernameEdit" to="." method="_on_username_edit_text_changed"]
 [connection signal="text_changed" from="PanelContainer/MarginContainer/VBoxContainer/IPAddressEdit" to="." method="_on_ip_address_text_changed"]
 [connection signal="text_changed" from="PanelContainer/MarginContainer/VBoxContainer/PortEdit" to="." method="_on_port_text_changed"]
+[connection signal="pressed" from="PanelContainer/MarginContainer/VBoxContainer/WakeButton" to="." method="_on_wake_button_pressed"]
 [connection signal="pressed" from="PanelContainer/MarginContainer/VBoxContainer/ConnectButton" to="." method="_on_connect_button_pressed"]
 [connection signal="toggled" from="PanelContainer/MarginContainer/VBoxContainer/FullScreenButton" to="." method="_on_full_screen_button_toggled"]
 [connection signal="pressed" from="PanelContainer/MarginContainer/VBoxContainer/QuitButton" to="." method="_on_quit_button_pressed"]

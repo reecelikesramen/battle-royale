@@ -8,6 +8,10 @@
 #   _PROJECT_NAME  - Godot project name (e.g., "Battle Royale")
 #   _PROJECT_PATH  - Path to Godot project (e.g., godot)
 #   _GODOT_VERSION - Godot version (e.g., 4.5)
+#   _COMMIT_SHA    - Full git SHA of the commit being built. First 12 chars
+#                    become BUILD_SHA, written to build-sha.txt next to every
+#                    platform's game binary. Server + client exchange this
+#                    during the connect handshake and reject on mismatch.
 
 steps:
   # ============ RESTORE .godot CACHE ============
@@ -29,18 +33,52 @@ steps:
     args:
       - -c
       - |
-        mkdir -p ${_PROJECT_PATH}/addons/rust/bin
-        mkdir -p rust/target/release
-        mkdir -p rust/target/debug
-        
-        # Download all platform libraries
-        gsutil -m cp gs://${_BUCKET}/rust-libs/${_TAG_NAME}/* ${_PROJECT_PATH}/addons/rust/bin/
-        
-        # Copy Linux lib to expected paths for editor
-        cp ${_PROJECT_PATH}/addons/rust/bin/librust.so rust/target/release/librust.so
-        cp ${_PROJECT_PATH}/addons/rust/bin/librust.so rust/target/debug/librust.so
-        
-        ls -la ${_PROJECT_PATH}/addons/rust/bin/
+        # The Sprint-3 netcode addon's gdextension manifest expects libs at
+        # addons/netcode/bin/ with platform-suffixed names:
+        #   linux:   libnetcode.linux.x86_64.so
+        #   windows: libnetcode.windows.x86_64.dll
+        #   macos:   libnetcode.macos.universal.dylib
+        # CI uploads the raw cargo output names (librust.{so,dylib}, rust.dll)
+        # under gs://.../rust-libs/<tag>/; rename them into place here.
+        mkdir -p ${_PROJECT_PATH}/addons/netcode/bin
+        # The gdextension manifest's debug paths now point at the WORKSPACE
+        # target (target/debug/), since cargo invoked from any workspace
+        # member writes there — not into rust/target/. Populate that path so
+        # godot --editor --quit-after (the import step on the build runner)
+        # finds the dylib for the addon's debug-mode lookup.
+        mkdir -p target/debug
+
+        STAGE=$$(mktemp -d)
+        gsutil -m cp gs://${_BUCKET}/rust-libs/${_TAG_NAME}/* "$$STAGE/"
+
+        cp "$$STAGE/librust.so"     ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.linux.x86_64.so
+        cp "$$STAGE/rust.dll"       ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.windows.x86_64.dll
+        cp "$$STAGE/librust.dylib"  ${_PROJECT_PATH}/addons/netcode/bin/libnetcode.macos.universal.dylib
+
+        # Headless editor uses release paths for the export pipeline, but the
+        # gdextension's debug-mode entries are what godot --editor consults
+        # during the import-assets pass. Populate the workspace debug path.
+        cp "$$STAGE/librust.so" target/debug/librust.so
+        rm -rf "$$STAGE"
+
+        ls -la ${_PROJECT_PATH}/addons/netcode/bin/
+
+  # ============ DOWNLOAD LAUNCHER BINARIES ============
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'download-launchers'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p launchers/windows launchers/linux launchers/mac
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/windows/launcher.exe         launchers/windows/launcher.exe
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/windows/launcher-updater.exe launchers/windows/launcher-updater.exe
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/linux/launcher               launchers/linux/launcher
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/linux/launcher-updater       launchers/linux/launcher-updater
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/mac/launcher                 launchers/mac/launcher
+        gsutil cp gs://${_BUCKET}/launcher/${_TAG_NAME}/mac/launcher-updater         launchers/mac/launcher-updater
+        chmod +x launchers/linux/launcher launchers/mac/launcher launchers/linux/launcher-updater launchers/mac/launcher-updater
+        ls -la launchers/*
 
   # ============ DOWNLOAD PREVIOUS BASE PCKs (for patches) ============
   - name: 'gcr.io/cloud-builders/gsutil'
@@ -105,18 +143,16 @@ steps:
         mkdir -p build/windows
         cd ${_PROJECT_PATH}
         godot --headless --export-release "Windows" ../build/windows/${_EXPORT_NAME}.exe || true
-        
-        # Copy base PCK
+
+        # pck_base is the only pck artifact shipped now. Per-tag pck deltas are
+        # produced by generate-deltas (zstd zpatch against the prior tag's
+        # pck_base); the launcher applies them in-place before spawning the
+        # game. The legacy godot --export-patch chain (runtime-loaded patches
+        # via ProjectSettings.load_resource_pack) is gone.
         if [ -f "../build/windows/${_EXPORT_NAME}.pck" ]; then
           cp "../build/windows/${_EXPORT_NAME}.pck" "../build/windows/windows-base.pck"
         fi
-        
-        # Generate patch if previous exists
-        if [ -f "../previous-pcks/windows-base.pck" ]; then
-          godot --headless --export-patch "Windows" "../build/windows/${_TAG_NAME}.pck" \
-            --patches "$$(readlink -f ../previous-pcks/windows-base.pck)" || true
-        fi
-        
+
         ls -la ../build/windows/
 
   # ============ EXPORT LINUX ============
@@ -130,19 +166,33 @@ steps:
         mkdir -p build/linux
         cd ${_PROJECT_PATH}
         godot --headless --export-release "Linux" ../build/linux/${_EXPORT_NAME}.x86_64 || true
-        
-        # Copy base PCK
+
+        # See export-windows step: pck deltas now come from generate-deltas
+        # (zstd zpatch). No more --export-patch runtime-loaded patches.
         if [ -f "../build/linux/${_EXPORT_NAME}.pck" ]; then
           cp "../build/linux/${_EXPORT_NAME}.pck" "../build/linux/linux-base.pck"
         fi
-        
-        # Generate patch if previous exists
-        if [ -f "../previous-pcks/linux-base.pck" ]; then
-          godot --headless --export-patch "Linux" "../build/linux/${_TAG_NAME}.pck" \
-            --patches "$$(readlink -f ../previous-pcks/linux-base.pck)" || true
-        fi
-        
+
         ls -la ../build/linux/
+
+  # ============ EXPORT LINUX DEDICATED SERVER (STRIPPED) ============
+  # Preset 5 in export_presets.cfg — `dedicated_server=true`,
+  # `customized_files={"res://":"strip"}`, `binary_format/embed_pck=true`.
+  # Produces a single self-contained ELF with the stripped pck embedded
+  # (textures/audio/visual meshes replaced with placeholders). Output is
+  # ~50-150 MB vs. the 1.3 GB client bundle — avoids the OOM-kill loop
+  # the server hit applying client pck zpatches under `--patch-from`.
+  - name: 'barichello/godot-ci:${_GODOT_VERSION}'
+    id: 'export-linux-server'
+    entrypoint: bash
+    env: ['HOME=/root']
+    args:
+      - -c
+      - |
+        mkdir -p build/linux-server
+        cd ${_PROJECT_PATH}
+        godot --headless --export-release "Linux Dedicated Server" ../build/linux-server/${_EXPORT_NAME}.x86_64 || true
+        ls -la ../build/linux-server/
 
   # ============ EXPORT MACOS ============
   - name: 'barichello/godot-ci:${_GODOT_VERSION}'
@@ -166,7 +216,7 @@ steps:
         
         # Extract to get PCK
         cd build/mac
-        unzip -q ${_EXPORT_NAME}.zip || true
+        unzip -q -o ${_EXPORT_NAME}.zip || true
         
         # Copy base PCK (from app bundle)
         if [ -f "${_PROJECT_NAME}.app/Contents/Resources/${_PROJECT_NAME}.pck" ]; then
@@ -176,16 +226,67 @@ steps:
         # Clean up extracted app (save space)
         rm -rf "${_PROJECT_NAME}.app" || true
         cd ../..
-        
-        # Generate patch if previous exists
-        if [ -f "previous-pcks/mac-base.pck" ]; then
-          cd ${_PROJECT_PATH}
-          godot --headless --export-patch "macOS" "../build/mac/${_TAG_NAME}.pck" \
-            --patches "$$(readlink -f ../previous-pcks/mac-base.pck)" || true
-          cd ..
-        fi
-        
+
+        # See export-windows step: pck deltas now come from generate-deltas
+        # (zstd zpatch). No more --export-patch runtime-loaded patches.
+
         ls -la build/mac/
+
+  # ============ OS CODESIGNING (must run before zip so signed exes ship in release zips) ============
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'codesign-windows-prezip'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if gcloud secrets describe authenticode-cert --quiet >/dev/null 2>&1; then
+          which osslsigncode >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 update -qq && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 install -y -qq osslsigncode)
+          CERT=$$(mktemp)
+          PASS=$$(gcloud secrets versions access latest --secret=authenticode-password)
+          gcloud secrets versions access latest --secret=authenticode-cert > "$$CERT"
+          # Sign both the game .exe and the launcher .exe before they get zipped.
+          for f in build/windows/${_EXPORT_NAME}.exe launchers/windows/launcher.exe; do
+            [ -f "$$f" ] || continue
+            osslsigncode sign -pkcs12 "$$CERT" -pass "$$PASS" -in "$$f" -out "$$f.signed" \
+              -h sha256 -t http://timestamp.digicert.com
+            mv "$$f.signed" "$$f"
+          done
+          shred -u "$$CERT"
+        else
+          echo "no authenticode-cert secret; skipping Windows codesigning"
+        fi
+
+  # ============ COMPUTE BUILD SHA ============
+  # Single cross-platform build identity = first 12 chars of the git commit
+  # SHA that produced this run. Written to BUILD_SHA file in the build root;
+  # zip-builds copies it into each platform dir as `build-sha.txt`. Both
+  # client and server read it at startup and trade it during the in-game
+  # connect handshake — mismatch → kick. Lives outside individual platform
+  # bundles so we can also write it into versions.json (manifest step below).
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'compute-build-sha'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        # `${_COMMIT_SHA}` IS a Cloud Build substitution (passed by GH
+        # Actions). Bash refs — `$$SHORT_SHA`, `$${SHORT_SHA:0:12}` — must
+        # be doubled or Cloud Build tries to look them up as substitutions
+        # and silently produces empty (parameter-expansion `${X:n:m}` isn't
+        # supported by Cloud Build's substitution syntax either).
+        SHORT_SHA="${_COMMIT_SHA}"
+        SHORT_SHA="$${SHORT_SHA:0:12}"
+        if [[ -z "$$SHORT_SHA" ]]; then
+          # A missing sha would mean every future client fails the handshake
+          # against this release. Fail the build instead of shipping a broken
+          # version-handshake bundle.
+          echo "ERROR: _COMMIT_SHA substitution missing — refusing to build" >&2
+          exit 1
+        fi
+        echo -n "$$SHORT_SHA" > BUILD_SHA
+        echo "BUILD_SHA = $$SHORT_SHA"
 
   # ============ ZIP BUILDS ============
   - name: 'gcr.io/cloud-builders/gsutil'
@@ -194,53 +295,198 @@ steps:
     args:
       - -c
       - |
+        set -euo pipefail
         mkdir -p release
-        
+
+        # Bundle the launcher binary alongside each platform's game files.
+        # The launcher is the new primary entrypoint (game can still be
+        # launched directly for legacy clients via BR_LEGACY_UPDATER=1).
+        cp launchers/windows/launcher.exe         build/windows/launcher.exe         2>/dev/null || true
+        cp launchers/windows/launcher-updater.exe build/windows/launcher-updater.exe 2>/dev/null || true
+        cp launchers/linux/launcher               build/linux/launcher               2>/dev/null || true
+        cp launchers/linux/launcher-updater       build/linux/launcher-updater       2>/dev/null || true
+        chmod +x build/linux/launcher build/linux/launcher-updater 2>/dev/null || true
+        cp infrastructure/cloudbuild-steps/linux-launcher.desktop build/linux/Battle\ Royale.desktop 2>/dev/null || true
+
+        # Drop build-sha.txt next to the game binary on every platform.
+        # Runtime reads via OS.get_executable_path().get_base_dir().
+        # Mac handled inside build-mac-app.sh (path is inside the .app bundle).
+        cp BUILD_SHA build/windows/build-sha.txt
+        cp BUILD_SHA build/linux/build-sha.txt
+
+        # VERSION.txt next to the launcher so launcher::installed_version()
+        # picks up the freshly-installed tag and does a fast no-op when the
+        # download already matches manifest.latest. Without it the launcher
+        # defaults to "v0.0.0" and forces a full re-download every run.
+        # Mac path handled inside build-mac-app.sh.
+        echo -n "${_TAG_NAME}" > build/windows/VERSION.txt
+        echo -n "${_TAG_NAME}" > build/linux/VERSION.txt
+
         # Windows
         (cd build && zip -r ../release/windows.zip windows)
         mv build/windows/windows-base.pck release/ 2>/dev/null || true
-        mv build/windows/${_TAG_NAME}.pck release/windows-${_TAG_NAME}.pck 2>/dev/null || true
-        
+
         # Linux
         (cd build && zip -r ../release/linux.zip linux)
         mv build/linux/linux-base.pck release/ 2>/dev/null || true
-        mv build/linux/${_TAG_NAME}.pck release/linux-${_TAG_NAME}.pck 2>/dev/null || true
-        
-        # Mac (already zipped)
+        # Standalone Linux game binary so the dedicated-server VM can update
+        # via launcher --update-only (atomic swap + zstd delta against the
+        # prior tag's binary) rather than re-downloading a 1+ GB linux.zip on
+        # every release. Client builds keep using the zip for cold install.
+        cp build/linux/${_EXPORT_NAME}.x86_64 release/linux-battle-royale.x86_64 2>/dev/null || true
+
+        # Linux-server bundle (stripped pck embedded in the binary; no
+        # separate pck file). 50-150 MB self-contained ELF + the launcher
+        # chain + rust lib. Bootstrap zip mirrors linux.zip layout so
+        # refresh.sh can `unzip -o` it the same way. The standalone .x86_64
+        # is what manifest's `game_binary` for `linux-server` points at;
+        # generate-deltas builds its zpatch against the prior tag's.
+        if [ -f "build/linux-server/${_EXPORT_NAME}.x86_64" ]; then
+          cp launchers/linux/launcher               build/linux-server/launcher
+          cp launchers/linux/launcher-updater       build/linux-server/launcher-updater
+          chmod +x build/linux-server/launcher build/linux-server/launcher-updater
+          cp ${_PROJECT_PATH}/addons/rust/bin/librust.so build/linux-server/librust.so 2>/dev/null || true
+          cp infrastructure/cloudbuild-steps/linux-launcher.desktop build/linux-server/Battle\ Royale.desktop 2>/dev/null || true
+          cp BUILD_SHA build/linux-server/build-sha.txt
+          echo -n "${_TAG_NAME}" > build/linux-server/VERSION.txt
+          (cd build && zip -r ../release/linux-server.zip linux-server)
+          cp build/linux-server/${_EXPORT_NAME}.x86_64 release/linux-server-battle-royale.x86_64
+        fi
+
+        # Mac: rewrap Godot's exported .app so the launcher is the entry point.
+        # Double-click of Battle Royale.app then opens the launcher UI directly
+        # instead of running the raw game in a Terminal session. Gatekeeper
+        # approval covers the whole bundle in one right-click → Open.
+        # VERSION.txt for the mac bundle is generated on the fly from the
+        # cloud-build substitution (rather than relying on _PROJECT_PATH/VERSION.txt
+        # which is consumed by Godot's export and may or may not be on disk
+        # here depending on workflow ordering).
+        echo -n "${_TAG_NAME}" > VERSION_FOR_LAUNCHER.txt
+        BUILD_SHA_FILE="$$PWD/BUILD_SHA" VERSION_FILE="$$PWD/VERSION_FOR_LAUNCHER.txt" \
+          _EXPORT_NAME=${_EXPORT_NAME} \
+          bash infrastructure/cloudbuild-steps/build-mac-app.sh
         mv build/mac/${_EXPORT_NAME}.zip release/mac.zip 2>/dev/null || true
         mv build/mac/mac-base.pck release/ 2>/dev/null || true
-        mv build/mac/${_TAG_NAME}.pck release/mac-${_TAG_NAME}.pck 2>/dev/null || true
-        
+
+        # Promote BUILD_SHA into the release dir so the manifest gen step can
+        # publish it alongside versions.json (gives launcher + wake-fn a
+        # checkable build identity without unzipping a platform bundle).
+        cp BUILD_SHA release/BUILD_SHA
+
         ls -la release/
 
+  # macOS codesigning + notarization runs on a macOS host, not Cloud Build's
+  # Linux runners. The Linux pipeline can only validate that the cert secret
+  # exists; the actual sign/notarize is a manual or self-hosted-runner step.
+  # See infrastructure/README.md "Codesigning" section.
+
   # ============ UPLOAD RELEASE ARTIFACTS ============
+  # Parallel composite uploads chunk files >150MB into pieces uploaded in
+  # parallel, then GCS server-side composes them. Cuts upload time roughly
+  # in half for the platform zips. Safe here because our downloaders (the
+  # launcher's reqwest, refresh.sh's curl) use plain HTTP — the crcmod
+  # warning only affects `gsutil cp` downloads, which we don't use.
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'upload-release'
     args:
       - '-m'
+      - '-o'
+      - 'GSUtil:parallel_composite_upload_threshold=150M'
       - 'cp'
       - '-r'
       - 'release/*'
       - 'gs://${_BUCKET}/releases/${_TAG_NAME}/'
 
-  # ============ GENERATE versions.json MANIFEST ============
-  - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'update-manifest'
+  # ============ GENERATE ZSTD DELTAS ============
+  # zstd --patch-from for game binary, rust lib, launcher per platform.
+  # Uploads to gs://${_BUCKET}/deltas/${_TAG_NAME}/{platform}/{component}.zpatch.
+  # generate-manifest-v2 (next step) picks these up automatically.
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'generate-deltas'
     entrypoint: bash
     args:
       - -c
       - |
-        # List all release tags, extract patch PCK versions
-        VERSIONS=$$(gsutil ls gs://${_BUCKET}/releases/ 2>/dev/null | grep -oP 'v[\d.]+(-[a-zA-Z0-9.]+)?' | sort -V | uniq)
-        if [ -z "$$VERSIONS" ]; then
-          VERSIONS="${_TAG_NAME}"
+        set -euo pipefail
+        which zstd >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 update -qq && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 install -y -qq zstd unzip)
+        chmod +x infrastructure/cloudbuild-steps/generate-deltas.sh
+        env _BUCKET='${_BUCKET}' _TAG_NAME='${_TAG_NAME}' _EXPORT_NAME='${_EXPORT_NAME}' \
+            _PROJECT_NAME='${_PROJECT_NAME}' _PROJECT_PATH='${_PROJECT_PATH}' \
+          infrastructure/cloudbuild-steps/generate-deltas.sh
+
+  # ============ GENERATE versions.json + ed25519 signature ============
+  # Produces a per-platform, per-component manifest with sha256s, signed by
+  # the ed25519 key in Secret Manager. The launcher downloads versions.json
+  # + .sig, verifies, and uses checksum-driven updates.
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'generate-manifest'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        # Install jq via direct binary download to avoid apt/dpkg hangs in the
+        # builder. Pin to a known-good release.
+        if ! command -v jq >/dev/null 2>&1; then
+          curl -fsSL -o /usr/local/bin/jq \
+            https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+          chmod +x /usr/local/bin/jq
         fi
-        # Convert to JSON array
-        VERSIONS_JSON=$$(echo "$$VERSIONS" | sed 's/^/"/' | sed 's/$$/"/' | tr '\n' ',' | sed 's/,$$//')
-        echo "{\"versions\": [$$VERSIONS_JSON], \"latest\": \"${_TAG_NAME}\"}" > versions.json
-        cat versions.json
+        chmod +x infrastructure/cloudbuild-steps/generate-manifest-v2.sh
+        env _BUCKET='${_BUCKET}' _TAG_NAME='${_TAG_NAME}' _EXPORT_NAME='${_EXPORT_NAME}' \
+          infrastructure/cloudbuild-steps/generate-manifest-v2.sh
         gsutil cp versions.json gs://${_BUCKET}/versions.json
-        echo "Manifest updated with versions: $$VERSIONS"
+
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'sign-manifest'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        which openssl >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 update -qq && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 install -y -qq openssl)
+        gsutil cp gs://${_BUCKET}/versions.json versions.json
+        chmod +x infrastructure/cloudbuild-steps/sign-manifest.sh
+        env GCP_PROJECT_ID="$PROJECT_ID" \
+          infrastructure/cloudbuild-steps/sign-manifest.sh
+        gsutil cp versions.json.sig gs://${_BUCKET}/versions.json.sig
+
+  # ============ VERIFY PUBLISHED MANIFEST ============
+  # Smoke-tests the freshly-published manifest from the same public URL a real
+  # launcher hits. Verifies the ed25519 signature with the committed pubkey,
+  # HEADs every component URL, and sha256-checks one component per platform.
+  # If anything fails, the release is "published but rejected" — the Pub/Sub
+  # broadcast below is skipped and the server won't auto-restart onto a broken
+  # release. Operator must roll forward with a fixed manifest.
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'verify-manifest'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        which openssl >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 update -qq && DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=60 install -y -qq openssl)
+        if ! command -v jq >/dev/null 2>&1; then
+          curl -fsSL -o /usr/local/bin/jq \
+            https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+          chmod +x /usr/local/bin/jq
+        fi
+        chmod +x infrastructure/cloudbuild-steps/verify-manifest.sh
+        env _BUCKET='${_BUCKET}' _TAG_NAME='${_TAG_NAME}' \
+          infrastructure/cloudbuild-steps/verify-manifest.sh
+
+  # ============ PUBLISH RELEASE TO PUB/SUB ============
+  # Tells the running game server (and any other subscribers) that a new
+  # release is available. The VM's server-agent receives this and triggers
+  # a graceful restart that picks up the new build.
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'publish-release'
+    args:
+      - 'pubsub'
+      - 'topics'
+      - 'publish'
+      - 'game-builds'
+      - '--message=${_TAG_NAME}'
 
   # ============ SAVE .godot CACHE ============
   - name: 'gcr.io/cloud-builders/gsutil'

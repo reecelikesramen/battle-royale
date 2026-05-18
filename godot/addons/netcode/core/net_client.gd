@@ -23,7 +23,9 @@ func _ready() -> void:
 
 
 func on_client_packet(data) -> void:
-	if data is NetStatePacket:
+	if data is ServerHelloPacket:
+		_on_server_hello(data)
+	elif data is NetStatePacket:
 		handle_net_state.emit(data)
 	elif data is NetReliablePacket:
 		handle_net_reliable.emit(data)
@@ -31,6 +33,27 @@ func on_client_packet(data) -> void:
 		handle_server_tick.emit(data)
 	else:
 		push_error("Packet unknown type unhandled!")
+
+
+# First server-originated packet on every new connection. Carries the
+# server's BUILD_SHA + version so the client can refuse to proceed against a
+# server running a different build (which would otherwise manifest as desync,
+# crashes, or silent protocol drift). On mismatch we disconnect locally with
+# a rich reason; on match we reply with our own sha + version so the server
+# can do the symmetric check.
+func _on_server_hello(packet: ServerHelloPacket) -> void:
+	var local_sha := Constants.get_build_sha()
+	if packet.build_sha != local_sha:
+		_disconnected_message = "Version mismatch: server %s, you %s. Update via the launcher." \
+			% [packet.version, Constants.get_version()]
+		push_warning("[net_client] %s" % _disconnected_message)
+		NetSession.shutdown_all()
+		return
+
+	var reply := ClientHelloPacket.new()
+	reply.build_sha = local_sha
+	reply.version = Constants.get_version()
+	NetSession.send_packet(reply.to_payload())
 
 
 # Wire format: u8 id, u8 count, then `count` u8 remote ids. Mirrors NetServer
@@ -79,6 +102,10 @@ func get_disconnect_message(end_reason: int) -> String:
 			return "Connection failed: Server is full upon connected"
 		DisconnectReason.APP_SERVER_CONNECTION_ENDED_BY_CLIENT:
 			return "Connection failed: Server connection ended by client"
+		DisconnectReason.APP_BUILD_MISMATCH:
+			return "Build mismatch — your client is on a different release than the server. Update via the launcher."
+		DisconnectReason.APP_HANDSHAKE_TIMEOUT:
+			return "Server kicked us: version handshake timed out. Client likely too old to talk to this server."
 		
 		# Local errors
 		DisconnectReason.LOCAL_OFFLINE_MODE:
@@ -126,7 +153,14 @@ func get_disconnect_message(end_reason: int) -> String:
 
 
 func on_disconnect_from_server(end_reason: int) -> void:
-	_disconnected_message = get_disconnect_message(end_reason)
+	# Preserve any application-level message already set by code that
+	# initiated the disconnect (e.g. _on_server_hello on build mismatch
+	# writes a rich "Server: vX.Y vs you: vA.B" string before calling
+	# NetSession.shutdown_all). Without this guard we'd clobber it
+	# with the generic "Disconnected from server" mapped from end_reason
+	# 1000 (APP_INTENTIONAL).
+	if _disconnected_message.is_empty():
+		_disconnected_message = get_disconnect_message(end_reason)
 	print("Disconnected from server: ", _disconnected_message)
 	handle_disconnect_from_server.emit()
 	id = -1
@@ -141,6 +175,9 @@ enum DisconnectReason {
 	APP_INTENTIONAL = 1000,
 	APP_SERVER_FULL = 1001,
 	APP_SERVER_CONNECTION_ENDED_BY_CLIENT = 1002,
+	# Kept in sync with NetServer.APP_BUILD_MISMATCH / APP_HANDSHAKE_TIMEOUT.
+	APP_BUILD_MISMATCH = 1003,
+	APP_HANDSHAKE_TIMEOUT = 1004,
 
 	# AppException range: 2000-2999 (unusual/exceptional disconnections)
 	APP_SERVER_FULL_UPON_CONNECTED = 2000, # unusual case where the server has room when connecting but not once connection is established

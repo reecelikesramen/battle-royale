@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-"Battle Royale" — Godot 4.5 (Forward+) multiplayer game. Authoritative server with client-side prediction & reconciliation. Networking + math + packet codecs implemented in Rust via [godot-rust](https://github.com/godot-rust/gdext) (`godot = "0.4.3"`), backed by Valve's GameNetworkingSockets (`game-networking-sockets` crate). Godot project lives in `godot/`, Rust gdextension in `rust/`.
+"Battle Royale" — Godot 4.6 (Forward+) multiplayer game. Authoritative server with client-side prediction & reconciliation. Networking + math + packet codecs implemented in Rust via [godot-rust](https://github.com/godot-rust/gdext) (`godot = "0.4.3"`), backed by Valve's GameNetworkingSockets (`game-networking-sockets` crate). Godot project lives in `godot/`, Rust gdextension in `rust/`.
 
 ## Build / run
 
@@ -20,7 +20,7 @@ Linker target paths in `godot/addons/rust/rust.gdextension`:
 - Editor/debug reads `rust/target/debug/librust.{so,dylib,dll}`
 - Exports/release reads `godot/addons/rust/bin/librust.*`
 
-Godot: open `godot/project.godot` in Godot 4.5 editor. No CLI test harness; no lint config. Linux cross-compile from macOS uses `x86_64-w64-mingw32-gcc` (see `rust/config.toml`).
+Godot: open `godot/project.godot` in Godot 4.6 editor. No CLI test harness; no lint config. Linux cross-compile from macOS uses `x86_64-w64-mingw32-gcc` (see `rust/config.toml`).
 
 CI: `.github/workflows/godot-google-ci.yml` builds Rust on 3 OS runners, uploads libs to GCS, then triggers `cloudbuild.yaml` to do Godot exports + PCK patch diffs. Env vars `GODOT_VERSION`, `EXPORT_NAME=battle-royale`, `PROJECT_PATH=godot`.
 

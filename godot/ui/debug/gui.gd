@@ -228,27 +228,42 @@ func _process(_delta: float) -> void:
 		_health_bar.visible = true
 		_health_bar_bg.visible = true
 	
+# Closed by escape_menu when it opens — escape menu wins. Don't touch
+# Input.set_mouse_mode here: escape menu sets MOUSE_MODE_VISIBLE in its own
+# setter and force_close runs after via opened.emit → _on_open. Setting
+# CAPTURED here clobbered escape menu's VISIBLE, leaving the user looking at
+# the options panel with a captured (invisible) cursor.
 func force_close() -> void:
 	if not open:
 		return
 	open = false
 	mouse_filter = Control.MOUSE_FILTER_PASS
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 
 func _input(event):
 	if event.is_action_pressed("debug"):
 		if not open:
-			for node in get_tree().get_nodes_in_group("escape_menu"):
-				if node.get("open") == true:
-					return
+			if _any_escape_menu_open():
+				return
 		open = !open
 		if open:
 			mouse_filter = Control.MOUSE_FILTER_STOP
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 		else:
 			mouse_filter = Control.MOUSE_FILTER_PASS
-			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+			# Only re-capture if no higher-priority UI is holding the cursor.
+			# Escape menu force_closes debug on open, so in practice debug.open
+			# is always false when escape is up — but defensive in case future
+			# UI work changes that.
+			if not _any_escape_menu_open():
+				Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+
+func _any_escape_menu_open() -> bool:
+	for node in get_tree().get_nodes_in_group("escape_menu"):
+		if node.get("open") == true:
+			return true
+	return false
 
 
 func _on_fps_controller_reconcile_network_debug(delta_pos: Vector3, delta_vel: Vector3, unacked_inputs: SequenceRingBuffer) -> void:

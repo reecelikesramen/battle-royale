@@ -31,6 +31,9 @@ NetReplication="*res://addons/netcode/core/net_replication.gd"
 NetReliableHub="*res://addons/netcode/core/net_reliable_hub.gd"
 Enums="*res://autoload/enums.gd"
 Constants="*res://autoload/constants.gd"
+MetricsReporter="*res://server/metrics_reporter.gd"
+AdminListener="*res://server/admin_listener.gd"
+RestartListener="*res://server/restart_listener.gd"
 
 [debug]
 
