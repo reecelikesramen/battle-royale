@@ -40,7 +40,21 @@ const RESPAWN_DELAY_SEC := 10.0
 # diagnosing high-latency shoot feel; flip to false for normal play.
 const SHOOT_LOG: bool = true
 
+# Single-process singleton for player.gd to reach the client-side predict path
+# without a tree walk. Listen-server (future) still has one ShootHandler that
+# serves both roles, so a single static ref is correct. Set in _finish_setup on
+# client role; cleared in _exit_tree.
+static var instance: ShootHandler = null
+
+# Client-side predicted-shot queue. Each entry pushes the local trigger time
+# in usec; entries are popped (oldest-first) by inbound SHOT_FIRED matched to
+# this peer. Drift cap: anything beyond MAX_PREDICTED_SHOTS gets dropped at the
+# front so a runaway "predictions outpace confirmations" state self-heals.
+const MAX_PREDICTED_SHOTS: int = 10
+
 var _last_fire_us: Dictionary = {}  # peer_id -> int (server-side rate limit)
+var _last_predicted_us: int = 0     # client-side rate limit (mirror of server)
+var _predicted_shots: Array = []    # list of { local_us: int }
 var _comp: NetLagCompensator
 var _tracer_root: Node3D
 var _tracer_mat: ShaderMaterial
@@ -105,7 +119,13 @@ func _finish_setup() -> void:
 		_tracer_mat = ShaderMaterial.new()
 		_tracer_mat.shader = shader
 		set_process(true)
+		ShootHandler.instance = self
 	print("[SHOOT] handler ready mode=%d" % NetSession.mode)
+
+
+func _exit_tree() -> void:
+	if ShootHandler.instance == self:
+		ShootHandler.instance = null
 
 
 func _unsubscribe_all() -> void:
@@ -325,6 +345,44 @@ signal player_died(victim_id: int, killer_id: int)
 signal player_respawned(victim_id: int, pos: Vector3)
 
 
+# ---- Client-side prediction (local shooter) -------------------------------
+
+# Called every tick that the local player holds `shoot=true`. Enforces the same
+# 120ms cadence the server uses so predictions and confirmations match 1:1
+# under typical conditions. Returns true when a tracer was actually drawn.
+#
+# Origin is camera global_position; dir is camera forward. exclude_rid is the
+# local player's CharacterBody3D RID so the bullet doesn't terminate on our
+# own collider. Endpoint = first wall/proxy hit within RAY_LENGTH, else max.
+#
+# Anti-cheat note: this only draws a visual on the local screen. Damage and
+# hit detection remain server-authoritative (lag-comp rewind), so faking this
+# path just shows the user fake tracers. No server policy reads it.
+func predict_local_tracer(origin: Vector3, dir: Vector3, exclude_rid: RID = RID()) -> bool:
+	if _tracer_root == null:
+		return false
+	var now_us: int = Time.get_ticks_usec()
+	if now_us - _last_predicted_us < FIRE_INTERVAL_US:
+		return false
+	_last_predicted_us = now_us
+	var endpoint: Vector3 = origin + dir * RAY_LENGTH
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space != null:
+		var params := PhysicsRayQueryParameters3D.create(origin, endpoint)
+		params.collide_with_bodies = true
+		params.collide_with_areas = false
+		if exclude_rid.is_valid():
+			params.exclude = [exclude_rid]
+		var hit: Dictionary = space.intersect_ray(params)
+		if not hit.is_empty():
+			endpoint = hit.position
+	_spawn_tracer(origin, endpoint)
+	_predicted_shots.append({"local_us": now_us})
+	while _predicted_shots.size() > MAX_PREDICTED_SHOTS:
+		_predicted_shots.pop_front()
+	return true
+
+
 # ---- Tracer broadcast/render ----------------------------------------------
 
 func _broadcast_shot_fired(shooter_id: int, origin: Vector3, endpoint: Vector3) -> void:
@@ -350,12 +408,22 @@ func _on_shot_fired(payload: PackedByteArray) -> void:
 		if SHOOT_LOG:
 			# Trigger-to-first-tracer delay. Read+clear so auto-fire's later
 			# tracers don't print a stale, monotonically-growing delta.
+			# After sprint 1 this should be ~1 frame (tracer was predicted);
+			# if it ever prints > a frame, the predicted-shot queue ran dry.
 			var pc := NetClient.player as PlayerController
 			var edge_us: int = pc._shoot_local_edge_us
 			if edge_us > 0:
 				var delta_ms: int = (Time.get_ticks_usec() - edge_us) / 1000
-				print("[SHOOT-RENDER local delta_ms=%d]" % delta_ms)
+				print("[SHOOT-RENDER local delta_ms=%d predicted=%s]" % [
+						delta_ms, "yes" if not _predicted_shots.is_empty() else "NO"])
 				pc._shoot_local_edge_us = -1
+		# If we predicted this shot locally, the tracer is already on screen;
+		# pop the queue entry and skip rendering. Falls through to render only
+		# when prediction wasn't possible (queue empty — e.g. server fired but
+		# our local rate-limit blocked the predict, or queue overflow drop).
+		if not _predicted_shots.is_empty():
+			_predicted_shots.pop_front()
+			return
 		var cam: Camera3D = NetClient.player.get_node_or_null("CameraController/Camera3D")
 		if cam != null:
 			var delta: Vector3 = cam.global_position - o

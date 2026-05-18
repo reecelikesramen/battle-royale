@@ -124,10 +124,12 @@ The server's `FIRE_INTERVAL_US = 120000` is mirrored as a client constant. Clien
 
 ### Verification
 
-- `[SHOOT-RENDER local delta_ms=N]` post-sprint: median <16ms (single frame). Sprint 0 baseline was ~280ms.
+- New `[SHOOT-PREDICT local delta_ms=N]` log: trigger-to-predicted-tracer time. Median <16ms (single frame). This is the meaningful number — replaces SHOOT-RENDER as the latency-to-visible metric.
+- `[SHOOT-RENDER local delta_ms=N predicted=yes|NO]`: server-confirmation arrival time. Stays at ~RTT; `predicted=yes` means we suppressed the duplicate render (expected case). `predicted=NO` would indicate a cadence drift between client+server fire-rate gates — should be rare.
 - Single-shot mode: zero double-tracer visible.
 - Auto-fire: tracers appear at smooth 120ms cadence (8.3/sec) locally; server arrivals get suppressed.
 - Two-process test: remote shooter's tracer appears normally (unaffected).
+- Grep recipe updated: `grep -E "\[SHOOT-(LOCAL|PREDICT|AUTH|RENDER)"`
 
 ---
 

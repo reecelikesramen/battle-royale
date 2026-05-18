@@ -313,6 +313,18 @@ func _gather_command(delta: float) -> PlayerInput:
 		if SHOOT_DEBUG:
 			print("[SHOOT-LOCAL t=%d us look=%s]" % [_shoot_local_edge_us, _look_abs])
 	_last_shoot_pressed = cmd.shoot
+	# Predict local tracer immediately so the user doesn't wait an RTT for the
+	# server's SHOT_FIRED loopback. ShootHandler enforces its own 120ms cadence
+	# matching the server's FIRE_INTERVAL_US, so calling every tick during a
+	# held trigger is fine — only the cadence-passing calls draw a tracer.
+	# Server still owns hit detection; this is visual-only.
+	if cmd.shoot and not _is_locally_dead() and ShootHandler.instance != null and camera != null:
+		var pred_origin: Vector3 = camera.global_position
+		var pred_dir: Vector3 = -camera.global_transform.basis.z
+		var did_predict: bool = ShootHandler.instance.predict_local_tracer(pred_origin, pred_dir, get_rid())
+		if did_predict and SHOOT_DEBUG and _shoot_local_edge_us > 0:
+			var pred_delta_ms: int = (Time.get_ticks_usec() - _shoot_local_edge_us) / 1000
+			print("[SHOOT-PREDICT local delta_ms=%d]" % pred_delta_ms)
 	cmd.scope = Input.is_action_pressed("scope")
 	# While dead, drop all actionable input. Look angles stay so we don't snap
 	# the view at the moment of death; server also gates damage/throw on health.
