@@ -26,6 +26,12 @@ func _get_configuration_warnings() -> PackedStringArray:
 #
 # Host hooks (all duck-typed via has_method; absent hooks are no-ops unless
 # noted):
+#   _seed_state(state: NetState) -> void
+#       Populate scene-derived defaults (spawn pos, initial SM ids) into
+#       shadow_state + render_state at _ready. Without this, fields default to
+#       the state_template's zero values until tick 1's _simulate overwrites
+#       them — fine for code that never reads shadow before tick 1, but any
+#       early hook (debug, lag-comp signal) sees garbage.
 #   _gather_command(delta: float) -> Resource
 #       (REQUIRED on authority) returns the wire packet for this tick. Host
 #       reads predictor.input_sequence + .last_received_tick to stamp the cmd.
@@ -41,7 +47,7 @@ func _get_configuration_warnings() -> PackedStringArray:
 #   _apply_corrections(delta: float) -> void
 #       Lerp scene-graph toward shadow_state. Host-owned in Sprint 1; future
 #       sprint moves the schema-driven loop into the framework.
-#   _proxy_apply(from_state, to_state, alpha, extrapolation_s, delta) -> void
+#   _proxy_apply(from_state, to_state, alpha, extrapolation_s, segment_s, delta) -> void
 #       Proxy interp + scene write. Host owns the field interpolation today.
 
 # Identity. Set by the owning controller before/while adding as child.
@@ -89,6 +95,11 @@ var last_input_seq: int = -1
 # shadow_state. Subscribers (player controller, debug overlays) react to a
 # fresh server view. Passes (shadow_state, last_input_seq, new_tick).
 signal state_snapshot_received(state: NetState, last_input_seq: int, new_tick: int)
+# Phase 6: server-side signal fired after we decode an incoming NetCommandPacket
+# for this entity. Carries the decoded typed cmd + the packet's infra fields
+# (sequence_id / timestamp_us / last_received_tick) so game-side hit detection,
+# lag-comp pivots, etc. can read them without re-decoding the packet themselves.
+signal command_received(cmd: NetCommand, sequence_id: int, timestamp_us: int, last_received_tick: int)
 
 # Phase 10c: fires whenever shadow_state is mutated externally and the scene
 # graph should re-sync to it. Currently emitted by NetLagCompensator after
@@ -125,6 +136,16 @@ var command_field_names: PackedStringArray = PackedStringArray()
 # to AUTO (put_var/get_var) so unconfigured fields keep working. Cached so the
 # encode/decode hot loops don't pay a linear search per field per snapshot.
 var _state_field_cfgs: Array[NetStateField] = []
+
+# Phase 6: same shape, command side. Indexed by command_field_names order.
+var _command_field_cfgs: Array[NetStateField] = []
+
+# Phase 6b: indices (into *_field_names) of TYPE_BOOL fields. Codec emits these
+# as a packed bitset trailing the inline block (1 bit each) instead of going
+# through put_var (~8 bytes per bool). Resolved at config time; null/missing
+# template falls back to empty array (codec then walks zero bools — no-op).
+var _state_bool_indices: PackedInt32Array = PackedInt32Array()
+var _command_bool_indices: PackedInt32Array = PackedInt32Array()
 
 # Phase 11: optional Callable(peer_id: int, predictor: NetPredictor) -> bool.
 # When set, server_broadcast_snapshot iterates connected peers and sends only
@@ -175,14 +196,33 @@ func _ready() -> void:
 			NetReplication.register_entity(schema.id, entity_id, self)
 		_resolve_children()
 		_cache_state_field_cfgs()
+		_cache_command_field_cfgs()
+		# Per-schema proxy buffer scaling. Takes effect on the next ring buffer
+		# auto-tune (i.e., when the second snapshot arrives).
+		if player_state_buffer.has_method(&"set_buffer_delay_multiplier"):
+			player_state_buffer.set_buffer_delay_multiplier(schema.buffer_segments)
+		# Per-entity server tick rate: schema declares tick_hz, predictor gates
+		# _server_tick every (physics_hz / tick_hz) physics frames. tick_hz=120
+		# (player default) → fire every frame; tick_hz=60 → every 2nd; etc.
+		var physics_hz: int = ProjectSettings.get_setting("physics/common/physics_ticks_per_second", 120)
+		_server_tick_every = maxi(1, physics_hz / maxi(1, schema.tick_hz))
+
+	# Hosts that need to seed scene-derived defaults into shadow/render (spawn
+	# position, initial state-machine ids, etc.) implement _seed_state(state).
+	# Called after schema registration so the field set is finalized but before
+	# the first physics tick, ensuring any early shadow_state read sees
+	# scene-consistent values rather than template zeros.
+	if shadow_state != null and host != null and host.has_method(&"_seed_state"):
+		host._seed_state(shadow_state)
+		host._seed_state(render_state)
 
 	# Auto-subscribe to the server's input fan-out when this predictor has a
-	# command_template. Server filters incoming PlayerInputPackets by peer_id ==
-	# owner_id and enqueues them; clients never see the signal so the connect
-	# is a no-op for them. Replaces per-controller boilerplate that previously
-	# wired this up in each entity's _enter_tree.
+	# command_template. Server fans NetCommandPacket to all predictors; each
+	# filters by (schema_id, entity_id, peer_id == owner_id), decodes payload
+	# into a typed NetCommand, and enqueues for the next _server_tick. Clients
+	# never see the signal so the connect is a no-op for them.
 	if command_template != null and NetSession.is_server:
-		NetServer.handle_player_input.connect(_on_server_player_input)
+		NetServer.handle_net_command.connect(_on_server_net_command)
 		_subscribed_to_input = true
 
 
@@ -191,10 +231,145 @@ func _ready() -> void:
 # Fields not declared in the schema get a null cfg → AUTO fallback.
 func _cache_state_field_cfgs() -> void:
 	_state_field_cfgs.clear()
+	_state_bool_indices = PackedInt32Array()
 	if schema == null:
 		return
-	for fname in state_field_names:
+	var template := state_template
+	for i in state_field_names.size():
+		var fname := state_field_names[i]
 		_state_field_cfgs.append(schema.find_state_field(fname))
+		# Cache bool indices so the codec doesn't typeof() every encode/decode.
+		if template != null and typeof(template.get(fname)) == TYPE_BOOL:
+			_state_bool_indices.append(i)
+
+
+# Phase 6: same shape as _cache_state_field_cfgs but for command fields.
+func _cache_command_field_cfgs() -> void:
+	_command_field_cfgs.clear()
+	_command_bool_indices = PackedInt32Array()
+	if schema == null:
+		return
+	var template := command_template
+	for i in command_field_names.size():
+		var fname := command_field_names[i]
+		_command_field_cfgs.append(schema.find_command_field(fname))
+		if template != null and typeof(template.get(fname)) == TYPE_BOOL:
+			_command_bool_indices.append(i)
+
+
+# Phase 6: encode a typed NetCommand to bytes using command_field_names order
+# + per-field quant config. Always emits a full snapshot (commands aren't
+# delta-encoded — they're tiny, lossy, and client-redundant).
+#
+# Phase 6b bool packing: TYPE_BOOL fields are extracted from the inline stream
+# and emitted as a trailing bitset (1 bit each, LSB-first, packed into
+# ceil(bool_count/8) bytes). Eliminates put_var's ~8-byte-per-bool Variant
+# header. The per-field Quant config on bool fields is ignored — packing is
+# unconditional. Wire layout: [non_bool_field_values..., bool_bitset_bytes...].
+# Field order on the wire matches command_field_names declaration order for
+# the non-bool block; bool bits go in command_field_names order too (skipping
+# non-bool indices).
+func encode_command_payload(cmd: NetCommand) -> PackedByteArray:
+	if cmd == null:
+		return PackedByteArray()
+	var sp := StreamPeerBuffer.new()
+	var bool_bits: int = 0
+	var bool_idx: int = 0
+	for i in command_field_names.size():
+		var fname := command_field_names[i]
+		var value = cmd.get(fname)
+		if typeof(value) == TYPE_BOOL:
+			if value:
+				bool_bits |= (1 << bool_idx)
+			bool_idx += 1
+		else:
+			_encode_command_field(sp, i, value)
+	_write_bool_bitset(sp, bool_bits, bool_idx)
+	return sp.data_array
+
+
+# Phase 6: in-place decode of a payload into a typed NetCommand. Caller
+# pre-allocates via command_template.duplicate(true).
+func decode_command_payload_into(cmd: NetCommand, payload: PackedByteArray) -> void:
+	if cmd == null or payload.is_empty():
+		return
+	var sp := StreamPeerBuffer.new()
+	sp.data_array = payload
+	# Pass 1: inline non-bools. Record bool field indices for the second pass.
+	for i in command_field_names.size():
+		var fname := command_field_names[i]
+		var template_value = command_template.get(fname) if command_template != null else cmd.get(fname)
+		if typeof(template_value) == TYPE_BOOL:
+			continue
+		cmd.set(fname, _decode_command_field(sp, i, template_value))
+	# Pass 2: read trailing bitset and unpack into the cached bool indices.
+	var bool_count := _command_bool_indices.size()
+	var bool_bits := _read_bool_bitset(sp, bool_count)
+	for bi in bool_count:
+		var fname := command_field_names[_command_bool_indices[bi]]
+		cmd.set(fname, (bool_bits >> bi) & 1 != 0)
+
+
+# Pack `bool_count` LSB-first bits of `bool_bits` into ceil(bool_count/8) bytes
+# at the tail of `sp`. Caller is responsible for ordering (must be the final
+# write before returning the buffer; readers expect bits to live at the tail).
+func _write_bool_bitset(sp: StreamPeerBuffer, bool_bits: int, bool_count: int) -> void:
+	if bool_count <= 0:
+		return
+	var byte_count := (bool_count + 7) / 8
+	for b in byte_count:
+		sp.put_u8((bool_bits >> (b * 8)) & 0xFF)
+
+
+# Read ceil(bool_count/8) bytes from the current position and reconstruct
+# the original int. GDScript int is 64-bit; we accept up to 64 bools without
+# overflow. If more are needed in the future, split across multiple int slots.
+func _read_bool_bitset(sp: StreamPeerBuffer, bool_count: int) -> int:
+	if bool_count <= 0:
+		return 0
+	var byte_count := (bool_count + 7) / 8
+	var bits: int = 0
+	for b in byte_count:
+		bits |= sp.get_u8() << (b * 8)
+	return bits
+
+
+# Phase 6: command-field codec. Reuses the same _put_quantized / _put_float32 /
+# _put_quat32 helpers as the state codec — same quantization semantics, just
+# different cfg list.
+func _encode_command_field(sp: StreamPeerBuffer, field_idx: int, value: Variant) -> void:
+	var cfg: NetStateField = _command_field_cfgs[field_idx] if field_idx < _command_field_cfgs.size() else null
+	if cfg == null or cfg.quant == NetStateField.Quant.AUTO:
+		sp.put_var(value)
+		return
+	match cfg.quant:
+		NetStateField.Quant.FLOAT32:
+			_put_float32(sp, value)
+		NetStateField.Quant.QUANT8:
+			_put_quantized(sp, value, cfg.min_value, cfg.max_value, 255)
+		NetStateField.Quant.QUANT16:
+			_put_quantized(sp, value, cfg.min_value, cfg.max_value, 65535)
+		NetStateField.Quant.QUAT32:
+			_put_quat32(sp, value)
+		_:
+			sp.put_var(value)
+
+
+func _decode_command_field(sp: StreamPeerBuffer, field_idx: int, type_hint: Variant) -> Variant:
+	var cfg: NetStateField = _command_field_cfgs[field_idx] if field_idx < _command_field_cfgs.size() else null
+	if cfg == null or cfg.quant == NetStateField.Quant.AUTO:
+		return sp.get_var()
+	match cfg.quant:
+		NetStateField.Quant.FLOAT32:
+			return _get_float32(sp, type_hint)
+		NetStateField.Quant.QUANT8:
+			return _get_quantized(sp, type_hint, cfg.min_value, cfg.max_value, 255)
+		NetStateField.Quant.QUANT16:
+			return _get_quantized(sp, type_hint, cfg.min_value, cfg.max_value, 65535)
+		NetStateField.Quant.QUAT32:
+			return _get_quat32(sp)
+		_:
+			return sp.get_var()
 
 
 # Walks schema.child_refs, resolves each NodePath relative to the predictor's
@@ -223,21 +398,32 @@ func _exit_tree() -> void:
 	if schema and entity_id >= 0:
 		NetReplication.unregister_entity(schema.id, entity_id)
 	if _subscribed_to_input:
-		NetServer.handle_player_input.disconnect(_on_server_player_input)
+		NetServer.handle_net_command.disconnect(_on_server_net_command)
 		_subscribed_to_input = false
 
 
-# Server-side handler installed in _ready when command_template is set. Filters by
-# owner_id (only inputs from this entity's owning peer feed the queue) and
-# enqueues into server_input_queue so _server_tick can drain the jitter buffer
-# and replay them in order.
-func _on_server_player_input(peer_id: int, input_packet) -> void:
+# Server-side handler installed in _ready when command_template is set. Filters
+# by (schema_id, entity_id, peer_id == owner_id), decodes the schema-driven
+# payload into a fresh typed NetCommand, and enqueues for the next _server_tick.
+# Decoded cmd carries only user fields; infra (sequence_id/timestamp_us/
+# last_received_tick) is consumed off the packet here and used to key the
+# JitterBuffer + later sent back via NetStatePacket.last_input_seq.
+func _on_server_net_command(peer_id: int, packet) -> void:
 	if peer_id != owner_id:
 		return
-	server_input_queue.enqueue(input_packet.sequence_id, input_packet.timestamp_us, input_packet)
+	if schema == null or packet.schema_id != schema.id or packet.entity_id != entity_id:
+		return
+	var cmd: NetCommand = command_template.duplicate(true) as NetCommand
+	decode_command_payload_into(cmd, packet.payload)
+	# Frame entries store (sequence_id, arrival_us, server_us, cmd). The
+	# server_tick loop reads frame.packet for replay — we keep that field name
+	# but it now references the typed NetCommand directly (host._simulate takes
+	# typed cmd, not Rust packet).
+	server_input_queue.enqueue(packet.sequence_id, packet.timestamp_us, cmd)
+	command_received.emit(cmd, packet.sequence_id, packet.timestamp_us, packet.last_received_tick)
 
 
-# True once we've connected NetServer.handle_player_input in _ready. Guards
+# True once we've connected NetServer.handle_net_command in _ready. Guards
 # _exit_tree against disconnecting a signal we never bound (test harnesses that
 # skip _ready, predictors without a command_template).
 var _subscribed_to_input: bool = false
@@ -274,14 +460,26 @@ static func _user_field_names(res: Resource) -> PackedStringArray:
 # Networking data structures.
 var server_input_queue := JitterBuffer.new()
 var player_state_buffer := SequenceRingBuffer.new()
+# Per-predictor mutable state owned by NetProxyBlender. Holds last rendered
+# values for PREDICTED-mode fields so correction lerp survives across ticks.
+# Empty unless this schema declares field_interp.
+var _proxy_correction_state: Dictionary = {}
+# Per-entity tick-rate gating. Server-side _server_tick fires once every
+# `_server_tick_every` physics ticks (derived from physics_hz / schema.tick_hz
+# at register time). Higher physics rates with lower-priority entities means
+# the server skips most work for cheap props / ambient objects while keeping
+# players running hot.
+var _server_tick_every: int = 1
+var _server_tick_ctr: int = 0
 var input_sequence := PacketSequence.new()
 var unacked_inputs := SequenceRingBuffer.new()
 
 # Input redundancy: client sends the last N inputs each tick so a single
 # packet loss is recovered by the next tick's send. Server JitterBuffer
-# dedupes by sequence_id.
+# dedupes by sequence_id. Stores NetCommandPacket so retransmits are the
+# exact same bytes the original send used.
 const INPUT_REDUNDANCY: int = 3
-var input_redundancy_ring: Array[PlayerInputPacket] = []
+var input_redundancy_ring: Array = []
 
 # Server-authoritative shadow state. Player simulates two parallel
 # integrations: VISUAL (smoothed for camera) and GAME (authoritative).
@@ -366,12 +564,26 @@ func _encode_payload(
 			or ticks_since_keyframe >= KEYFRAME_INTERVAL
 	if is_keyframe:
 		sp.put_u8(1)
+		# Phase 6b: bool fields skip inline emit, accumulate into a trailing bitset.
+		var kf_bool_bits: int = 0
+		var kf_bool_idx: int = 0
 		for i in state_field_names.size():
-			_encode_state_field(sp, i, shadow_state.get(state_field_names[i]))
+			var fname := state_field_names[i]
+			var value = shadow_state.get(fname)
+			if typeof(value) == TYPE_BOOL:
+				if value:
+					kf_bool_bits |= (1 << kf_bool_idx)
+				kf_bool_idx += 1
+			else:
+				_encode_state_field(sp, i, value)
+		# Child fields go between non-bool state fields and the state-bool bitset.
+		# Per-child bool packing is a future-phase concern; for now child fields
+		# remain put_var inline.
 		for entry in _resolved_children:
 			var node: Node = entry[0]
 			for f in entry[1]:
 				sp.put_var(node.get(f))
+		_write_bool_bitset(sp, kf_bool_bits, kf_bool_idx)
 		return sp.data_array
 
 	sp.put_u8(0)
@@ -396,9 +608,22 @@ func _encode_payload(
 				mask[bit_idx / 8] = mask[bit_idx / 8] | (1 << (bit_idx % 8))
 			bit_idx += 1
 	sp.put_data(mask)
+	# Phase 6b: dirty bool values pack into a trailing bitset. Counter advances
+	# only when the field is bool AND its dirty mask bit is set, so the bitset
+	# is exactly sized to the dirty-bool count for this delta.
+	var dlt_bool_bits: int = 0
+	var dlt_bool_idx: int = 0
 	for i in n_state:
-		if mask[i / 8] & (1 << (i % 8)):
-			_encode_state_field(sp, i, shadow_state.get(state_field_names[i]))
+		if mask[i / 8] & (1 << (i % 8)) == 0:
+			continue
+		var fname := state_field_names[i]
+		var value = shadow_state.get(fname)
+		if typeof(value) == TYPE_BOOL:
+			if value:
+				dlt_bool_bits |= (1 << dlt_bool_idx)
+			dlt_bool_idx += 1
+		else:
+			_encode_state_field(sp, i, value)
 	bit_idx = n_state
 	for child_i in _resolved_children.size():
 		var node: Node = _resolved_children[child_i][0]
@@ -407,6 +632,7 @@ func _encode_payload(
 			if mask[bit_idx / 8] & (1 << (bit_idx % 8)):
 				sp.put_var(node.get(f))
 			bit_idx += 1
+	_write_bool_bitset(sp, dlt_bool_bits, dlt_bool_idx)
 	return sp.data_array
 
 
@@ -424,8 +650,13 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 	# suppressed so the host's locally-driven values aren't clobbered.
 	var suppress_child_writes: bool = NetSession.is_server or is_local_authority
 	if is_keyframe:
+		# Phase 6b: pass 1 reads non-bool fields inline. Bools skipped here.
 		for i in state_field_names.size():
-			state.set(state_field_names[i], _decode_state_field(sp, i, state.get(state_field_names[i])))
+			var fname := state_field_names[i]
+			var current = state.get(fname)
+			if typeof(current) == TYPE_BOOL:
+				continue
+			state.set(fname, _decode_state_field(sp, i, current))
 		for entry in _resolved_children:
 			var node: Node = entry[0]
 			var fields: PackedStringArray = entry[1]
@@ -435,6 +666,14 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 				var v = sp.get_var()
 				if not skip:
 					node.set(f, v)
+		# Pass 2: trailing bool bitset. Size known from cached indices populated
+		# at config time — receiver's schema must match sender's (hash drift
+		# detection enforces this at register time).
+		var kf_bool_count := _state_bool_indices.size()
+		var kf_bool_bits := _read_bool_bitset(sp, kf_bool_count)
+		for bi in kf_bool_count:
+			state.set(state_field_names[_state_bool_indices[bi]],
+					(kf_bool_bits >> bi) & 1 != 0)
 	else:
 		var n_state := state_field_names.size()
 		var n_total := n_state
@@ -443,9 +682,19 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 		var mask_bytes := (n_total + 7) / 8
 		var mask_pair: Array = sp.get_data(mask_bytes)
 		var mask: PackedByteArray = mask_pair[1]
+		# Phase 6b: track which dirty fields were bools so the trailing
+		# dirty-bool bitset can be sized + applied. dlt_bool_targets holds
+		# field indices in order they appear in the dirty pass.
+		var dlt_bool_targets: Array[int] = []
 		for i in n_state:
-			if mask[i / 8] & (1 << (i % 8)):
-				state.set(state_field_names[i], _decode_state_field(sp, i, state.get(state_field_names[i])))
+			if mask[i / 8] & (1 << (i % 8)) == 0:
+				continue
+			var fname := state_field_names[i]
+			var current = state.get(fname)
+			if typeof(current) == TYPE_BOOL:
+				dlt_bool_targets.append(i)
+			else:
+				state.set(fname, _decode_state_field(sp, i, current))
 		var bit_idx := n_state
 		for entry in _resolved_children:
 			var node: Node = entry[0]
@@ -458,6 +707,11 @@ func decode_payload_into(state: NetState, payload: PackedByteArray) -> void:
 					if not skip:
 						node.set(f, v)
 				bit_idx += 1
+		var dlt_bool_count := dlt_bool_targets.size()
+		var dlt_bool_bits := _read_bool_bitset(sp, dlt_bool_count)
+		for bi in dlt_bool_count:
+			state.set(state_field_names[dlt_bool_targets[bi]],
+					(dlt_bool_bits >> bi) & 1 != 0)
 
 
 # Sprint 6: per-field quantized codecs. `field_idx` indexes _state_field_cfgs;
@@ -539,7 +793,17 @@ func _get_float32(sp: StreamPeerBuffer, type_hint: Variant) -> Variant:
 # avoid a divide-by-zero and decode returns the midpoint scalar.
 func _put_quantized(sp: StreamPeerBuffer, value: Variant, lo: float, hi: float, max_int: int) -> void:
 	match typeof(value):
-		TYPE_FLOAT, TYPE_INT:
+		TYPE_INT:
+			# Lossless int path: write the integer directly as u8/u16. Float
+			# scaling would round 5 → 4.988 → 4 (state-id corruption). Clamp
+			# to the configured [lo, hi] range so out-of-band values are
+			# detectable rather than silently wrapping.
+			var iv := clampi(int(value), int(lo), int(hi))
+			if max_int <= 255:
+				sp.put_u8(iv)
+			else:
+				sp.put_u16(iv)
+		TYPE_FLOAT:
 			_put_scalar_quantized(sp, float(value), lo, hi, max_int)
 		TYPE_VECTOR2:
 			var v2: Vector2 = value
@@ -563,8 +827,10 @@ func _put_quantized(sp: StreamPeerBuffer, value: Variant, lo: float, hi: float, 
 
 func _get_quantized(sp: StreamPeerBuffer, type_hint: Variant, lo: float, hi: float, max_int: int) -> Variant:
 	match typeof(type_hint):
-		TYPE_FLOAT, TYPE_INT:
+		TYPE_FLOAT:
 			return _get_scalar_quantized(sp, lo, hi, max_int)
+		TYPE_INT:
+			return sp.get_u8() if max_int <= 255 else sp.get_u16()
 		TYPE_VECTOR2:
 			var x := _get_scalar_quantized(sp, lo, hi, max_int)
 			var y := _get_scalar_quantized(sp, lo, hi, max_int)
@@ -585,6 +851,20 @@ func _get_quantized(sp: StreamPeerBuffer, type_hint: Variant, lo: float, hi: flo
 
 
 func _put_scalar_quantized(sp: StreamPeerBuffer, value: float, lo: float, hi: float, max_int: int) -> void:
+	# Symmetric range (hi == -lo): encode signed. q=0 maps to value 0.0 exactly,
+	# so consumers like Vector*.normalized() and `> 0` / `< 0` checks see clean
+	# zero on idle input. Uses 2 * max_q + 1 quant slots (e.g. 255 of 256 for
+	# QUANT8) — one slot is unused, but the gain is exact zero round-trip with
+	# no per-field config. See _get_scalar_quantized for the decode path.
+	if _is_symmetric_range(lo, hi):
+		var max_q := max_int / 2
+		var q := clampi(int(round((value / hi) * float(max_q))), -max_q, max_q)
+		if max_int <= 255:
+			sp.put_8(q)
+		else:
+			sp.put_16(q)
+		return
+	# Asymmetric path: unsigned u8/u16 mapping over [lo, hi] -> [0, max_int].
 	var range_: float = hi - lo
 	var t: float
 	if range_ <= 0.0:
@@ -599,15 +879,39 @@ func _put_scalar_quantized(sp: StreamPeerBuffer, value: float, lo: float, hi: fl
 
 
 func _get_scalar_quantized(sp: StreamPeerBuffer, lo: float, hi: float, max_int: int) -> float:
-	var q: int
+	# Symmetric range: signed decode, exact zero at q=0.
+	if _is_symmetric_range(lo, hi):
+		var max_q := max_int / 2
+		var q_signed: int
+		if max_int <= 255:
+			q_signed = sp.get_8()
+		else:
+			q_signed = sp.get_16()
+		return float(q_signed) / float(max_q) * hi
+	# Asymmetric path: unsigned decode + half-LSB zero-snap when the range
+	# straddles zero (e.g. [-5, 1]). Without the snap, q values either side of
+	# the true-zero quant slot decode to ±half-LSB; consumers doing sign tests
+	# would see noise. The snap is a no-op for ranges that don't straddle zero.
+	var q_unsigned: int
 	if max_int <= 255:
-		q = sp.get_u8()
+		q_unsigned = sp.get_u8()
 	else:
-		q = sp.get_u16()
+		q_unsigned = sp.get_u16()
 	var range_: float = hi - lo
 	if range_ <= 0.0:
 		return lo
-	return lo + (float(q) / float(max_int)) * range_
+	var v: float = lo + (float(q_unsigned) / float(max_int)) * range_
+	if lo <= 0.0 and hi >= 0.0:
+		var half_lsb: float = range_ / float(max_int) * 0.5
+		if absf(v) < half_lsb:
+			return 0.0
+	return v
+
+
+# Range is symmetric around zero when hi == -lo and hi > 0. Float comparison
+# tolerant of inspector rounding noise (1e-6 covers any practical setting).
+static func _is_symmetric_range(lo: float, hi: float) -> bool:
+	return hi > 0.0 and absf(hi + lo) < 1e-6
 
 
 # QUAT32: smallest-three quaternion compression. 2 bits encode which of x/y/z/w
@@ -869,7 +1173,15 @@ func _physics_process(delta: float) -> void:
 	if schema == null or shadow_state == null:
 		return
 	if NetSession.is_server:
-		_server_tick(delta)
+		# Per-entity tick-rate gate. Skip _server_tick on intermediate ticks so
+		# low-priority entities (props, projectiles) cost a fraction of what
+		# players cost. Effective dt scales with the gate so time-based fields
+		# advance correctly.
+		_server_tick_ctr += 1
+		if _server_tick_ctr < _server_tick_every:
+			return
+		_server_tick_ctr = 0
+		_server_tick(delta * float(_server_tick_every))
 	elif is_local_authority:
 		_authority_tick(delta)
 	else:
@@ -900,8 +1212,19 @@ func _authority_tick(delta: float) -> void:
 	var cmd = host._gather_command(delta)
 	if cmd == null:
 		return
-	unacked_inputs.insert(cmd.sequence_id, -1, cmd.timestamp_us, cmd)
-	input_redundancy_ring.append(cmd)
+	# Phase 6: predictor owns the infra fields (sequence_id, timestamp_us,
+	# last_received_tick). Host-returned cmd is a typed NetCommand carrying only
+	# user-authored @export fields; we wrap it in a NetCommandPacket with
+	# schema-driven encoded payload.
+	var packet := NetCommandPacket.new()
+	packet.schema_id = schema.id if schema else 0
+	packet.entity_id = entity_id
+	packet.sequence_id = input_sequence.next()
+	packet.timestamp_us = Time.get_ticks_usec()
+	packet.last_received_tick = last_received_tick
+	packet.payload = encode_command_payload(cmd)
+	unacked_inputs.insert(packet.sequence_id, -1, packet.timestamp_us, cmd)
+	input_redundancy_ring.append(packet)
 	while input_redundancy_ring.size() > INPUT_REDUNDANCY:
 		input_redundancy_ring.pop_front()
 	for redundant in input_redundancy_ring:
@@ -951,11 +1274,18 @@ func _server_tick(_delta: float) -> void:
 			previous_cmd = frame.packet
 	if host.has_method(&"_apply_state"):
 		host._apply_state(shadow_state)
-	server_broadcast_snapshot(frames[-1].packet.sequence_id)
+	# Phase 6: TimestampedPacket exposes sequence_id directly now that frame.packet
+	# is a typed NetCommand without an infrastructure sequence_id field.
+	server_broadcast_snapshot(frames[-1].sequence_id)
 
 
 # Remote proxy: interpolate two ring entries, hand off to host for scene write.
 # No simulate, no reconcile.
+#
+# Two host signatures depending on schema.field_interp:
+#   - empty (host-driven, default): host._proxy_apply(from, to, alpha, ext_s, seg_s, delta)
+#   - non-empty (schema-driven blending): host._proxy_apply(blended, from, to, delta)
+# NetProxyBlender does the math; host just writes blended fields into the scene.
 func _proxy_tick(delta: float) -> void:
 	if host == null or not host.has_method(&"_proxy_apply"):
 		return
@@ -963,7 +1293,14 @@ func _proxy_tick(delta: float) -> void:
 	var pair := player_state_buffer.get_interpolation_pair(now_us)
 	if not pair.is_valid:
 		return
-	host._proxy_apply(pair.from, pair.to, pair.alpha, pair.extrapolation_s, delta)
+	if schema != null and not schema.field_interp.is_empty():
+		var blended: NetState = NetProxyBlender.blend(
+				state_template, schema.field_interp,
+				pair.from, pair.to, pair.alpha, pair.segment_s,
+				pair.extrapolation_s, _proxy_correction_state, delta)
+		host._proxy_apply(blended, pair.from, pair.to, delta)
+	else:
+		host._proxy_apply(pair.from, pair.to, pair.alpha, pair.extrapolation_s, pair.segment_s, delta)
 
 
 const _AXIS_INDEX := {"x": 0, "y": 1, "z": 2, "w": 3}

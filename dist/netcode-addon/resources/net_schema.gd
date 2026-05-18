@@ -87,16 +87,25 @@ func _do_deferred_revalidate() -> void:
 # NetStateField defaults instead — same outcome as the (now-retired) "Reset
 # state_fields config to defaults" button, but driven by Godot's standard UX.
 func _property_can_revert(property: StringName) -> bool:
-	return property == &"state_fields" and state_template != null
+	if property == &"state_fields":
+		return state_template != null
+	if property == &"command_fields":
+		return command_template != null
+	return false
 
 
 func _property_get_revert(property: StringName) -> Variant:
-	if property != &"state_fields":
-		return null
 	var defaults: Dictionary[StringName, NetStateField] = {}
-	if state_template == null:
+	var tmpl: Resource = null
+	if property == &"state_fields":
+		tmpl = state_template
+	elif property == &"command_fields":
+		tmpl = command_template
+	else:
+		return null
+	if tmpl == null:
 		return defaults
-	for fname in _user_field_names(state_template):
+	for fname in _user_field_names(tmpl):
 		defaults[fname] = NetStateField.new()
 	return defaults
 
@@ -129,19 +138,41 @@ static var _revalidate_scheduled: bool = false
 		command_template = v
 		_schedule_emit_changed()
 
-## Simulation tick rate (Hz). The predictor's _physics_process executes
-## _simulate at roughly this cadence; in practice Godot's physics step is
-## fixed so this is the design target.
+## Per-entity simulation + wire rate (Hz). Server-side hosts gate their
+## _physics_process at (project_physics_hz / tick_hz) so high-frequency
+## entities (players, vehicles) and low-frequency ones (props, projectiles,
+## ambient world objects) can coexist without all paying the player rate.
+## The wire rate equals this — each gated tick produces one snapshot.
 @export var tick_hz: int = 120:
 	set(v):
 		tick_hz = v
 		_schedule_emit_changed()
-## Server broadcast rate (Hz). Snapshots are sent every (tick_hz / snapshot_hz)
-## ticks. Lower = less bandwidth + more interpolation; higher = more bandwidth
-## + tighter visuals.
+## Historical: explicit server broadcast rate. Now redundant — entities
+## broadcast once per gated tick, so the on-wire rate equals tick_hz. Field
+## kept (and still hashed) for pinned-hash backwards compatibility; remove on
+## the next breaking-change pass. Don't read for behavior, use tick_hz.
 @export var snapshot_hz: int = 30:
 	set(v):
 		snapshot_hz = v
+		_schedule_emit_changed()
+
+## Per-field proxy interpolation declarations (LERP / SLERP / DISCRETE /
+## HERMITE / PREDICTED). When non-empty, NetPredictor pre-blends snapshots
+## and the host's _proxy_apply receives a single blended state instead of
+## raw (from, to, alpha). Leave empty to keep the host-driven signature
+## (current behavior — used by the player which has bespoke proxy logic).
+@export var field_interp: Dictionary[StringName, NetFieldInterp] = {}:
+	set(v):
+		field_interp = v
+		_schedule_emit_changed()
+
+## Multiplier on the proxy ring buffer's auto-tuned inter-sample delay.
+## 1.0 = render one segment behind (default). 0.5 = tighter, more
+## extrapolation. 2.0 = safer under jitter at the cost of perceived lag.
+## Replaces the dead NetTimeline.interp_window_ratio.
+@export var buffer_segments: float = 1.0:
+	set(v):
+		buffer_segments = maxf(v, 0.0)
 		_schedule_emit_changed()
 
 ## Per-field codec config keyed by field name. One entry per @export var on
@@ -153,6 +184,13 @@ static var _revalidate_scheduled: bool = false
 @export var state_fields: Dictionary[StringName, NetStateField] = {}:
 	set(v):
 		state_fields = v
+		_schedule_emit_changed()
+## Per-field codec config for command_template fields. Mirrors state_fields.
+## Quant.AUTO falls back to put_var on the wire (safe default for bool/int).
+## Use QUANT8/QUANT16 on float-typed cmd fields when range is known.
+@export var command_fields: Dictionary[StringName, NetStateField] = {}:
+	set(v):
+		command_fields = v
 		_schedule_emit_changed()
 ## Reconcile channels — groups of state fields that share an error magnitude
 ## and smoothing behavior (e.g. "horizontal" snaps + smooths pos.xz together).
@@ -185,6 +223,10 @@ func find_correction(correction_name: StringName) -> NetCorrection:
 
 func find_state_field(field_name: StringName) -> NetStateField:
 	return state_fields.get(field_name)
+
+
+func find_command_field(field_name: StringName) -> NetStateField:
+	return command_fields.get(field_name)
 
 
 # Returns a list of structured issues with this schema (empty when valid).
@@ -494,8 +536,11 @@ static func refresh_id_cache() -> void:
 	_id_paths_cache = {}
 	if not Engine.is_editor_hint():
 		return
-	# EditorInterface is a global singleton in @tool scripts in Godot 4.
-	var fs = EditorInterface.get_resource_filesystem()
+	# Resolve EditorInterface dynamically: a bare reference fails to PARSE
+	# in exported builds (the symbol doesn't exist outside the editor), even
+	# though the runtime guard above prevents the line from ever executing.
+	# Without this, exporting the dedicated server bricks the netcode addon.
+	var fs = Engine.get_singleton("EditorInterface").get_resource_filesystem()
 	if fs == null:
 		return
 	_scan_dir_for_schemas(fs.get_filesystem(), _id_paths_cache)
@@ -647,6 +692,17 @@ func compute_hash() -> int:
 				int(f.quant),
 				int(f.predict),
 				int(f.no_interp),
+				f.min_value,
+				f.max_value])
+	# Command fields participate too: a server with QUANT8 vs client with AUTO
+	# on the same cmd field decodes wrong bytes silently otherwise.
+	var sorted_cmd_field_names: Array = command_fields.keys()
+	sorted_cmd_field_names.sort()
+	for fname in sorted_cmd_field_names:
+		var f: NetStateField = command_fields[fname]
+		parts.append("cmd_field|%s|%d|%f|%f" % [
+				str(fname),
+				int(f.quant),
 				f.min_value,
 				f.max_value])
 	for c in corrections:

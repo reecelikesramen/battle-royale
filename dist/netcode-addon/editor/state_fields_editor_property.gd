@@ -74,6 +74,40 @@ var _scroll: ScrollContainer
 var _grid: GridContainer
 var _message_lbl: Label
 var _schema: NetSchema
+
+# Phase 6: parameterized so the same editor handles state_fields + command_fields.
+# Inspector plugin sets these before add_property_editor. Defaults preserve the
+# original state_fields behavior for any caller that doesn't reconfigure.
+var _fields_prop_name: StringName = &"state_fields"
+var _template_prop_name: StringName = &"state_template"
+# predict / no_interp are state-side semantics (replay-skip flag, proxy interp
+# disable). They have no meaning for commands — the codec ignores them in the
+# command path. Hide the columns when editing command_fields to avoid pretend-
+# config UX.
+var _show_state_only_cols: bool = true
+
+
+# Inspector plugin calls this immediately after `new()` to bind the editor to
+# a specific dict + template pair on the schema. Must be called BEFORE the
+# inspector calls _update_property (i.e. before add_property_editor returns).
+func configure(fields_prop: StringName, template_prop: StringName, show_state_only_cols: bool = true) -> void:
+	_fields_prop_name = fields_prop
+	_template_prop_name = template_prop
+	_show_state_only_cols = show_state_only_cols
+	# Grid column count contracts when we hide the trailing state-only widgets.
+	_grid.columns = _COLUMNS if show_state_only_cols else _COLUMNS - 2
+
+
+func _fields_dict() -> Dictionary:
+	if _schema == null:
+		return {}
+	return _schema.get(_fields_prop_name)
+
+
+func _template_res() -> Resource:
+	if _schema == null:
+		return null
+	return _schema.get(_template_prop_name)
 # Guard against re-entry: emit_changed -> editor writes prop back -> our
 # _update_property fires -> would tear down + rebuild rows mid-edit. Setting
 # _updating skips the rebuild for that round-trip.
@@ -168,10 +202,11 @@ func _process(_delta: float) -> void:
 # types). When this differs from the last build we know the script was edited
 # and need to re-render.
 func _compute_template_signature() -> String:
-	if _schema == null or _schema.state_template == null:
+	var tmpl := _template_res()
+	if _schema == null or tmpl == null:
 		return ""
 	var parts: PackedStringArray = PackedStringArray()
-	for prop in _schema.state_template.get_property_list():
+	for prop in tmpl.get_property_list():
 		if (prop.usage & PROPERTY_USAGE_EDITOR) == 0:
 			continue
 		if (prop.usage & PROPERTY_USAGE_CATEGORY) != 0:
@@ -210,12 +245,14 @@ func _rebuild_rows() -> void:
 	if _schema == null:
 		_show_message("No schema bound.", Color(0.7, 0.7, 0.7))
 		return
-	if _schema.state_template == null:
-		_show_message("state_template is unset — set it to configure field codec.",
+	var tmpl := _template_res()
+	if tmpl == null:
+		_show_message("%s is unset — set it to configure field codec." % _template_prop_name,
 				Color(1.0, 0.65, 0.2))
 		return
 
-	var template_fields: Array = _template_fields(_schema.state_template)
+	var fields_dict: Dictionary = _fields_dict()
+	var template_fields: Array = _template_fields(tmpl)
 	var template_names: Array[StringName] = []
 	for entry in template_fields:
 		template_names.append(entry.name)
@@ -225,23 +262,23 @@ func _rebuild_rows() -> void:
 	# id — Godot's UndoRedo restores the same Resource instance on undo, so
 	# this hits when the user undoes a "remove template" or re-assigns the same
 	# template after clearing it.
-	var template_key: int = _schema.state_template.get_instance_id()
+	var template_key: int = tmpl.get_instance_id()
 	var cached: Dictionary = _field_cache.get(template_key, {})
 	var restore_dirty := false
 	for k in template_names:
-		if not _schema.state_fields.has(k) and cached.has(k):
-			_schema.state_fields[k] = cached[k]
+		if not fields_dict.has(k) and cached.has(k):
+			fields_dict[k] = cached[k]
 			restore_dirty = true
 
-	# Reconcile state_fields with the script. Always-on cleanup so the user
+	# Reconcile fields_dict with the script. Always-on cleanup so the user
 	# never sees a manual orphan row.
 	var orphans: Array[StringName] = []
-	for k in _schema.state_fields.keys():
+	for k in fields_dict.keys():
 		if not k in template_names:
 			orphans.append(k)
 	var new_fields: Array[StringName] = []
 	for k in template_names:
-		if not _schema.state_fields.has(k):
+		if not fields_dict.has(k):
 			new_fields.append(k)
 
 	var dirty := false
@@ -249,26 +286,26 @@ func _rebuild_rows() -> void:
 	# almost always a rename — transplant the codec config so the user
 	# doesn't have to redial quant/min/max after every variable rename.
 	if orphans.size() == 1 and new_fields.size() == 1:
-		_schema.state_fields[new_fields[0]] = _schema.state_fields[orphans[0]]
-		_schema.state_fields.erase(orphans[0])
+		fields_dict[new_fields[0]] = fields_dict[orphans[0]]
+		fields_dict.erase(orphans[0])
 		orphans.clear()
 		new_fields.clear()
 		dirty = true
 
 	# Default-init any remaining new fields so each row has a backing entry.
 	for k in new_fields:
-		_schema.state_fields[k] = NetStateField.new()
+		fields_dict[k] = NetStateField.new()
 		dirty = true
 
 	# Auto-prune leftover orphans. No red rows, no manual ✕ button required.
 	for k in orphans:
-		_schema.state_fields.erase(k)
+		fields_dict.erase(k)
 		dirty = true
 
 	# Render rows in declaration order so the inspector mirrors the script's
 	# top-to-bottom layout. (Hash + wire codec also walk in this order.)
 	for entry in template_fields:
-		_add_row(entry.name, entry.type_label, _schema.state_fields[entry.name])
+		_add_row(entry.name, entry.type_label, fields_dict[entry.name])
 
 	_field_count = template_fields.size()
 	_refresh_fold_ui()
@@ -278,8 +315,8 @@ func _rebuild_rows() -> void:
 	# what the user currently sees (not pre-prune state).
 	var snapshot: Dictionary = {}
 	for k in template_names:
-		if _schema.state_fields.has(k):
-			snapshot[k] = _schema.state_fields[k]
+		if fields_dict.has(k):
+			snapshot[k] = fields_dict[k]
 	_field_cache[template_key] = snapshot
 
 	if dirty or restore_dirty:
@@ -387,25 +424,26 @@ func _add_row(field_name: StringName, type_label: String,
 		_commit())
 	_grid.add_child(max_box)
 
-	# Column 8: no_interp
-	var no_interp_btn := CheckBox.new()
-	no_interp_btn.text = "no_interp"
-	no_interp_btn.button_pressed = cfg.no_interp
-	no_interp_btn.tooltip_text = "Proxy interpolation uses the freshest value with no easing. Useful for booleans, state IDs, and any field where intermediate interpolated values would be nonsense."
-	no_interp_btn.toggled.connect(func(pressed: bool):
-		cfg.no_interp = pressed
-		_commit())
-	_grid.add_child(no_interp_btn)
+	# Columns 8 + 9: no_interp + predict. State-only — commands have no proxy
+	# interp path and no replay-skip flag, so hide these knobs in command mode.
+	if _show_state_only_cols:
+		var no_interp_btn := CheckBox.new()
+		no_interp_btn.text = "no_interp"
+		no_interp_btn.button_pressed = cfg.no_interp
+		no_interp_btn.tooltip_text = "Proxy interpolation uses the freshest value with no easing. Useful for booleans, state IDs, and any field where intermediate interpolated values would be nonsense."
+		no_interp_btn.toggled.connect(func(pressed: bool):
+			cfg.no_interp = pressed
+			_commit())
+		_grid.add_child(no_interp_btn)
 
-	# Column 9: predict
-	var predict_btn := CheckBox.new()
-	predict_btn.text = "predict"
-	predict_btn.button_pressed = cfg.predict
-	predict_btn.tooltip_text = "When off, field replicates to proxies only; predicted (locally-authoritative) entities skip it on replay. Use for cosmetics derived from other fields."
-	predict_btn.toggled.connect(func(pressed: bool):
-		cfg.predict = pressed
-		_commit())
-	_grid.add_child(predict_btn)
+		var predict_btn := CheckBox.new()
+		predict_btn.text = "predict"
+		predict_btn.button_pressed = cfg.predict
+		predict_btn.tooltip_text = "When off, field replicates to proxies only; predicted (locally-authoritative) entities skip it on replay. Use for cosmetics derived from other fields."
+		predict_btn.toggled.connect(func(pressed: bool):
+			cfg.predict = pressed
+			_commit())
+		_grid.add_child(predict_btn)
 
 
 func _make_inline_label(text: String) -> Label:
@@ -538,6 +576,6 @@ func _commit() -> void:
 	# Mutating cfg in place doesn't bump references but does need an explicit
 	# emit_changed to flag the .tres for re-serialization.
 	_updating = true
-	emit_changed(get_edited_property(), _schema.state_fields)
+	emit_changed(get_edited_property(), _fields_dict())
 	_schema.emit_changed()
 	_updating = false

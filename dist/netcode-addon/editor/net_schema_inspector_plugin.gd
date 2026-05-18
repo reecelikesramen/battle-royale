@@ -26,11 +26,20 @@ func _can_handle(object: Object) -> bool:
 
 func _parse_property(_object: Object, _type: int, name: String, _hint_type: int,
 		_hint_string: String, _usage_flags: int, _wide: bool) -> bool:
-	if name != "state_fields":
-		return false
-	var editor := StateFieldsEditor.new()
-	add_property_editor(name, editor)
-	return true  # tell the inspector we handled it; suppress the default editor
+	# Phase 6: same editor handles both state_fields and command_fields via
+	# .configure(). predict + no_interp columns only make sense for state, so
+	# command_fields gets the contracted (7-col) layout.
+	if name == "state_fields":
+		var editor := StateFieldsEditor.new()
+		editor.configure(&"state_fields", &"state_template", true)
+		add_property_editor(name, editor)
+		return true
+	if name == "command_fields":
+		var editor := StateFieldsEditor.new()
+		editor.configure(&"command_fields", &"command_template", false)
+		add_property_editor(name, editor)
+		return true
+	return false
 
 
 func _parse_begin(object: Object) -> void:

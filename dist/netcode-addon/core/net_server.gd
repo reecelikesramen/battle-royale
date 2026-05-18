@@ -1,6 +1,6 @@
 extends Node
 
-signal handle_player_input(peer_id: int, input: PlayerInputPacket)
+signal handle_net_command(peer_id: int, packet: NetCommandPacket)
 signal handle_net_reliable(peer_id: int, packet: NetReliablePacket)
 
 var peer_ids: Array[int]
@@ -29,12 +29,24 @@ func _physics_process(_delta: float) -> void:
 	NetSession.broadcast_packet(packet.to_payload())
 
 func on_peer_connected(peer_id: int) -> void:
+	# Rust drains all GNS Connecting→Connected events in one poll before emitting
+	# on_peer_connect signals, so connected_clients can already contain a peer
+	# that hasn't received its IdAssignment yet. Broadcasting the first assignment
+	# would race: the unassigned peer (id==-1) takes whichever packet arrives
+	# first as its local id. Target sends instead.
+	for existing_id in peer_ids:
+		var remote_notify := IdAssignmentPacket.new()
+		remote_notify.id = peer_id
+		remote_notify.remote_ids = peer_ids.duplicate()
+		remote_notify.remote_ids.append(peer_id)
+		NetSession.send_packet_to_peer(existing_id, remote_notify.to_payload())
+
 	peer_ids.append(peer_id)
 
 	var id_assignment := IdAssignmentPacket.new()
 	id_assignment.id = peer_id
 	id_assignment.remote_ids = peer_ids.duplicate()
-	NetSession.broadcast_packet(id_assignment.to_payload())
+	NetSession.send_packet_to_peer(peer_id, id_assignment.to_payload())
 
 
 func on_peer_disconnected(peer_id: int) -> void:
@@ -44,8 +56,8 @@ func on_peer_disconnected(peer_id: int) -> void:
 
 
 func on_server_packet(peer_id: int, packet) -> void:
-	if packet is PlayerInputPacket:
-		handle_player_input.emit(peer_id, packet)
+	if packet is NetCommandPacket:
+		handle_net_command.emit(peer_id, packet)
 	elif packet is NetReliablePacket:
 		handle_net_reliable.emit(peer_id, packet)
 	else:
