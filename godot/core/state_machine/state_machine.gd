@@ -1,5 +1,12 @@
 class_name StateMachine extends Node
 
+# Per-frame transition spam: flip to true when investigating state-machine
+# desyncs / reconcile churn. Logs [SM-LOG-TRANS], [SM-LOG-SET], [SM-SYNC] only
+# for the "Move" machine (peek machine stays quiet either way to keep volume
+# manageable). Default off — these fired every physics frame and drowned out
+# anything useful.
+const LOG_STATE_TRANSITIONS: bool = false
+
 @export var INITIAL_STATE: State
 @export var DEBUG_NAME: String
 @export var SHOW_IN_DEBUG: bool = true
@@ -80,7 +87,7 @@ func run_logic(delta: float) -> void:
 func sync_visual() -> void:
 	if _visual_state == _logic_state:
 		return
-	if DEBUG_NAME == "Move":
+	if LOG_STATE_TRANSITIONS and DEBUG_NAME == "Move":
 		print("[SM-SYNC f=%d sm=%s] visual: %s -> %s" % [
 				Engine.get_physics_frames(), DEBUG_NAME, _visual_state.name, _logic_state.name])
 	_visual_state.visual_exit()
@@ -100,7 +107,7 @@ func set_logic_state_by_id(new_state_id: int) -> void:
 	var target := states[id_to_state[new_state_id]]
 	if target == null or target == _logic_state:
 		return
-	if DEBUG_NAME == "Move":
+	if LOG_STATE_TRANSITIONS and DEBUG_NAME == "Move":
 		print("[SM-LOG-SET f=%d sm=%s] logic: %s -> %s (id=%d)" % [
 				Engine.get_physics_frames(), DEBUG_NAME, _logic_state.name, target.name, new_state_id])
 	_logic_state.logic_exit()
@@ -127,7 +134,7 @@ func _switch_logic(new_state_name: StringName) -> void:
 	var target := states[new_state_name]
 	if target == null or target == _logic_state:
 		return
-	if DEBUG_NAME == "Move":
+	if LOG_STATE_TRANSITIONS and DEBUG_NAME == "Move":
 		print("[SM-LOG-TRANS f=%d sm=%s] logic: %s -> %s" % [
 				Engine.get_physics_frames(), DEBUG_NAME, _logic_state.name, target.name])
 	_logic_state.logic_exit()

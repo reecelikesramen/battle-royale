@@ -119,6 +119,14 @@ const TIREDNESS_DEBUG := true
 # Sample tiredness in _physics_process every TIREDNESS_LOG_INTERVAL_TICKS so
 # decay is observable even outside crouch/prone state machines.
 const TIREDNESS_LOG_INTERVAL_TICKS := 30  # at 60Hz, ~2 lines/sec
+# Shoot-flow trace prints. [SHOOT-LOCAL] on trigger edge, [SHOOT-AUTH] on
+# server when command resolves, [SHOOT-RENDER] on client when tracer arrives.
+# Keep on while diagnosing high-latency shoot feel; flip to false for normal play.
+const SHOOT_DEBUG := true
+# Trigger-edge timestamp for the local client. Read by ShootHandler to compute
+# the end-to-end "trigger pulled -> tracer rendered" delay.
+var _last_shoot_pressed: bool = false
+var _shoot_local_edge_us: int = -1
 var _tiredness_base: float = 0.0
 # Decay only begins at-or-after this timestamp. Bumps/completion-holds push it
 # forward; outside any hold, decay runs purely off wall clock.
@@ -298,6 +306,13 @@ func _gather_command(delta: float) -> PlayerInput:
 	cmd.walk_mode = _walk_mode
 	cmd.prone = Input.is_action_pressed("prone")
 	cmd.shoot = Input.is_action_pressed("shoot")
+	# Rising-edge timestamp for shoot. ShootHandler.[SHOOT-RENDER] reads this on
+	# tracer arrival to compute trigger-to-tracer latency on the local shooter.
+	if cmd.shoot and not _last_shoot_pressed:
+		_shoot_local_edge_us = Time.get_ticks_usec()
+		if SHOOT_DEBUG:
+			print("[SHOOT-LOCAL t=%d us look=%s]" % [_shoot_local_edge_us, _look_abs])
+	_last_shoot_pressed = cmd.shoot
 	cmd.scope = Input.is_action_pressed("scope")
 	# While dead, drop all actionable input. Look angles stay so we don't snap
 	# the view at the moment of death; server also gates damage/throw on health.
@@ -365,10 +380,14 @@ func _process(_delta: float) -> void:
 	if _tiredness_log_ctr < TIREDNESS_LOG_INTERVAL_TICKS:
 		return
 	_tiredness_log_ctr = 0
-	# Show tiredness even in idle so we can see decay outside crouch/prone.
 	var t: float = current_tiredness()
 	var now: int = Time.get_ticks_usec()
 	var in_hold: bool = now < _tiredness_decay_starts_at_us
+	# Skip the line when there's nothing happening: no accumulated tiredness, no
+	# active hold, no slowdown. Was firing constantly with base=0 current=0
+	# slowdown=1.00x and drowning every other log.
+	if _tiredness_base <= 0.001 and t <= 0.001 and not in_hold and tiredness_slowdown() <= 1.001:
+		return
 	var hold_remaining_ms: int = (_tiredness_decay_starts_at_us - now) / 1000 if in_hold else 0
 	print("[TIRED tick] base=%.3f  current=%.3f  slowdown=%.2fx  hold=%s%s" % [
 			_tiredness_base, t, tiredness_slowdown(),

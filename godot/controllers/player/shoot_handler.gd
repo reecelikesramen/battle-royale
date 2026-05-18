@@ -34,6 +34,12 @@ const TRACER_THICKNESS := 0.04          # cylinder radius (m)
 const MUZZLE_LOCAL := Vector3(0.0, -0.20, -0.50)
 const RESPAWN_DELAY_SEC := 10.0
 
+# Shoot-flow trace flag. [SHOOT-AUTH] on server when command consumed,
+# [SHOOT-AUTH-REFUSED] on rewind-window miss, [SHOOT-RENDER] on local client
+# when tracer arrives (with delta from local trigger edge). Keep on while
+# diagnosing high-latency shoot feel; flip to false for normal play.
+const SHOOT_LOG: bool = true
+
 var _last_fire_us: Dictionary = {}  # peer_id -> int (server-side rate limit)
 var _comp: NetLagCompensator
 var _tracer_root: Node3D
@@ -141,6 +147,13 @@ func _on_command(cmd: NetCommand, _sequence_id: int, _timestamp_us: int, last_re
 	if now_us - last_us < FIRE_INTERVAL_US:
 		return
 	_last_fire_us[peer_id] = now_us
+	if SHOOT_LOG:
+		# Tick-age = how far in the past the shooter quoted. Past max_rewind_ticks
+		# the rewind refuses (logged below). Useful for picking peer-cap constants.
+		var tick_age: int = NetServer.server_tick - last_received_tick
+		print("[SHOOT-AUTH peer=%d tick_age=%d (%dms) last_recv=%d server_tick=%d]" % [
+				peer_id, tick_age, tick_age * 1000 / NetTimeline.tick_hz,
+				last_received_tick, NetServer.server_tick])
 	var ray_origin: Vector3 = sstate.pos + EYE_OFFSET
 	var look: Vector2 = sstate.look
 	# look.x = pitch, look.y = yaw. Match player.gd update_camera basis order.
@@ -153,7 +166,9 @@ func _on_command(cmd: NetCommand, _sequence_id: int, _timestamp_us: int, last_re
 	var wall_dist: float = _world_raycast_distance(ray_origin, dir, RAY_LENGTH)
 	var result: Variant = _comp.with_rewind(last_received_tick, _do_raycast.bind(ray_origin, dir, peer_id, wall_dist))
 	if result == null:
-		print("[SHOOT] peer=%d rewind_refused tick=%d" % [peer_id, last_received_tick])
+		var age: int = NetServer.server_tick - last_received_tick
+		print("[SHOOT-AUTH-REFUSED peer=%d tick=%d age=%d cap=%d]" % [
+				peer_id, last_received_tick, age, _comp.max_rewind_ticks])
 		return
 	var hit: Dictionary = result
 	var endpoint: Vector3 = ray_origin + dir * wall_dist
@@ -332,6 +347,15 @@ func _on_shot_fired(payload: PackedByteArray) -> void:
 	# Shader near-origin fade hides the segment close to the camera so the
 	# shooter doesn't see their own tracer in their face.
 	if shooter_id == NetClient.id and NetClient.player != null:
+		if SHOOT_LOG:
+			# End-to-end trigger-to-tracer delay. Reads the rising-edge stamp
+			# saved by PlayerController._gather_command. -1 if no edge tracked
+			# yet (continuous-hold tracers between edges still print, just with
+			# a stale delta — first one after a press is the meaningful number).
+			var edge_us: int = (NetClient.player as PlayerController)._shoot_local_edge_us
+			if edge_us > 0:
+				var delta_ms: int = (Time.get_ticks_usec() - edge_us) / 1000
+				print("[SHOOT-RENDER local delta_ms=%d]" % delta_ms)
 		var cam: Camera3D = NetClient.player.get_node_or_null("CameraController/Camera3D")
 		if cam != null:
 			var delta: Vector3 = cam.global_position - o

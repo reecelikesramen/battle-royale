@@ -2,6 +2,13 @@
 class_name NetPredictor extends Node
 
 
+# Reconcile-magnitude trace flag. When true, _reconcile_replay logs the captured
+# offset magnitude + any per-axis snap-clamp. Suppressed below 5cm and absent
+# snap to keep steady-state quiet. On while diagnosing first-person rubber-band
+# feel under simulated latency; flip false for normal play.
+const RECONCILE_LOG: bool = true
+
+
 # Editor-time validation. Called by Godot whenever this node is selected /
 # any of its properties change. Returns a list of warning strings shown on
 # the red triangle in the scene tree. Runtime is a no-op (tool-only).
@@ -1283,9 +1290,19 @@ func _reconcile_replay(new_sequence_id: int) -> void:
 	if has_offset_path:
 		var new_pos: Vector3 = shadow_state.get(&"pos")
 		_smoothing_offset_pos = pre_visible_pos - new_pos
-		_walk_smoothing_offset_pos_axes(0.0, false)
+		var pre_clamp_offset: Vector3 = _smoothing_offset_pos
+		var any_snapped: bool = _walk_smoothing_offset_pos_axes(0.0, false)
 		(_body as Node3D).global_position = new_pos + _smoothing_offset_pos
 		_call_reset_physics_interp_on_body()
+		# Reconcile-magnitude trace. Off by default; flip RECONCILE_LOG to true
+		# while diagnosing first-person rubber-band feel. Only prints when the
+		# offset is large enough to be visible (>5cm on any axis) or a
+		# snap-clamp fired, so steady-state quiet stays quiet.
+		if RECONCILE_LOG and (any_snapped or pre_clamp_offset.length() > 0.05):
+			print("[RECON schema=%d ent=%d seq=%d replays=%d offset=%s|%.3fm snapped=%s post=%s]" % [
+					schema.id, entity_id, new_sequence_id, maxi(inputs.size() - 1, 0),
+					pre_clamp_offset, pre_clamp_offset.length(),
+					"YES" if any_snapped else "no", _smoothing_offset_pos])
 	#if is_local_authority:
 		#var dbg_shadow_crouch_post: float = shadow_state.get(&"crouch_progress") if &"crouch_progress" in state_field_names else -1.0
 		#var dbg_shadow_move_post: int = shadow_state.get(&"movement_state") if &"movement_state" in state_field_names else -1
