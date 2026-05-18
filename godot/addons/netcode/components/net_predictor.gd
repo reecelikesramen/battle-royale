@@ -300,9 +300,15 @@ func _ready() -> void:
 		_cache_state_field_cfgs()
 		_cache_command_field_cfgs()
 		# Per-schema proxy buffer scaling. Takes effect on the next ring buffer
-		# auto-tune (i.e., when the second snapshot arrives).
+		# auto-tune (i.e., when the second snapshot arrives). Network Quality
+		# preset multiplies the schema value so HIGH-ping clients can buffer
+		# proxies longer (smoother, more visible lag).
 		if player_state_buffer.has_method(&"set_buffer_delay_multiplier"):
-			player_state_buffer.set_buffer_delay_multiplier(schema.buffer_segments)
+			player_state_buffer.set_buffer_delay_multiplier(_scaled_buffer_segments())
+		# React to runtime preset changes (escape-menu picker, AUTO mode
+		# resampling). Reapplies buffer-segments without requiring reconnect.
+		if SettingsStore != null and not SettingsStore.quality_preset_changed.is_connected(_on_quality_preset_changed):
+			SettingsStore.quality_preset_changed.connect(_on_quality_preset_changed)
 		# Per-entity server tick rate: schema declares tick_hz, predictor gates
 		# _server_tick every (physics_hz / tick_hz) physics frames. tick_hz=120
 		# (player default) → fire every frame; tick_hz=60 → every 2nd; etc.
@@ -1766,6 +1772,45 @@ func _mark_smoothed_offset_axes_touched(c: NetCorrection, touched: Dictionary) -
 			touched[field][ch] = true
 
 
+# Network Quality preset hooks. SettingsStore.quality_multipliers is always
+# populated (defaults to BALANCED = 1.0 for everything), so these helpers
+# never return zero. Server-side NetPredictor instances also call these, but
+# corrections never fire on the auth side so the multipliers are effectively
+# inert there.
+func _qmul(key: StringName) -> float:
+	if SettingsStore == null:
+		return 1.0
+	var d: Dictionary = SettingsStore.quality_multipliers
+	return d.get(key, 1.0)
+
+
+func _scaled_snap(c: NetCorrection) -> float:
+	return c.snap_threshold * _qmul(&"snap_mul")
+
+
+func _scaled_deadband(c: NetCorrection) -> float:
+	return c.deadband * _qmul(&"deadband_mul")
+
+
+func _scaled_smooth_rate(c: NetCorrection) -> float:
+	return c.smooth_rate * _qmul(&"smooth_rate_mul")
+
+
+func _scaled_buffer_segments() -> float:
+	if schema == null:
+		return 1.0
+	return schema.buffer_segments * _qmul(&"buffer_segments_mul")
+
+
+# Sprint 3: re-push buffer-segments when preset changes so the proxy buffer
+# adapts without requiring a reconnect. The correction read sites in
+# _walk_smoothing_offset_pos_axes / _apply_correction_channel pull multipliers
+# every frame, so they're already live; only buffer_segments is a one-shot.
+func _on_quality_preset_changed(_new_preset: int) -> void:
+	if player_state_buffer != null and player_state_buffer.has_method(&"set_buffer_delay_multiplier"):
+		player_state_buffer.set_buffer_delay_multiplier(_scaled_buffer_segments())
+
+
 # Phase 4: walk SMOOTHED_OFFSET-on-pos channels and update _smoothing_offset_pos
 # in place. Two callers:
 #   _authority_tick (do_decay = true, decay_delta = physics dt): per-tick
@@ -1782,7 +1827,9 @@ func _walk_smoothing_offset_pos_axes(decay_delta: float, do_decay: bool) -> bool
 	for c in schema.corrections:
 		if c == null or c.mode != NetCorrection.Mode.SMOOTHED_OFFSET:
 			continue
-		var decay_alpha: float = 1.0 - exp(-c.smooth_rate * decay_delta) if do_decay else 0.0
+		var decay_alpha: float = 1.0 - exp(-_scaled_smooth_rate(c) * decay_delta) if do_decay else 0.0
+		var snap_t: float = _scaled_snap(c)
+		var dead_t: float = _scaled_deadband(c)
 		for path in c.fields:
 			var parsed := _parse_field_path(path)
 			if parsed.field != "pos":
@@ -1795,10 +1842,10 @@ func _walk_smoothing_offset_pos_axes(decay_delta: float, do_decay: bool) -> bool
 				var v: float = off[idx]
 				if do_decay:
 					v = lerp(v, 0.0, decay_alpha)
-				if absf(v) > c.snap_threshold:
+				if absf(v) > snap_t:
 					v = 0.0
 					snapped = true
-				elif absf(v) < c.deadband:
+				elif absf(v) < dead_t:
 					v = 0.0
 				off[idx] = v
 	_smoothing_offset_pos = off
@@ -1828,15 +1875,18 @@ func _apply_correction_channel(c: NetCorrection, delta: float, touched: Dictiona
 		return
 	var first := _parse_field_path(c.fields[0])
 	var err_mag := _field_error_mag(shadow_state, render_state, first.field, first.axes)
+	var snap_t: float = _scaled_snap(c)
+	var dead_t: float = _scaled_deadband(c)
+	var smooth_r: float = _scaled_smooth_rate(c)
 	var alpha: float
 	if c.always_snap:
 		alpha = 1.0
-	elif err_mag <= c.deadband:
+	elif err_mag <= dead_t:
 		alpha = 0.0
-	elif err_mag > c.snap_threshold and not c.always_smooth:
+	elif err_mag > snap_t and not c.always_smooth:
 		alpha = 1.0
 	else:
-		alpha = correction_alpha(delta, err_mag, c.snap_threshold, c.smooth_rate, c.deadband)
+		alpha = correction_alpha(delta, err_mag, snap_t, smooth_r, dead_t)
 	if alpha <= 0.0:
 		# Still record axes as "touched" so the snap-untouched pass leaves them
 		# alone — deadband means "hold render where it is", not "snap to shadow".
